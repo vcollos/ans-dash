@@ -2,6 +2,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui
 import { formatNumber, formatPercent, getVariationColor } from '../../lib/utils'
 
 const monetarySpec = [
+  { key: 'vr_receitas', label: 'Receitas' },
+  { key: 'vr_despesas', label: 'Despesas' },
   { key: 'vr_contraprestacoes', label: 'Receitas de contraprestações' },
   { key: 'vr_contraprestacoes_pre', label: 'Receitas de contraprestações (pré)' },
   { key: 'vr_creditos_operacoes_saude', label: 'Créditos de operações de saúde' },

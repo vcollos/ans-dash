@@ -11,7 +11,7 @@ import MonetarySummary from './components/dashboard/MonetarySummary'
 import { Skeleton } from './components/ui/skeleton'
 import { Card, CardContent } from './components/ui/card'
 import { Button } from './components/ui/button'
-import { getComparisonOptionLabel } from './lib/comparisonModes'
+import { describeComparisonFilters } from './lib/comparisonModes'
 
 function LoadingState() {
   return (
@@ -77,41 +77,11 @@ function App() {
     operatorPeriod,
     setOperatorPeriod,
     operatorContext,
-    comparisonMode,
-    setComparisonMode,
+    comparisonFilters,
+    updateComparisonFilters,
   } = useDashboardController()
 
-  const comparisonLabel = useMemo(() => {
-    if (!operatorContext?.name) {
-      return getComparisonOptionLabel(comparisonMode)
-    }
-    switch (comparisonMode) {
-      case 'all-operators':
-        return 'Média das operadoras'
-      case 'all-uniodonto':
-        return 'Média das Uniodontos'
-      case 'non-uniodonto':
-        return 'Média das operadoras não Uniodonto'
-      case 'modality-non-uniodonto':
-        return operatorContext?.modalidade
-          ? `Média das ${operatorContext.modalidade} não Uniodonto`
-          : 'Média das operadoras da modalidade (não Uniodonto)'
-      case 'same-porte':
-        return operatorContext?.porte
-          ? `Média das operadoras de porte ${operatorContext.porte}`
-          : 'Média das operadoras do mesmo porte'
-      case 'same-porte-uniodonto':
-        return operatorContext?.porte
-          ? `Média das Uniodontos de porte ${operatorContext.porte}`
-          : 'Média das Uniodontos do mesmo porte'
-      case 'same-porte-non-uniodonto':
-        return operatorContext?.porte
-          ? `Média das operadoras não Uniodonto de porte ${operatorContext.porte}`
-          : 'Média das operadoras do mesmo porte (não Uniodonto)'
-      default:
-        return 'Média dos pares'
-    }
-  }, [operatorContext, comparisonMode])
+  const comparisonLabel = useMemo(() => describeComparisonFilters(comparisonFilters), [comparisonFilters])
 
   if (status === 'loading') {
     return (
@@ -165,8 +135,8 @@ function App() {
                   onReset={resetFilters}
                   onOperatorSelect={applyOperatorSelection}
                   className="border border-border/60 shadow-none"
-                  comparisonMode={comparisonMode}
-                  onComparisonModeChange={setComparisonMode}
+                  comparisonFilters={comparisonFilters}
+                  onComparisonFiltersChange={updateComparisonFilters}
                 />
               </div>
               <div className="border-t p-4">
@@ -185,8 +155,8 @@ function App() {
               onChange={updateFilters}
               onReset={resetFilters}
               onOperatorSelect={applyOperatorSelection}
-              comparisonMode={comparisonMode}
-              onComparisonModeChange={setComparisonMode}
+              comparisonFilters={comparisonFilters}
+              onComparisonFiltersChange={updateComparisonFilters}
             />
           </div>
           <div className="space-y-6 min-w-0">

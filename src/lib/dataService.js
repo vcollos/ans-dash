@@ -34,16 +34,6 @@ const DEFAULT_VIEW = 'diops_curated'
 
 let cachedViewColumns = null
 
-const comparisonModes = new Set([
-  'all-operators',
-  'all-uniodonto',
-  'non-uniodonto',
-  'modality-non-uniodonto',
-  'same-porte',
-  'same-porte-uniodonto',
-  'same-porte-non-uniodonto',
-])
-
 const sanitizeList = (values = []) => values.filter((value) => value !== null && value !== undefined && value !== '')
 const sanitizeSql = (value) => (value ? value.replaceAll("'", "''") : value)
 const metricSelectSql = metricFormulas.map(({ id, sql }) => `${sql.trim()} AS ${id}`).join(',\n        ')
@@ -111,34 +101,9 @@ function buildFilterClauses(filters = {}, { latestOnlyDefault = true } = {}) {
   return { whereClause, latestFilterApplies }
 }
 
-function buildPeerGroupClauses({ comparisonMode, modalidade, porte, uniodonto } = {}) {
-  const clauses = []
-  if (modalidade) clauses.push(`modalidade = '${sanitizeSql(modalidade)}'`)
-  switch (comparisonMode) {
-    case 'all-uniodonto':
-      clauses.push('COALESCE(uniodonto, FALSE) IS TRUE')
-      break
-    case 'non-uniodonto':
-      clauses.push('COALESCE(uniodonto, FALSE) IS FALSE')
-      break
-    case 'modality-non-uniodonto':
-      clauses.push('COALESCE(uniodonto, FALSE) IS FALSE')
-      break
-    case 'same-porte':
-      if (porte) clauses.push(`porte = '${sanitizeSql(porte)}'`)
-      break
-    case 'same-porte-uniodonto':
-      if (porte) clauses.push(`porte = '${sanitizeSql(porte)}'`)
-      clauses.push('COALESCE(uniodonto, FALSE) IS TRUE')
-      break
-    case 'same-porte-non-uniodonto':
-      if (porte) clauses.push(`porte = '${sanitizeSql(porte)}'`)
-      clauses.push('COALESCE(uniodonto, FALSE) IS FALSE')
-      break
-    default:
-      break
-  }
-  return clauses
+function getWhereExpression(filters = {}) {
+  const clause = buildWhereClause(filters)
+  return clause ? clause.replace(/^WHERE\s+/i, '') : ''
 }
 
 export async function loadDataset({ csvUrl, csvText, filename } = {}) {
@@ -311,13 +276,20 @@ async function summarizePeriod(filters) {
           .filter((metric) => metric.showInCards)
           .map((metric) => `AVG(${metric.id}) AS ${metric.id}`)
           .join(',\n        ')},
+        SUM(COALESCE(vr_receitas, 0)) AS vr_receitas,
+        SUM(COALESCE(vr_despesas, 0)) AS vr_despesas,
         SUM(COALESCE(vr_contraprestacoes, 0)) AS vr_contraprestacoes,
         SUM(COALESCE(vr_contraprestacoes_pre, 0)) AS vr_contraprestacoes_pre,
         SUM(COALESCE(vr_creditos_operacoes_saude, 0)) AS vr_creditos_operacoes_saude,
         SUM(COALESCE(vr_eventos_liquidos, 0)) AS vr_eventos_liquidos,
         SUM(COALESCE(vr_eventos_a_liquidar, 0)) AS vr_eventos_a_liquidar,
         SUM(COALESCE(vr_desp_comerciais, 0)) AS vr_desp_comerciais,
+        SUM(COALESCE(vr_desp_comerciais_promocoes, 0)) AS vr_desp_comerciais_promocoes,
         SUM(COALESCE(vr_desp_administrativas, 0)) AS vr_desp_administrativas,
+        SUM(COALESCE(vr_outras_desp_oper, 0)) AS vr_outras_desp_oper,
+        SUM(COALESCE(vr_desp_tributos, 0)) AS vr_desp_tributos,
+        SUM(COALESCE(vr_receitas_fin, 0)) AS vr_receitas_fin,
+        SUM(COALESCE(vr_despesas_fin, 0)) AS vr_despesas_fin,
         SUM(COALESCE(resultado_financeiro, 0)) AS resultado_financeiro,
         SUM(COALESCE(resultado_liquido, 0)) AS resultado_liquido
       FROM base
@@ -349,15 +321,18 @@ export async function fetchKpiSummary(filters) {
   return { ...current, previousPeriod: previous }
 }
 
-export async function fetchTrendSeries(metric, filters, comparisonOptions = null) {
+export async function fetchTrendSeries(metric, filters, comparisonContext = null) {
   const conn = await getConnection()
   const sqlMetric = metric ?? 'sinistralidade_pct'
-  if (comparisonOptions?.operatorName) {
-    const sanitizedName = sanitizeSql(comparisonOptions.operatorName)
-    const peerClauses = buildPeerGroupClauses(comparisonOptions)
+  if (comparisonContext?.operatorName) {
+    const sanitizedName = sanitizeSql(comparisonContext.operatorName)
     const baseFilter = buildWhereClause({ ...filters, search: '' })
     const operatorFilter = baseFilter ? baseFilter.replace(/^WHERE\s+/i, '') : ''
-    const peerWherePieces = [`nome_operadora <> '${sanitizedName}'`, ...peerClauses]
+    const comparisonFilter = getWhereExpression(comparisonContext.filters ?? {})
+    const peerWherePieces = [`nome_operadora <> '${sanitizedName}'`]
+    if (comparisonFilter) {
+      peerWherePieces.push(`(${comparisonFilter})`)
+    }
     const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\n        AND ')}` : ''
     const query = `
       WITH operador AS (
@@ -397,7 +372,7 @@ export async function fetchTrendSeries(metric, filters, comparisonOptions = null
   return tableToObjects(table)
 }
 
-export async function fetchOperatorSnapshot(nomeOperadora, targetPeriod = {}, comparisonMode = DEFAULT_COMPARISON_MODE) {
+export async function fetchOperatorSnapshot(nomeOperadora, targetPeriod = {}, comparisonFilters = {}) {
   if (!nomeOperadora) {
     return {
       operator: null,
@@ -432,33 +407,27 @@ export async function fetchOperatorSnapshot(nomeOperadora, targetPeriod = {}, co
   `)
   const operatorRow = tableToObjects(operatorTable)[0] ?? null
 
-  let peersRow = null
-  if (operatorRow?.modalidade) {
-    const peerClauses = buildPeerGroupClauses({
-      comparisonMode,
-      modalidade: operatorRow.modalidade,
-      porte: operatorRow.porte,
-      uniodonto: operatorRow.uniodonto,
-    })
-    const wherePieces = [
-      `ano = ${resolvedPeriod.ano}`,
-      `trimestre = ${resolvedPeriod.trimestre}`,
-      `nome_operadora <> '${sanitizedName}'`,
-      ...peerClauses,
-    ]
-    const peerQuery = `
-      SELECT
-        COUNT(DISTINCT nome_operadora) AS peer_count,
-        ${metricFormulas
-          .filter((metric) => metric.showInCards)
-          .map((metric) => `AVG(${metric.id}) AS ${metric.id}`)
-          .join(',\n        ')}
-      FROM ${DEFAULT_VIEW}
-      WHERE ${wherePieces.join('\n        AND ')}
-    `
-    const peerTable = await conn.query(peerQuery)
-    peersRow = tableToObjects(peerTable)[0] ?? null
+  const comparisonExpression = getWhereExpression(comparisonFilters)
+  const wherePieces = [
+    `ano = ${resolvedPeriod.ano}`,
+    `trimestre = ${resolvedPeriod.trimestre}`,
+    `nome_operadora <> '${sanitizedName}'`,
+  ]
+  if (comparisonExpression) {
+    wherePieces.push(`(${comparisonExpression})`)
   }
+  const peerQuery = `
+    SELECT
+      COUNT(DISTINCT nome_operadora) AS peer_count,
+      ${metricFormulas
+        .filter((metric) => metric.showInCards)
+        .map((metric) => `AVG(${metric.id}) AS ${metric.id}`)
+        .join(',\n        ')}
+    FROM ${DEFAULT_VIEW}
+    WHERE ${wherePieces.join('\n        AND ')}
+  `
+  const peerTable = await conn.query(peerQuery)
+  const peersRow = tableToObjects(peerTable)[0] ?? null
 
   return {
     operator: operatorRow,
@@ -482,25 +451,24 @@ export async function fetchOperatorLatestSnapshot(nomeOperadora) {
   return tableToObjects(table)[0] ?? null
 }
 
-export async function fetchRanking(metric, filters, limit = 10, order = 'DESC', comparisonOptions = {}) {
+export async function fetchRanking(metric, filters, limit = 10, order = 'DESC', options = {}) {
   const conn = await getConnection()
   const { whereClause } = buildFilterClauses(filters)
-  const peerClauses = buildPeerGroupClauses(comparisonOptions)
-  const peerWhere = peerClauses.length ? `${whereClause ? `${whereClause} AND` : 'WHERE'} ${peerClauses.join(' AND ')}` : whereClause
   const sqlMetric = metric ?? 'resultado_liquido'
   const metricDef = metricFormulas.find((item) => item.id === metric)
   const lowerIsBetter = metricDef?.trend === 'lower'
+  const aggregator = metricDef?.aggregate === 'sum' ? 'SUM' : 'AVG'
   const requestedOrder = order?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC'
   const effectiveOrder = lowerIsBetter ? (requestedOrder === 'ASC' ? 'DESC' : 'ASC') : requestedOrder
   const baseQuery = `
     WITH base AS (
       SELECT *
       FROM ${DEFAULT_VIEW}
-      ${peerWhere}
+      ${whereClause}
     ), aggregated AS (
       SELECT
         nome_operadora,
-        SUM(${sqlMetric}) AS valor
+        ${aggregator}(${sqlMetric}) AS valor
       FROM base
       GROUP BY nome_operadora
     ), ranked AS (
@@ -519,16 +487,19 @@ export async function fetchRanking(metric, filters, limit = 10, order = 'DESC', 
   const rows = tableToObjects(table)
 
   let operatorRow = null
-  if (comparisonOptions?.operatorName) {
+  if (options?.operatorName) {
+    const sanitizedOperator = sanitizeSql(options.operatorName)
+    const operatorClause = `nome_operadora = '${sanitizedOperator}'`
+    const operatorWhere = whereClause ? `${whereClause} AND ${operatorClause}` : `WHERE ${operatorClause}`
     const operatorQuery = `
       WITH base AS (
         SELECT *
         FROM ${DEFAULT_VIEW}
-        ${peerWhere ? `${peerWhere} AND` : 'WHERE'} nome_operadora = '${sanitizeSql(comparisonOptions.operatorName)}'
+        ${operatorWhere}
       ), aggregated AS (
         SELECT
           nome_operadora,
-          SUM(${sqlMetric}) AS valor
+          ${aggregator}(${sqlMetric}) AS valor
         FROM base
         GROUP BY nome_operadora
       ), ranked AS (

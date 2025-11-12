@@ -12,20 +12,6 @@ const indicatorSpec = metricFormulas
     direction: metric.trend ?? 'higher',
   }))
 
-const fallbackMapping = {
-  sinistralidade_pct: 'sinistralidade',
-  margem_lucro_pct: 'margem_lucro_liquido',
-  despesas_adm_pct: 'despesas_adm',
-  despesas_comerciais_pct: 'despesas_comerciais',
-  despesas_operacionais_pct: 'despesas_operacionais',
-  indice_resultado_financeiro_pct: 'indice_resultado_financeiro',
-  retorno_pl_pct: 'retorno_patrimonio_liquido',
-  liquidez_corrente: 'liquidez_corrente',
-  capital_terceiros_sobre_pl: 'capital_terceiros',
-  pmcr: 'pmcr',
-  pmpe: 'pmpe',
-}
-
 function formatValue(value, format) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return '—'
@@ -117,8 +103,7 @@ function KpiCards({ snapshot, fallbackSummary, onPeriodChange, period, peerLabel
         <CardContent>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {indicatorSpec.map((metric) => {
-              const fallbackKey = fallbackMapping[metric.key] ?? metric.key
-              const value = fallbackSummary?.[fallbackKey]
+              const value = fallbackSummary?.[metric.key]
               return (
                 <div key={metric.key} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 px-4 py-3">
                   <p className="text-xs font-medium uppercase text-muted-foreground">{metric.label}</p>

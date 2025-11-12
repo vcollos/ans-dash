@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   loadDataset,
   fetchOperatorOptions,
@@ -10,7 +10,11 @@ import {
   persistDatasetFile,
   fetchAvailablePeriods,
 } from '../lib/dataService'
-import { DEFAULT_COMPARISON_MODE } from '../lib/comparisonModes'
+import { DEFAULT_COMPARISON_FILTERS, comparisonFiltersToQuery, sanitizeComparisonFilters } from '../lib/comparisonModes'
+import { metricFormulas } from '../lib/metricFormulas'
+
+const rankingCatalog = metricFormulas.filter((metric) => metric.showInCards)
+const DEFAULT_RANKING_METRIC = rankingCatalog[0]?.id ?? 'resultado_liquido'
 
 const defaultFilters = {
   modalidades: [],
@@ -27,20 +31,6 @@ const defaultOptions = {
   operadoras: [],
 }
 
-function getComparisonFiltersForMode(mode) {
-  switch (mode) {
-    case 'all-uniodonto':
-    case 'same-porte-uniodonto':
-      return { uniodonto: true }
-    case 'non-uniodonto':
-    case 'modality-non-uniodonto':
-    case 'same-porte-non-uniodonto':
-      return { uniodonto: false }
-    default:
-      return {}
-  }
-}
-
 const basePath = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '')
 const resolveDataPath = (filename) => `${basePath ? `${basePath}/` : ''}data/${filename}`
 
@@ -55,7 +45,7 @@ export function useDashboardController() {
   const [options, setOptions] = useState(defaultOptions)
   const [periodOptions, setPeriodOptions] = useState([])
   const [kpis, setKpis] = useState(null)
-  const [rankingMetric, setRankingMetric] = useState('resultado_liquido')
+  const [rankingMetric, setRankingMetric] = useState(DEFAULT_RANKING_METRIC)
   const [rankingData, setRankingData] = useState({ rows: [], operatorRow: null })
   const [rankingOrder, setRankingOrder] = useState('DESC')
   const [tableData, setTableData] = useState({ rows: [], columns: [] })
@@ -64,7 +54,7 @@ export function useDashboardController() {
   const [uploadFeedback, setUploadFeedback] = useState(null)
   const [sourceInfo, setSourceInfo] = useState(null)
 
-  const [comparisonMode, setComparisonMode] = useState(DEFAULT_COMPARISON_MODE)
+  const [comparisonFilters, setComparisonFilters] = useState(() => sanitizeComparisonFilters(DEFAULT_COMPARISON_FILTERS))
   const [operatorContext, setOperatorContext] = useState(null)
   const [operatorSnapshot, setOperatorSnapshot] = useState({
     operator: null,
@@ -75,6 +65,8 @@ export function useDashboardController() {
   const [operatorPeriod, setOperatorPeriod] = useState(null)
   const operatorSelectionRef = useRef(0)
 
+  const comparisonFilterQuery = useMemo(() => comparisonFiltersToQuery(comparisonFilters), [comparisonFilters])
+
   const resolvedFilters = useMemo(() => {
     let nextFilters = { ...filters }
     if (operatorPeriod?.ano && operatorPeriod?.trimestre) {
@@ -84,17 +76,40 @@ export function useDashboardController() {
         trimestres: [operatorPeriod.trimestre],
       }
     }
-    if (!operatorContext?.name) {
-      const comparisonFilters = getComparisonFiltersForMode(comparisonMode)
-      if (Object.keys(comparisonFilters).length) {
+    return nextFilters
+  }, [filters, operatorPeriod?.ano, operatorPeriod?.trimestre])
+
+  const applyComparisonFilters = useCallback(
+    (baseFilters) => {
+      let nextFilters = { ...baseFilters }
+      if (comparisonFilterQuery.modalidades?.length) {
         nextFilters = {
           ...nextFilters,
-          ...comparisonFilters,
+          modalidades: [...comparisonFilterQuery.modalidades],
         }
       }
-    }
-    return nextFilters
-  }, [filters, operatorPeriod?.ano, operatorPeriod?.trimestre, operatorContext?.name, comparisonMode])
+      if (comparisonFilterQuery.portes?.length) {
+        nextFilters = {
+          ...nextFilters,
+          portes: [...comparisonFilterQuery.portes],
+        }
+      }
+      if (comparisonFilterQuery.uniodonto === true || comparisonFilterQuery.uniodonto === false) {
+        nextFilters = {
+          ...nextFilters,
+          uniodonto: comparisonFilterQuery.uniodonto,
+        }
+      }
+      if (comparisonFilterQuery.ativa === true || comparisonFilterQuery.ativa === false) {
+        nextFilters = {
+          ...nextFilters,
+          ativa: comparisonFilterQuery.ativa,
+        }
+      }
+      return nextFilters
+    },
+    [comparisonFilterQuery],
+  )
 
   useEffect(() => {
     if (operatorPeriod?.ano && operatorPeriod?.trimestre) return
@@ -139,17 +154,9 @@ export function useDashboardController() {
     setIsQuerying(true)
     async function runQueries() {
       try {
-        const comparisonOptions = operatorContext?.name
-          ? {
-              comparisonMode,
-              operatorName: operatorContext.name,
-              operatorModalidade: operatorContext.modalidade ?? operatorSnapshot.operator?.modalidade ?? null,
-              operatorUniodonto: operatorContext.uniodonto ?? operatorSnapshot.operator?.uniodonto ?? null,
-              operatorPorte: operatorContext.porte ?? operatorSnapshot.operator?.porte ?? null,
-            }
-          : null
-        const rankingFilters = operatorContext?.name ? { ...resolvedFilters, search: '' } : resolvedFilters
-        const rankingComparisonOptions = comparisonOptions ?? {}
+        const summaryFilters = operatorContext?.name ? resolvedFilters : applyComparisonFilters(resolvedFilters)
+        const baseRankingFilters = operatorContext?.name ? { ...resolvedFilters, search: '' } : resolvedFilters
+        const rankingFilters = applyComparisonFilters(baseRankingFilters)
         const tableOptions = operatorContext?.name
           ? {
               includeAllColumns: true,
@@ -158,8 +165,8 @@ export function useDashboardController() {
             }
           : {}
         const [summary, ranking, table] = await Promise.all([
-          fetchKpiSummary(resolvedFilters),
-          fetchRanking(rankingMetric, rankingFilters, 10, rankingOrder, rankingComparisonOptions),
+          fetchKpiSummary(summaryFilters),
+          fetchRanking(rankingMetric, rankingFilters, 10, rankingOrder, { operatorName: operatorContext?.name ?? null }),
           fetchTableData(resolvedFilters, tableOptions),
         ])
         if (cancelled) return
@@ -180,7 +187,7 @@ export function useDashboardController() {
     return () => {
       cancelled = true
     }
-  }, [status, resolvedFilters, rankingMetric, rankingOrder, comparisonMode, operatorContext?.name])
+  }, [status, resolvedFilters, rankingMetric, rankingOrder, applyComparisonFilters, operatorContext?.name])
 
   useEffect(() => {
     if (!operatorContext?.name) {
@@ -190,7 +197,7 @@ export function useDashboardController() {
     let cancelled = false
     async function loadSnapshot() {
       try {
-        const snapshot = await fetchOperatorSnapshot(operatorContext.name, operatorPeriod, comparisonMode)
+        const snapshot = await fetchOperatorSnapshot(operatorContext.name, operatorPeriod, comparisonFilterQuery)
         if (cancelled) return
         setOperatorSnapshot(snapshot)
         if (snapshot?.selectedPeriod) {
@@ -204,7 +211,7 @@ export function useDashboardController() {
     return () => {
       cancelled = true
     }
-  }, [operatorContext?.name, operatorPeriod?.ano, operatorPeriod?.trimestre, comparisonMode])
+  }, [operatorContext?.name, operatorPeriod?.ano, operatorPeriod?.trimestre, comparisonFilterQuery])
 
   async function applyOperatorSelection(operatorName) {
     operatorSelectionRef.current += 1
@@ -252,7 +259,7 @@ export function useDashboardController() {
       })
       setPeriodOptions(availablePeriods ?? [])
       setFilters({ ...defaultFilters })
-      setComparisonMode(DEFAULT_COMPARISON_MODE)
+      setComparisonFilters(sanitizeComparisonFilters(DEFAULT_COMPARISON_FILTERS))
       setOperatorContext(null)
       setOperatorPeriod(null)
       setStatus('ready')
@@ -282,9 +289,13 @@ export function useDashboardController() {
 
   function resetFilters() {
     setFilters({ ...defaultFilters })
-    setComparisonMode(DEFAULT_COMPARISON_MODE)
+    setComparisonFilters(sanitizeComparisonFilters(DEFAULT_COMPARISON_FILTERS))
     setOperatorContext(null)
     setOperatorPeriod(null)
+  }
+
+  function updateComparisonFilters(nextFilters) {
+    setComparisonFilters(sanitizeComparisonFilters(nextFilters))
   }
 
   return {
@@ -315,7 +326,7 @@ export function useDashboardController() {
     operatorContext,
     operatorPeriod,
     setOperatorPeriod,
-    comparisonMode,
-    setComparisonMode,
+    comparisonFilters,
+    updateComparisonFilters,
   }
 }

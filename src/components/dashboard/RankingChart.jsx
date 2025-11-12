@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { cn, formatNumber, formatPercent, toNumber } from '../../lib/utils'
@@ -37,6 +38,13 @@ function RankingChart({
   comparisonLabel,
 }) {
   const selectedMetric = rankingOptions.find((item) => item.id === metric) ?? rankingOptions[0]
+  useEffect(() => {
+    if (!metric && rankingOptions[0]) {
+      onMetricChange?.(rankingOptions[0].id)
+    } else if (!rankingOptions.find((item) => item.id === metric) && rankingOptions[0]) {
+      onMetricChange?.(rankingOptions[0].id)
+    }
+  }, [metric, onMetricChange])
   const orderDescription = order === 'ASC' ? 'Top 10 menores' : 'Top 10 maiores'
   const operatorInTop = data.some((row) => row.nome_operadora === operatorName)
 
