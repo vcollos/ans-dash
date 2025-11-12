@@ -8,9 +8,9 @@ import {
   fetchRanking,
   fetchTableData,
   persistDatasetFile,
+  fetchAvailablePeriods,
 } from '../lib/dataService'
-
-const DEFAULT_COMPARISON_MODE = 'all-uniodonto'
+import { DEFAULT_COMPARISON_MODE } from '../lib/comparisonModes'
 
 const defaultFilters = {
   modalidades: [],
@@ -27,6 +27,20 @@ const defaultOptions = {
   operadoras: [],
 }
 
+function getComparisonFiltersForMode(mode) {
+  switch (mode) {
+    case 'all-uniodonto':
+    case 'same-porte-uniodonto':
+      return { uniodonto: true }
+    case 'non-uniodonto':
+    case 'modality-non-uniodonto':
+    case 'same-porte-non-uniodonto':
+      return { uniodonto: false }
+    default:
+      return {}
+  }
+}
+
 const basePath = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '')
 const resolveDataPath = (filename) => `${basePath ? `${basePath}/` : ''}data/${filename}`
 
@@ -39,6 +53,7 @@ export function useDashboardController() {
   const [error, setError] = useState(null)
   const [filters, setFilters] = useState({ ...defaultFilters })
   const [options, setOptions] = useState(defaultOptions)
+  const [periodOptions, setPeriodOptions] = useState([])
   const [kpis, setKpis] = useState(null)
   const [rankingMetric, setRankingMetric] = useState('resultado_liquido')
   const [rankingData, setRankingData] = useState({ rows: [], operatorRow: null })
@@ -61,15 +76,34 @@ export function useDashboardController() {
   const operatorSelectionRef = useRef(0)
 
   const resolvedFilters = useMemo(() => {
+    let nextFilters = { ...filters }
     if (operatorPeriod?.ano && operatorPeriod?.trimestre) {
-      return {
-        ...filters,
+      nextFilters = {
+        ...nextFilters,
         anos: [operatorPeriod.ano],
         trimestres: [operatorPeriod.trimestre],
       }
     }
-    return filters
-  }, [filters, operatorPeriod?.ano, operatorPeriod?.trimestre])
+    if (!operatorContext?.name) {
+      const comparisonFilters = getComparisonFiltersForMode(comparisonMode)
+      if (Object.keys(comparisonFilters).length) {
+        nextFilters = {
+          ...nextFilters,
+          ...comparisonFilters,
+        }
+      }
+    }
+    return nextFilters
+  }, [filters, operatorPeriod?.ano, operatorPeriod?.trimestre, operatorContext?.name, comparisonMode])
+
+  useEffect(() => {
+    if (operatorPeriod?.ano && operatorPeriod?.trimestre) return
+    if (!periodOptions.length) return
+    const [latest] = periodOptions
+    if (latest) {
+      setOperatorPeriod({ ano: latest.ano, trimestre: latest.trimestre, periodo: latest.periodo })
+    }
+  }, [periodOptions, operatorPeriod?.ano, operatorPeriod?.trimestre])
 
   useEffect(() => {
     let cancelled = false
@@ -79,9 +113,12 @@ export function useDashboardController() {
         const loadedSource = await loadDataset(DEFAULT_SOURCES)
         if (cancelled) return
         setSourceInfo(loadedSource)
-        const operatorNames = await fetchOperatorOptions()
+        const [operatorNames, availablePeriods] = await Promise.all([fetchOperatorOptions(), fetchAvailablePeriods()])
         if (cancelled) return
-        setOptions({ operadoras: operatorNames })
+        setOptions({
+          operadoras: operatorNames,
+        })
+        setPeriodOptions(availablePeriods ?? [])
         setStatus('ready')
       } catch (err) {
         if (cancelled) return
@@ -113,10 +150,17 @@ export function useDashboardController() {
           : null
         const rankingFilters = operatorContext?.name ? { ...resolvedFilters, search: '' } : resolvedFilters
         const rankingComparisonOptions = comparisonOptions ?? {}
+        const tableOptions = operatorContext?.name
+          ? {
+              includeAllColumns: true,
+              ignorePeriodFilters: true,
+              operatorName: operatorContext.name,
+            }
+          : {}
         const [summary, ranking, table] = await Promise.all([
           fetchKpiSummary(resolvedFilters),
           fetchRanking(rankingMetric, rankingFilters, 10, rankingOrder, rankingComparisonOptions),
-          fetchTableData(resolvedFilters),
+          fetchTableData(resolvedFilters, tableOptions),
         ])
         if (cancelled) return
         setKpis(summary)
@@ -141,7 +185,6 @@ export function useDashboardController() {
   useEffect(() => {
     if (!operatorContext?.name) {
       setOperatorSnapshot({ operator: null, peers: null, availablePeriods: [], selectedPeriod: null })
-      setOperatorPeriod(null)
       return
     }
     let cancelled = false
@@ -169,7 +212,6 @@ export function useDashboardController() {
     if (!operatorName) {
       setFilters((prev) => ({ ...prev, search: '' }))
       setOperatorContext(null)
-      setOperatorPeriod(null)
       return
     }
     try {
@@ -178,7 +220,6 @@ export function useDashboardController() {
       if (!latest) {
         setFilters((prev) => ({ ...prev, search: operatorName }))
         setOperatorContext(null)
-        setOperatorPeriod(null)
         return
       }
       setFilters((prev) => ({ ...prev, search: operatorName }))
@@ -188,11 +229,10 @@ export function useDashboardController() {
         porte: latest.porte ?? null,
         uniodonto: latest.uniodonto ?? null,
       })
-      setOperatorPeriod({ ano: latest.ano, trimestre: latest.trimestre })
+      setOperatorPeriod({ ano: latest.ano, trimestre: latest.trimestre, periodo: latest.periodo ?? `${latest.ano}T${latest.trimestre}` })
     } catch (err) {
       console.error('[Dashboard] Falha ao selecionar operadora', err)
       setOperatorContext(null)
-      setOperatorPeriod(null)
     }
   }
 
@@ -206,8 +246,11 @@ export function useDashboardController() {
       await persistDatasetFile(file.name, text)
       const loadedSource = await loadDataset({ csvText: text, filename: file.name })
       setSourceInfo(loadedSource)
-      const operatorNames = await fetchOperatorOptions()
-      setOptions({ operadoras: operatorNames })
+      const [operatorNames, availablePeriods] = await Promise.all([fetchOperatorOptions(), fetchAvailablePeriods()])
+      setOptions({
+        operadoras: operatorNames,
+      })
+      setPeriodOptions(availablePeriods ?? [])
       setFilters({ ...defaultFilters })
       setComparisonMode(DEFAULT_COMPARISON_MODE)
       setOperatorContext(null)
@@ -249,6 +292,7 @@ export function useDashboardController() {
     error,
     filters,
     options,
+    periodOptions,
     kpis,
     rankingMetric,
     setRankingMetric,

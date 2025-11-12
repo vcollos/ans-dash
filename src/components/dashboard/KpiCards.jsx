@@ -66,16 +66,53 @@ function getComparisonTrendClass(operatorValue, peerValue, direction = 'higher')
   return isBetter ? 'text-emerald-600' : 'text-red-600'
 }
 
-function KpiCards({ snapshot, fallbackSummary, onPeriodChange, period, peerLabel }) {
+function KpiCards({ snapshot, fallbackSummary, onPeriodChange, period, peerLabel, fallbackPeriods = [] }) {
   const operatorName = snapshot?.operatorName
   const selectedPeriod = snapshot?.selectedPeriod ?? period
+  const periodOptions = operatorName ? snapshot?.availablePeriods ?? [] : fallbackPeriods ?? []
+  const periodValue = buildPeriodValue(selectedPeriod)
+
+  const handlePeriodChange = (value) => {
+    if (!value) return
+    const [anoStr, trimStr] = value.split('-')
+    const ano = Number(anoStr)
+    const trimestre = Number(trimStr)
+    const match = periodOptions.find((item) => item.ano === ano && item.trimestre === trimestre)
+    const nextPeriod = match ?? { ano, trimestre, periodo: `${ano}T${trimestre}` }
+    onPeriodChange?.(nextPeriod)
+  }
+
+  const periodSelect = periodOptions.length ? (
+    <Select value={periodValue || undefined} onValueChange={handlePeriodChange}>
+      <SelectTrigger className="w-[220px]">
+        <SelectValue placeholder="Período" />
+      </SelectTrigger>
+      <SelectContent>
+        {periodOptions.map((item) => (
+          <SelectItem key={`${item.ano}-${item.trimestre}`} value={`${item.ano}-${item.trimestre}`}>
+            {item.periodo ?? `${item.ano}T${item.trimestre}`}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  ) : null
 
   if (!operatorName) {
     return (
       <Card className="min-w-0">
-        <CardHeader>
-          <CardTitle className="text-lg">Indicadores agregados</CardTitle>
-          <CardDescription>Selecione uma operadora para destravar a comparação com seus pares.</CardDescription>
+        <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <CardTitle className="text-lg">Indicadores agregados</CardTitle>
+            <CardDescription>
+              {peerLabel
+                ? `Visualizando a media definida em "Comparar com": ${peerLabel}.`
+                : 'Selecione uma operadora para destravar a comparacao com seus pares.'}
+            </CardDescription>
+            {selectedPeriod ? (
+              <p className="text-xs text-muted-foreground">Período ativo: {selectedPeriod.periodo ?? `${selectedPeriod.ano}T${selectedPeriod.trimestre}`}</p>
+            ) : null}
+          </div>
+          {periodSelect}
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
@@ -95,16 +132,7 @@ function KpiCards({ snapshot, fallbackSummary, onPeriodChange, period, peerLabel
     )
   }
 
-  const periodValue = buildPeriodValue(selectedPeriod)
-  const periods = snapshot?.availablePeriods ?? []
   const peerCount = snapshot?.peerCount ?? snapshot?.peers?.peer_count ?? 0
-
-  const handlePeriodChange = (value) => {
-    if (!value) return
-    const [anoStr, trimStr] = value.split('-')
-    const nextPeriod = { ano: Number(anoStr), trimestre: Number(trimStr) }
-    onPeriodChange?.(nextPeriod)
-  }
 
   return (
     <Card className="min-w-0">
@@ -121,20 +149,7 @@ function KpiCards({ snapshot, fallbackSummary, onPeriodChange, period, peerLabel
             </p>
           ) : null}
         </div>
-        {periods.length ? (
-          <Select value={periodValue} onValueChange={handlePeriodChange}>
-            <SelectTrigger className="w-[220px]">
-              <SelectValue placeholder="Período" />
-            </SelectTrigger>
-            <SelectContent>
-              {periods.map((item) => (
-                <SelectItem key={`${item.ano}-${item.trimestre}`} value={`${item.ano}-${item.trimestre}`}>
-                  {item.periodo}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : null}
+        {periodSelect}
       </CardHeader>
       <CardContent>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">

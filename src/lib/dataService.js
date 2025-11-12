@@ -23,11 +23,16 @@ export const DETAIL_TABLE_FIELDS = [
   'pmpe',
   'resultado_financeiro',
   'resultado_liquido',
+  'vr_receitas',
+  'vr_despesas',
+  'vr_receitas_patrimoniais',
   'vr_contraprestacoes',
   'vr_eventos_liquidos',
 ]
 
 const DEFAULT_VIEW = 'diops_curated'
+
+let cachedViewColumns = null
 
 const comparisonModes = new Set([
   'all-operators',
@@ -42,6 +47,19 @@ const comparisonModes = new Set([
 const sanitizeList = (values = []) => values.filter((value) => value !== null && value !== undefined && value !== '')
 const sanitizeSql = (value) => (value ? value.replaceAll("'", "''") : value)
 const metricSelectSql = metricFormulas.map(({ id, sql }) => `${sql.trim()} AS ${id}`).join(',\n        ')
+
+async function getViewColumns(conn) {
+  if (cachedViewColumns) {
+    return cachedViewColumns
+  }
+  const info = await conn.query(`PRAGMA table_info('${DEFAULT_VIEW}')`)
+  cachedViewColumns = tableToObjects(info).map((row) => row.name)
+  return cachedViewColumns
+}
+
+function invalidateSchemaCache() {
+  cachedViewColumns = null
+}
 
 async function fetchAsText(url) {
   const response = await fetch(url)
@@ -133,6 +151,7 @@ export async function loadDataset({ csvUrl, csvText, filename } = {}) {
   await db.dropFiles()
   await conn.query('DROP VIEW IF EXISTS diops_curated')
   await conn.query('DROP TABLE IF EXISTS diops_raw')
+  invalidateSchemaCache()
 
   const text = csvText ?? (await fetchAsText(csvUrl))
   await db.registerFileText('diops.csv', text)
@@ -163,6 +182,9 @@ export async function loadDataset({ csvUrl, csvText, filename } = {}) {
         TRY_CAST(NULLIF("311_vr_contraprestacoes", '') AS DOUBLE) AS vr_contraprestacoes,
         TRY_CAST(NULLIF("311121_vr_contraprestacoes_pre", '') AS DOUBLE) AS vr_contraprestacoes_pre,
         TRY_CAST(NULLIF("1231_vr_creditos_operacoes_saude", '') AS DOUBLE) AS vr_creditos_operacoes_saude,
+        TRY_CAST(NULLIF("3_vr_receitas", '') AS DOUBLE) AS vr_receitas,
+        TRY_CAST(NULLIF("4_vr_despesas", '') AS DOUBLE) AS vr_despesas,
+        TRY_CAST(NULLIF("36_vr_receitas_patrimoniais", '') AS DOUBLE) AS vr_receitas_patrimoniais,
         TRY_CAST(NULLIF("41_vr_eventos_liquidos", '') AS DOUBLE) AS vr_eventos_liquidos,
         TRY_CAST(NULLIF("2111_vr_eventos_a_liquidar", '') AS DOUBLE) AS vr_eventos_a_liquidar,
         TRY_CAST(NULLIF("43_vr_desp_comerciais", '') AS DOUBLE) AS vr_desp_comerciais,
@@ -179,7 +201,9 @@ export async function loadDataset({ csvUrl, csvText, filename } = {}) {
         TRY_CAST(NULLIF("23_vr_passivo_nao_circulante", '') AS DOUBLE) AS vr_passivo_nao_circulante,
         TRY_CAST(NULLIF("25_vr_patrimonio_liquido", '') AS DOUBLE) AS vr_patrimonio_liquido,
         TRY_CAST(NULLIF("31_vr_ativos_garantidores", '') AS DOUBLE) AS vr_ativos_garantidores,
-        TRY_CAST(NULLIF("32_vr_provisoes_tecnicas", '') AS DOUBLE) AS vr_provisoes_tecnicas
+        TRY_CAST(NULLIF("32_vr_provisoes_tecnicas", '') AS DOUBLE) AS vr_provisoes_tecnicas,
+        TRY_CAST(NULLIF("2521_vr_pl_ajustado", '') AS DOUBLE) AS vr_pl_ajustado,
+        TRY_CAST(NULLIF("2522_vr_margem_solvencia_exigida", '') AS DOUBLE) AS vr_margem_solvencia_exigida
       FROM diops_raw
       WHERE TRY_CAST(NULLIF(ano, '') AS INTEGER) IS NOT NULL
         AND TRY_CAST(NULLIF(trimestre, '') AS INTEGER) IS NOT NULL
@@ -224,22 +248,20 @@ export async function persistDatasetFile(filename, content) {
   }
 }
 
-export async function fetchFilterOptions() {
+export async function fetchAvailablePeriods() {
   const conn = await getConnection()
-  const [modalidades, portes, anos, trimestres, regAns] = await Promise.all([
-    conn.query(`SELECT DISTINCT modalidade FROM ${DEFAULT_VIEW} WHERE modalidade IS NOT NULL ORDER BY modalidade`),
-    conn.query(`SELECT DISTINCT porte FROM ${DEFAULT_VIEW} WHERE porte IS NOT NULL ORDER BY porte`),
-    conn.query(`SELECT DISTINCT ano FROM ${DEFAULT_VIEW} WHERE ano IS NOT NULL ORDER BY ano`),
-    conn.query(`SELECT DISTINCT trimestre FROM ${DEFAULT_VIEW} WHERE trimestre IS NOT NULL ORDER BY trimestre`),
-    conn.query(`SELECT DISTINCT reg_ans FROM ${DEFAULT_VIEW} WHERE reg_ans IS NOT NULL ORDER BY reg_ans`),
-  ])
-  return {
-    modalidades: tableToObjects(modalidades).map((row) => row.modalidade),
-    portes: tableToObjects(portes).map((row) => row.porte),
-    anos: tableToObjects(anos).map((row) => row.ano),
-    trimestres: tableToObjects(trimestres).map((row) => row.trimestre),
-    regAns: tableToObjects(regAns).map((row) => row.reg_ans),
-  }
+  const query = `
+    SELECT DISTINCT ano, trimestre, CONCAT(ano, 'T', trimestre) AS periodo
+    FROM ${DEFAULT_VIEW}
+    WHERE ano IS NOT NULL AND trimestre IS NOT NULL
+    ORDER BY ano DESC, trimestre DESC
+  `
+  const table = await conn.query(query)
+  return tableToObjects(table).map((row) => ({
+    ano: row.ano,
+    trimestre: row.trimestre,
+    periodo: row.periodo ?? `${row.ano}T${row.trimestre}`,
+  }))
 }
 
 export async function fetchOperatorOptions({ anos = [], trimestres = [] } = {}) {
@@ -552,15 +574,44 @@ export async function fetchScatter(xMetric, yMetric, filters, limit = 200) {
 
 export async function fetchTableData(filters, options = {}) {
   const conn = await getConnection()
-  const { whereClause } = buildFilterClauses(filters)
+  const includeAllColumns = options.includeAllColumns === true
+  const ignorePeriodFilters = options.ignorePeriodFilters === true
+  const exactOperatorName = options.operatorName ?? null
+
+  let effectiveFilters = { ...filters }
+  if (ignorePeriodFilters) {
+    effectiveFilters = {
+      ...effectiveFilters,
+      anos: [],
+      trimestres: [],
+    }
+  }
+
+  const { whereClause } = buildFilterClauses(effectiveFilters, {
+    latestOnlyDefault: ignorePeriodFilters ? false : true,
+  })
+
+  let finalWhereClause = whereClause
+  if (exactOperatorName) {
+    const clause = `nome_operadora = '${sanitizeSql(exactOperatorName)}'`
+    finalWhereClause = finalWhereClause ? `${finalWhereClause} AND ${clause}` : `WHERE ${clause}`
+  }
+
+  let selectedFields = options.columns?.length ? options.columns : DETAIL_TABLE_FIELDS
+  if (includeAllColumns) {
+    selectedFields = await getViewColumns(conn)
+  }
+  if (!selectedFields || !selectedFields.length) {
+    selectedFields = ['*']
+  }
+
+  const projection = selectedFields.join(', ')
   const limit = options.limit ?? 500
   const offset = options.offset ?? 0
-  const selectedFields = options.columns?.length ? options.columns : DETAIL_TABLE_FIELDS
-  const projection = selectedFields.join(', ')
   const query = `
     SELECT ${projection}
     FROM ${DEFAULT_VIEW}
-    ${whereClause}
+    ${finalWhereClause ?? ''}
     ORDER BY ano DESC, trimestre DESC, nome_operadora
     LIMIT ${limit} OFFSET ${offset}
   `

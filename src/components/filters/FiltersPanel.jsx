@@ -5,16 +5,7 @@ import { RefreshCcw } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '../ui/select'
 import OperatorSearch from './OperatorSearch'
 import { cn } from '../../lib/utils'
-
-const comparisonOptions = [
-  { value: 'all-operators', label: 'Todas operadoras' },
-  { value: 'all-uniodonto', label: 'Todas Uniodontos' },
-  { value: 'non-uniodonto', label: 'Todas não Uniodonto' },
-  { value: 'modality-non-uniodonto', label: 'Modalidade não Uniodonto' },
-  { value: 'same-porte', label: 'Todas do mesmo porte' },
-  { value: 'same-porte-uniodonto', label: 'Uniodontos do mesmo porte' },
-  { value: 'same-porte-non-uniodonto', label: 'Mesmo porte não Uniodonto' },
-]
+import { comparisonOptions } from '../../lib/comparisonModes'
 
 function FiltersPanel({
   filters,

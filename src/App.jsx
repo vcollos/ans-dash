@@ -11,6 +11,7 @@ import MonetarySummary from './components/dashboard/MonetarySummary'
 import { Skeleton } from './components/ui/skeleton'
 import { Card, CardContent } from './components/ui/card'
 import { Button } from './components/ui/button'
+import { getComparisonOptionLabel } from './lib/comparisonModes'
 
 function LoadingState() {
   return (
@@ -56,6 +57,7 @@ function App() {
     error,
     filters,
     options,
+    periodOptions,
     kpis,
     rankingMetric,
     setRankingMetric,
@@ -81,7 +83,7 @@ function App() {
 
   const comparisonLabel = useMemo(() => {
     if (!operatorContext?.name) {
-      return 'Média dos filtros ativos'
+      return getComparisonOptionLabel(comparisonMode)
     }
     switch (comparisonMode) {
       case 'all-operators':
@@ -194,6 +196,7 @@ function App() {
               onPeriodChange={setOperatorPeriod}
               period={operatorPeriod}
               peerLabel={comparisonLabel}
+              fallbackPeriods={periodOptions}
             />
             <div className="grid gap-6 lg:grid-cols-2 lg:items-stretch">
               <RankingChart
