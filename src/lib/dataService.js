@@ -36,6 +36,7 @@ let cachedViewColumns = null
 
 const sanitizeList = (values = []) => values.filter((value) => value !== null && value !== undefined && value !== '')
 const sanitizeSql = (value) => (value ? value.replaceAll("'", "''") : value)
+const quoteIdentifier = (value) => `"${String(value).replace(/"/g, '""')}"`
 const metricSelectSql = metricFormulas.map(({ id, sql }) => `${sql.trim()} AS ${id}`).join(',\n        ')
 
 async function getViewColumns(conn) {
@@ -88,6 +89,9 @@ function buildWhereClause(filters = {}) {
     const v = sanitizeSql(filters.search).toLowerCase()
     clauses.push(`lower(nome_operadora) LIKE '%${v}%'`)
   }
+  if (filters.operatorName) {
+    clauses.push(`nome_operadora = '${sanitizeSql(filters.operatorName)}'`)
+  }
 
   return clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
 }
@@ -122,6 +126,18 @@ export async function loadDataset({ csvUrl, csvText, filename } = {}) {
   await db.registerFileText('diops.csv', text)
   await conn.query("CREATE OR REPLACE TABLE diops_raw AS SELECT * FROM read_csv_auto('diops.csv', HEADER=TRUE, SAMPLE_SIZE=-1, ALL_VARCHAR=TRUE)")
 
+  const rawInfo = await conn.query("PRAGMA table_info('diops_raw')")
+  const rawColumns = tableToObjects(rawInfo).map((row) => row.name)
+  const conta61Column = rawColumns.find((name) => /^61/i.test(name)) ?? null
+  const conta61Select = conta61Column
+    ? `TRY_CAST(NULLIF(${quoteIdentifier(conta61Column)}, '') AS DOUBLE) AS vr_conta_61`
+    : 'CAST(NULL AS DOUBLE) AS vr_conta_61'
+  const resultadoLiquidoExpression = `COALESCE(vr_receitas, 0) - COALESCE(vr_despesas, 0)`
+  const resultadoLiquidoFinalExpression = `
+        ${resultadoLiquidoExpression}
+        - COALESCE(vr_conta_61, 0)
+  `
+
   await conn.query(`
     CREATE OR REPLACE VIEW ${DEFAULT_VIEW} AS
     WITH parsed AS (
@@ -143,7 +159,7 @@ export async function loadDataset({ csvUrl, csvText, filename } = {}) {
         TRY_CAST(NULLIF(reg_ans, '') AS BIGINT) AS reg_ans,
         TRY_CAST(NULLIF(ano, '') AS INTEGER) AS ano,
         TRY_CAST(NULLIF(trimestre, '') AS INTEGER) AS trimestre,
-        TRY_CAST(NULLIF(resultado_liquido, '') AS DOUBLE) AS resultado_liquido,
+        TRY_CAST(NULLIF(resultado_liquido, '') AS DOUBLE) AS resultado_liquido_informado,
         TRY_CAST(NULLIF("311_vr_contraprestacoes", '') AS DOUBLE) AS vr_contraprestacoes,
         TRY_CAST(NULLIF("311121_vr_contraprestacoes_pre", '') AS DOUBLE) AS vr_contraprestacoes_pre,
         TRY_CAST(NULLIF("1231_vr_creditos_operacoes_saude", '') AS DOUBLE) AS vr_creditos_operacoes_saude,
@@ -168,19 +184,27 @@ export async function loadDataset({ csvUrl, csvText, filename } = {}) {
         TRY_CAST(NULLIF("31_vr_ativos_garantidores", '') AS DOUBLE) AS vr_ativos_garantidores,
         TRY_CAST(NULLIF("32_vr_provisoes_tecnicas", '') AS DOUBLE) AS vr_provisoes_tecnicas,
         TRY_CAST(NULLIF("2521_vr_pl_ajustado", '') AS DOUBLE) AS vr_pl_ajustado,
-        TRY_CAST(NULLIF("2522_vr_margem_solvencia_exigida", '') AS DOUBLE) AS vr_margem_solvencia_exigida
+        TRY_CAST(NULLIF("2522_vr_margem_solvencia_exigida", '') AS DOUBLE) AS vr_margem_solvencia_exigida,
+        ${conta61Select}
       FROM diops_raw
       WHERE TRY_CAST(NULLIF(ano, '') AS INTEGER) IS NOT NULL
         AND TRY_CAST(NULLIF(trimestre, '') AS INTEGER) IS NOT NULL
-    ), enriched AS (
+    ), computed AS (
       SELECT
         parsed.*,
+        ${resultadoLiquidoExpression} AS resultado_liquido_calculado,
+        ${resultadoLiquidoFinalExpression} AS resultado_liquido_final_ans,
+        ${resultadoLiquidoExpression} AS resultado_liquido
+      FROM parsed
+    ), enriched AS (
+      SELECT
+        computed.*,
         COALESCE(vr_receitas_fin, 0) - COALESCE(vr_despesas_fin, 0) AS resultado_financeiro,
         ${metricSelectSql},
         (ano * 10 + trimestre) AS periodo_id,
         CONCAT(ano, 'T', trimestre) AS periodo,
         ROW_NUMBER() OVER (PARTITION BY nome_operadora, ano ORDER BY trimestre DESC NULLS LAST) AS trimestre_rank
-      FROM parsed
+      FROM computed
     )
     SELECT * FROM enriched;
   `)
@@ -291,6 +315,21 @@ async function summarizePeriod(filters) {
         SUM(COALESCE(vr_receitas_fin, 0)) AS vr_receitas_fin,
         SUM(COALESCE(vr_despesas_fin, 0)) AS vr_despesas_fin,
         SUM(COALESCE(resultado_financeiro, 0)) AS resultado_financeiro,
+        SUM(COALESCE(vr_receitas_patrimoniais, 0)) AS vr_receitas_patrimoniais,
+        SUM(COALESCE(vr_outras_receitas_operacionais, 0)) AS vr_outras_receitas_operacionais,
+        SUM(COALESCE(vr_ativo_circulante, 0)) AS vr_ativo_circulante,
+        SUM(COALESCE(vr_ativo_permanente, 0)) AS vr_ativo_permanente,
+        SUM(COALESCE(vr_passivo_circulante, 0)) AS vr_passivo_circulante,
+        SUM(COALESCE(vr_passivo_nao_circulante, 0)) AS vr_passivo_nao_circulante,
+        SUM(COALESCE(vr_patrimonio_liquido, 0)) AS vr_patrimonio_liquido,
+        SUM(COALESCE(vr_ativos_garantidores, 0)) AS vr_ativos_garantidores,
+        SUM(COALESCE(vr_provisoes_tecnicas, 0)) AS vr_provisoes_tecnicas,
+        SUM(COALESCE(vr_pl_ajustado, 0)) AS vr_pl_ajustado,
+        SUM(COALESCE(vr_margem_solvencia_exigida, 0)) AS vr_margem_solvencia_exigida,
+        SUM(COALESCE(vr_conta_61, 0)) AS vr_conta_61,
+        SUM(COALESCE(resultado_liquido_calculado, 0)) AS resultado_liquido_calculado,
+        SUM(COALESCE(resultado_liquido_final_ans, 0)) AS resultado_liquido_final_ans,
+        SUM(COALESCE(resultado_liquido_informado, 0)) AS resultado_liquido_informado,
         SUM(COALESCE(resultado_liquido, 0)) AS resultado_liquido
       FROM base
       GROUP BY periodo_id, periodo
@@ -361,6 +400,42 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
     return tableToObjects(table)
   }
   const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
+  if (comparisonContext) {
+    const periodScopedComparisonFilters = {
+      ...(comparisonContext.filters ?? {}),
+    }
+    if (sanitizeList(filters?.anos).length) {
+      periodScopedComparisonFilters.anos = sanitizeList(filters.anos)
+    }
+    if (sanitizeList(filters?.trimestres).length) {
+      periodScopedComparisonFilters.trimestres = sanitizeList(filters.trimestres)
+    }
+    const comparisonWhereClause = buildWhereClause(periodScopedComparisonFilters)
+    const query = `
+      WITH base AS (
+        SELECT ano, trimestre, periodo, AVG(${sqlMetric}) AS valor
+        FROM ${DEFAULT_VIEW}
+        ${whereClause}
+        GROUP BY ano, trimestre, periodo
+      ), pares AS (
+        SELECT ano, trimestre, periodo, AVG(${sqlMetric}) AS valor
+        FROM ${DEFAULT_VIEW}
+        ${comparisonWhereClause}
+        GROUP BY ano, trimestre, periodo
+      )
+      SELECT
+        COALESCE(base.ano, pares.ano) AS ano,
+        COALESCE(base.trimestre, pares.trimestre) AS trimestre,
+        COALESCE(base.periodo, pares.periodo) AS periodo,
+        base.valor AS operador_valor,
+        pares.valor AS pares_valor
+      FROM base
+      FULL OUTER JOIN pares ON base.ano = pares.ano AND base.trimestre = pares.trimestre
+      ORDER BY ano, trimestre
+    `
+    const table = await conn.query(query)
+    return tableToObjects(table)
+  }
   const query = `
     SELECT ano, trimestre, periodo, AVG(${sqlMetric}) AS valor
     FROM ${DEFAULT_VIEW}
@@ -460,7 +535,7 @@ export async function fetchRanking(metric, filters, limit = 10, order = 'DESC', 
   const aggregator = metricDef?.aggregate === 'sum' ? 'SUM' : 'AVG'
   const requestedOrder = order?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC'
   const effectiveOrder = lowerIsBetter ? (requestedOrder === 'ASC' ? 'DESC' : 'ASC') : requestedOrder
-  const baseQuery = `
+  const rankingCte = `
     WITH base AS (
       SELECT *
       FROM ${DEFAULT_VIEW}
@@ -468,48 +543,37 @@ export async function fetchRanking(metric, filters, limit = 10, order = 'DESC', 
     ), aggregated AS (
       SELECT
         nome_operadora,
-        ${aggregator}(${sqlMetric}) AS valor
+        ${aggregator}(${sqlMetric}) AS valor,
+        MAX(reg_ans) AS reg_ans
       FROM base
       GROUP BY nome_operadora
     ), ranked AS (
       SELECT
         nome_operadora,
         valor,
+        reg_ans,
         ROW_NUMBER() OVER (ORDER BY valor ${effectiveOrder}) AS rank_position
       FROM aggregated
     )
+  `
+  const table = await conn.query(`
+    ${rankingCte}
     SELECT *
     FROM ranked
     ORDER BY rank_position
     LIMIT ${limit}
-  `
-  const table = await conn.query(baseQuery)
+  `)
   const rows = tableToObjects(table)
 
   let operatorRow = null
   if (options?.operatorName) {
     const sanitizedOperator = sanitizeSql(options.operatorName)
-    const operatorClause = `nome_operadora = '${sanitizedOperator}'`
-    const operatorWhere = whereClause ? `${whereClause} AND ${operatorClause}` : `WHERE ${operatorClause}`
     const operatorQuery = `
-      WITH base AS (
-        SELECT *
-        FROM ${DEFAULT_VIEW}
-        ${operatorWhere}
-      ), aggregated AS (
-        SELECT
-          nome_operadora,
-          ${aggregator}(${sqlMetric}) AS valor
-        FROM base
-        GROUP BY nome_operadora
-      ), ranked AS (
-        SELECT
-          nome_operadora,
-          valor,
-          ROW_NUMBER() OVER (ORDER BY valor ${effectiveOrder}) AS rank_position
-        FROM aggregated
-      )
-      SELECT * FROM ranked LIMIT 1
+      ${rankingCte}
+      SELECT *
+      FROM ranked
+      WHERE nome_operadora = '${sanitizedOperator}'
+      LIMIT 1
     `
     const operatorTable = await conn.query(operatorQuery)
     operatorRow = tableToObjects(operatorTable)[0] ?? null

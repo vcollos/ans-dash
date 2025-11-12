@@ -88,6 +88,7 @@ function RankingChart({
               <tr>
                 <th className="px-3 py-2 text-left">#</th>
                 <th className="px-3 py-2 text-left">Operadora</th>
+                <th className="px-3 py-2 text-left">Nº ANS</th>
                 <th className="px-3 py-2 text-right">{selectedMetric.label}</th>
               </tr>
             </thead>
@@ -99,6 +100,7 @@ function RankingChart({
                   <tr key={`${row.nome_operadora}-${rank}`} className={cn('border-t', isOperator && 'bg-primary/5')}>
                     <td className="px-3 py-2 text-left text-xs text-muted-foreground">{rank ? `${rank}º` : '—'}</td>
                     <td className="px-3 py-2 text-left font-medium">{row.nome_operadora}</td>
+                    <td className="px-3 py-2 text-left text-xs text-muted-foreground">{row.reg_ans ?? '—'}</td>
                     <td className="px-3 py-2 text-right font-semibold">{formatValue(row.valor, selectedMetric.format)}</td>
                   </tr>
                 )
@@ -126,6 +128,13 @@ function RankingChart({
               <span className="font-semibold text-foreground">
                 {formatValue(operatorRow.valor, selectedMetric.format)}
               </span>
+              {operatorRow.reg_ans ? (
+                <>
+                  {' • '}
+                  Nº ANS:{' '}
+                  <span className="font-semibold text-foreground">{operatorRow.reg_ans}</span>
+                </>
+              ) : null}
             </p>
           </div>
         ) : null}

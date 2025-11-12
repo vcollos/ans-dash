@@ -6,6 +6,7 @@ import {
   fetchOperatorSnapshot,
   fetchKpiSummary,
   fetchRanking,
+  fetchTrendSeries,
   fetchTableData,
   persistDatasetFile,
   fetchAvailablePeriods,
@@ -48,6 +49,8 @@ export function useDashboardController() {
   const [rankingMetric, setRankingMetric] = useState(DEFAULT_RANKING_METRIC)
   const [rankingData, setRankingData] = useState({ rows: [], operatorRow: null })
   const [rankingOrder, setRankingOrder] = useState('DESC')
+  const [trendMetric, setTrendMetric] = useState(DEFAULT_RANKING_METRIC)
+  const [trendSeries, setTrendSeries] = useState({ rows: [], isLoading: false })
   const [tableData, setTableData] = useState({ rows: [], columns: [] })
   const [isQuerying, setIsQuerying] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
@@ -154,7 +157,13 @@ export function useDashboardController() {
     setIsQuerying(true)
     async function runQueries() {
       try {
-        const summaryFilters = operatorContext?.name ? resolvedFilters : applyComparisonFilters(resolvedFilters)
+        const summaryFilters = operatorContext?.name
+          ? {
+              ...resolvedFilters,
+              operatorName: operatorContext.name,
+              regAns: operatorContext?.regAns ? [operatorContext.regAns] : resolvedFilters.regAns,
+            }
+          : applyComparisonFilters(resolvedFilters)
         const baseRankingFilters = operatorContext?.name ? { ...resolvedFilters, search: '' } : resolvedFilters
         const rankingFilters = applyComparisonFilters(baseRankingFilters)
         const tableOptions = operatorContext?.name
@@ -188,6 +197,31 @@ export function useDashboardController() {
       cancelled = true
     }
   }, [status, resolvedFilters, rankingMetric, rankingOrder, applyComparisonFilters, operatorContext?.name])
+
+  useEffect(() => {
+    if (status !== 'ready') return
+    let cancelled = false
+    setTrendSeries((prev) => ({ ...prev, isLoading: true }))
+    async function loadTrend() {
+      try {
+        const series = await fetchTrendSeries(trendMetric, resolvedFilters, {
+          operatorName: operatorContext?.name ?? null,
+          filters: comparisonFilterQuery,
+        })
+        if (cancelled) return
+        setTrendSeries({ rows: series ?? [], isLoading: false })
+      } catch (err) {
+        if (!cancelled) console.error('[Dashboard] Falha ao carregar série histórica', err)
+        if (!cancelled) {
+          setTrendSeries({ rows: [], isLoading: false })
+        }
+      }
+    }
+    loadTrend()
+    return () => {
+      cancelled = true
+    }
+  }, [status, trendMetric, resolvedFilters, operatorContext?.name, comparisonFilterQuery])
 
   useEffect(() => {
     if (!operatorContext?.name) {
@@ -229,12 +263,16 @@ export function useDashboardController() {
         setOperatorContext(null)
         return
       }
-      setFilters((prev) => ({ ...prev, search: operatorName }))
+      setFilters((prev) => ({
+        ...prev,
+        search: operatorName,
+      }))
       setOperatorContext({
         name: operatorName,
         modalidade: latest.modalidade ?? null,
         porte: latest.porte ?? null,
         uniodonto: latest.uniodonto ?? null,
+        regAns: latest.reg_ans ?? null,
       })
       setOperatorPeriod({ ano: latest.ano, trimestre: latest.trimestre, periodo: latest.periodo ?? `${latest.ano}T${latest.trimestre}` })
     } catch (err) {
@@ -310,6 +348,9 @@ export function useDashboardController() {
     rankingData,
     rankingOrder,
     setRankingOrder,
+    trendMetric,
+    setTrendMetric,
+    trendSeries,
     tableData,
     isQuerying,
     isUploading,

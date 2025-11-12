@@ -6,6 +6,7 @@ import AppHeader from './components/layout/AppHeader'
 import FiltersPanel from './components/filters/FiltersPanel'
 import KpiCards from './components/dashboard/KpiCards'
 import RankingChart from './components/dashboard/RankingChart'
+import IndicatorTrendChart from './components/dashboard/IndicatorTrendChart'
 import DataTable from './components/dashboard/DataTable'
 import MonetarySummary from './components/dashboard/MonetarySummary'
 import { Skeleton } from './components/ui/skeleton'
@@ -64,6 +65,9 @@ function App() {
     rankingData,
     rankingOrder,
     setRankingOrder,
+    trendMetric,
+    setTrendMetric,
+    trendSeries,
     tableData,
     isQuerying,
     isUploading,
@@ -82,6 +86,7 @@ function App() {
   } = useDashboardController()
 
   const comparisonLabel = useMemo(() => describeComparisonFilters(comparisonFilters), [comparisonFilters])
+  const trendPrimaryLabel = operatorInsight?.operatorName ?? 'Média dos filtros'
 
   if (status === 'loading') {
     return (
@@ -181,6 +186,14 @@ function App() {
               />
               <MonetarySummary data={kpis} isLoading={isQuerying} className="h-full" />
             </div>
+            <IndicatorTrendChart
+              data={trendSeries.rows}
+              metric={trendMetric}
+              onMetricChange={setTrendMetric}
+              isLoading={trendSeries.isLoading || isQuerying}
+              primaryLabel={trendPrimaryLabel}
+              comparisonLabel={comparisonLabel}
+            />
             <DataTable rows={tableData.rows ?? []} columns={tableData.columns ?? []} isLoading={isQuerying} />
           </div>
         </div>
