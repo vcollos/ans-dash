@@ -1,12 +1,11 @@
 import './lib/charts'
+import { useState, useMemo } from 'react'
 import { AlertCircle } from 'lucide-react'
 import { useDashboardController } from './hooks/useDashboardController'
 import AppHeader from './components/layout/AppHeader'
 import FiltersPanel from './components/filters/FiltersPanel'
 import KpiCards from './components/dashboard/KpiCards'
-import TrendChart from './components/dashboard/TrendChart'
 import RankingChart from './components/dashboard/RankingChart'
-import ScatterChart from './components/dashboard/ScatterChart'
 import DataTable from './components/dashboard/DataTable'
 import MonetarySummary from './components/dashboard/MonetarySummary'
 import { Skeleton } from './components/ui/skeleton'
@@ -22,9 +21,10 @@ function LoadingState() {
           <Skeleton key={index} className="h-28 w-full" />
         ))}
       </div>
-      <Skeleton className="h-64 w-full" />
-      <Skeleton className="h-[360px] w-full" />
-      <Skeleton className="h-[360px] w-full" />
+      <div className="grid gap-4 md:grid-cols-2">
+        <Skeleton className="h-[360px] w-full" />
+        <Skeleton className="h-[360px] w-full" />
+      </div>
       <Skeleton className="h-[360px] w-full" />
     </div>
   )
@@ -50,30 +50,66 @@ function ErrorState({ error, onRetry }) {
 }
 
 function App() {
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   const {
     status,
     error,
     filters,
     options,
     kpis,
-    trendMetric,
-    setTrendMetric,
-    trendData,
     rankingMetric,
     setRankingMetric,
     rankingData,
     rankingOrder,
     setRankingOrder,
-    scatterMetrics,
-    setScatterMetrics,
-    scatterData,
     tableData,
     isQuerying,
+    isUploading,
+    uploadFeedback,
     updateFilters,
     resetFilters,
-    metricsCatalog,
+    applyOperatorSelection,
+    replaceDataset,
     sourceInfo,
+    operatorInsight,
+    operatorPeriod,
+    setOperatorPeriod,
+    operatorContext,
+    comparisonMode,
+    setComparisonMode,
   } = useDashboardController()
+
+  const comparisonLabel = useMemo(() => {
+    if (!operatorContext?.name) {
+      return 'Média dos filtros ativos'
+    }
+    switch (comparisonMode) {
+      case 'all-operators':
+        return 'Média das operadoras'
+      case 'all-uniodonto':
+        return 'Média das Uniodontos'
+      case 'non-uniodonto':
+        return 'Média das operadoras não Uniodonto'
+      case 'modality-non-uniodonto':
+        return operatorContext?.modalidade
+          ? `Média das ${operatorContext.modalidade} não Uniodonto`
+          : 'Média das operadoras da modalidade (não Uniodonto)'
+      case 'same-porte':
+        return operatorContext?.porte
+          ? `Média das operadoras de porte ${operatorContext.porte}`
+          : 'Média das operadoras do mesmo porte'
+      case 'same-porte-uniodonto':
+        return operatorContext?.porte
+          ? `Média das Uniodontos de porte ${operatorContext.porte}`
+          : 'Média das Uniodontos do mesmo porte'
+      case 'same-porte-non-uniodonto':
+        return operatorContext?.porte
+          ? `Média das operadoras não Uniodonto de porte ${operatorContext.porte}`
+          : 'Média das operadoras do mesmo porte (não Uniodonto)'
+      default:
+        return 'Média dos pares'
+    }
+  }, [operatorContext, comparisonMode])
 
   if (status === 'loading') {
     return (
@@ -93,29 +129,86 @@ function App() {
 
   return (
     <div className="min-h-screen bg-muted/20">
-      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-4 sm:p-6">
-        <AppHeader onResetFilters={resetFilters} tableData={tableData} trendData={trendData} sourceInfo={sourceInfo} summary={kpis} />
-        <div className="grid gap-6 lg:grid-cols-[320px,1fr]">
-          <FiltersPanel filters={filters} options={options} onChange={updateFilters} onReset={resetFilters} />
-          <div className="space-y-6">
-            <KpiCards data={kpis} isLoading={isQuerying} />
-            <MonetarySummary data={kpis} isLoading={isQuerying} />
-            <div className="grid gap-6 xl:grid-cols-2">
-              <TrendChart
-                data={trendData}
-                metric={trendMetric}
-                metricsCatalog={metricsCatalog}
-                onMetricChange={setTrendMetric}
-              />
-              <RankingChart data={rankingData} metric={rankingMetric} onMetricChange={setRankingMetric} order={rankingOrder} onOrderChange={setRankingOrder} />
+      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 pb-12 pt-4 sm:px-6 sm:pt-6">
+        <AppHeader
+          onResetFilters={resetFilters}
+          tableData={tableData}
+          sourceInfo={sourceInfo}
+          summary={kpis}
+          operatorName={operatorInsight?.operatorName}
+          operatorContext={operatorContext}
+          onUploadDataset={replaceDataset}
+          isUploading={isUploading}
+          uploadFeedback={uploadFeedback}
+        />
+        <div className="lg:hidden">
+          <div className="sticky top-2 z-20 -mx-4 mb-3 px-4 sm:px-0">
+          <Button className="w-full" variant="secondary" onClick={() => setMobileFiltersOpen(true)}>
+              Ajustar filtros
+            </Button>
+          </div>
+          {mobileFiltersOpen ? (
+            <div className="fixed inset-0 z-40 flex flex-col bg-background/95 backdrop-blur">
+              <div className="flex items-center justify-between border-b px-4 py-3">
+                <p className="text-sm font-semibold">Filtros</p>
+                <Button variant="ghost" size="sm" onClick={() => setMobileFiltersOpen(false)}>
+                  Fechar
+                </Button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-4 py-4">
+                <FiltersPanel
+                  filters={filters}
+                  options={options}
+                  onChange={updateFilters}
+                  onReset={resetFilters}
+                  onOperatorSelect={applyOperatorSelection}
+                  className="border border-border/60 shadow-none"
+                  comparisonMode={comparisonMode}
+                  onComparisonModeChange={setComparisonMode}
+                />
+              </div>
+              <div className="border-t p-4">
+                <Button className="w-full" onClick={() => setMobileFiltersOpen(false)}>
+                  Aplicar filtros
+                </Button>
+              </div>
             </div>
-            <ScatterChart
-              data={scatterData}
-              metricsCatalog={metricsCatalog}
-              metrics={scatterMetrics}
-              onMetricsChange={setScatterMetrics}
+          ) : null}
+        </div>
+        <div className="grid gap-6 lg:grid-cols-[320px,minmax(0,1fr)] lg:items-start lg:gap-8">
+          <div className="hidden min-w-0 lg:block">
+            <FiltersPanel
+              filters={filters}
+              options={options}
+              onChange={updateFilters}
+              onReset={resetFilters}
+              onOperatorSelect={applyOperatorSelection}
+              comparisonMode={comparisonMode}
+              onComparisonModeChange={setComparisonMode}
             />
-            <DataTable rows={tableData.rows ?? []} isLoading={isQuerying} />
+          </div>
+          <div className="space-y-6 min-w-0">
+            <KpiCards
+              snapshot={operatorInsight}
+              fallbackSummary={kpis}
+              onPeriodChange={setOperatorPeriod}
+              period={operatorPeriod}
+              peerLabel={comparisonLabel}
+            />
+            <div className="grid gap-6 lg:grid-cols-2 lg:items-stretch">
+              <RankingChart
+                data={rankingData.rows}
+                operatorRow={rankingData.operatorRow}
+                metric={rankingMetric}
+                onMetricChange={setRankingMetric}
+                order={rankingOrder}
+                onOrderChange={setRankingOrder}
+                operatorName={operatorInsight?.operatorName}
+                comparisonLabel={comparisonLabel}
+              />
+              <MonetarySummary data={kpis} isLoading={isQuerying} className="h-full" />
+            </div>
+            <DataTable rows={tableData.rows ?? []} columns={tableData.columns ?? []} isLoading={isQuerying} />
           </div>
         </div>
       </main>

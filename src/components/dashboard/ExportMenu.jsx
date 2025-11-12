@@ -4,14 +4,10 @@ import { Button } from '../ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover'
 import { downloadCsv, downloadJson } from '../../lib/export'
 
-function ExportMenu({ tableData, trendData }) {
+function ExportMenu({ tableData }) {
   const handleCsv = useCallback(() => {
     downloadCsv(tableData)
   }, [tableData])
-
-  const handleTrendJson = useCallback(() => {
-    downloadJson(trendData, 'serie_temporal.json')
-  }, [trendData])
 
   const handleTableJson = useCallback(() => {
     downloadJson(tableData.rows, 'dados_tabela.json')
@@ -33,10 +29,6 @@ function ExportMenu({ tableData, trendData }) {
         <Button variant="ghost" className="w-full justify-start gap-2" onClick={handleTableJson}>
           <FileJson className="h-4 w-4" />
           Exportar JSON (tabela)
-        </Button>
-        <Button variant="ghost" className="w-full justify-start gap-2" onClick={handleTrendJson}>
-          <FileJson className="h-4 w-4" />
-          Exportar JSON (série)
         </Button>
       </PopoverContent>
     </Popover>

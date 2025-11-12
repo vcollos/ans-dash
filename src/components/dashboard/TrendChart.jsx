@@ -4,10 +4,37 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
 import { Badge } from '../ui/badge'
 import { formatNumber, formatPercent } from '../../lib/utils'
 
-function TrendChart({ data, metric, metricsCatalog, onMetricChange }) {
+function TrendChart({ data, metric, metricsCatalog, onMetricChange, operatorName, peerLabel }) {
   const metricDefinition = useMemo(() => metricsCatalog.find((item) => item.id === metric), [metric, metricsCatalog])
+  const hasComparison = useMemo(() => data.some((item) => item.operador_valor !== undefined || item.pares_valor !== undefined), [data])
   const chartData = useMemo(() => {
     const labels = data.map((item) => item.periodo)
+    if (hasComparison) {
+      return {
+        labels,
+        datasets: [
+          {
+            label: operatorName ?? 'Operadora selecionada',
+            data: data.map((item) => item.operador_valor ?? null),
+            tension: 0.3,
+            fill: false,
+            borderColor: 'hsl(var(--primary))',
+            backgroundColor: 'hsl(var(--primary))',
+            pointRadius: 3,
+          },
+          {
+            label: peerLabel ?? 'Média dos pares',
+            data: data.map((item) => item.pares_valor ?? null),
+            tension: 0.3,
+            fill: false,
+            borderColor: 'hsl(var(--muted-foreground))',
+            backgroundColor: 'hsl(var(--muted-foreground))',
+            borderDash: [4, 4],
+            pointRadius: 3,
+          },
+        ],
+      }
+    }
     const values = data.map((item) => item.valor ?? 0)
     return {
       labels,
@@ -23,7 +50,7 @@ function TrendChart({ data, metric, metricsCatalog, onMetricChange }) {
         },
       ],
     }
-  }, [data, metricDefinition])
+  }, [data, metricDefinition, hasComparison, operatorName, peerLabel])
 
   const chartOptions = useMemo(
     () => ({
@@ -48,6 +75,9 @@ function TrendChart({ data, metric, metricsCatalog, onMetricChange }) {
         },
       },
       plugins: {
+        legend: {
+          display: hasComparison,
+        },
         tooltip: {
           callbacks: {
             label: (context) => {
@@ -68,7 +98,7 @@ function TrendChart({ data, metric, metricsCatalog, onMetricChange }) {
         },
       },
     }),
-    [metricDefinition],
+    [metricDefinition, hasComparison],
   )
 
   return (

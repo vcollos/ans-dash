@@ -2,7 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Label } from '../ui/label'
 import { Input } from '../ui/input'
 
-function OperatorSearch({ label, value = '', onChange, options = [], placeholder = 'Nome ou parte do nome', emptyText = 'Nenhuma operadora encontrada.' }) {
+function OperatorSearch({
+  label,
+  value = '',
+  onChange,
+  onSelect,
+  options = [],
+  placeholder = 'Nome ou parte do nome',
+  emptyText = 'Nenhuma operadora encontrada.',
+}) {
   const [query, setQuery] = useState(value ?? '')
   const [open, setOpen] = useState(false)
   const closeTimeoutRef = useRef(null)
@@ -31,6 +39,9 @@ function OperatorSearch({ label, value = '', onChange, options = [], placeholder
   const handleSelect = (option) => {
     setQuery(option)
     onChange(option)
+    if (onSelect) {
+      onSelect(option)
+    }
     setOpen(false)
   }
 
@@ -55,6 +66,13 @@ function OperatorSearch({ label, value = '', onChange, options = [], placeholder
             const nextValue = event.target.value
             setQuery(nextValue)
             onChange(nextValue)
+            if (onSelect) {
+              const normalized = nextValue?.toLowerCase().trim()
+              const exactMatch = options.find((option) => option?.toLowerCase() === normalized)
+              if (exactMatch) {
+                onSelect(exactMatch)
+              }
+            }
             setOpen(true)
           }}
           onFocus={handleFocus}

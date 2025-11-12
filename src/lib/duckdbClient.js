@@ -20,7 +20,7 @@ async function createDuckDB() {
   }
 
   const selectedBundle = await selectBundle(bundles)
-  const logger = new ConsoleLogger()
+  const logger = new ConsoleLogger(3) // suppress noisy INFO logs, keep warnings/errors
   const worker = selectedBundle.mainWorker ? new Worker(selectedBundle.mainWorker) : null
   const db = new AsyncDuckDB(logger, worker)
   await db.instantiate(selectedBundle.mainModule, selectedBundle.pthreadWorker)
