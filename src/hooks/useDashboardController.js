@@ -203,13 +203,17 @@ export function useDashboardController() {
     setIsQuerying(true)
     async function runQueries() {
       try {
+        const comparisonPeriodFilters = {
+          anos: resolvedFilters.anos ?? [],
+          trimestres: resolvedFilters.trimestres ?? [],
+        }
         const summaryFilters = operatorContext?.name
           ? {
               ...resolvedFilters,
               operatorName: operatorContext.name,
               regAns: operatorContext?.regAns ? [operatorContext.regAns] : resolvedFilters.regAns,
             }
-          : applyComparisonFilters(resolvedFilters)
+          : applyComparisonFilters(comparisonPeriodFilters)
         const baseRankingFilters = operatorContext?.name ? { ...resolvedFilters, search: '' } : resolvedFilters
         const rankingFilters = applyComparisonFilters(baseRankingFilters)
         const tableOptions = operatorContext?.name

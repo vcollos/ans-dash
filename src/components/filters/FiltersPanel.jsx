@@ -52,20 +52,6 @@ function FiltersPanel({
 }) {
   const safeComparisonFilters = sanitizeComparisonFilters(comparisonFilters)
 
-  const syncFiltersFromComparison = (key, values) => {
-    if (key === 'modalidades' || key === 'portes') {
-      onChange({ [key]: [...values] })
-      return
-    }
-    if (key === 'uniodonto' || key === 'ativa') {
-      if (values.length === 1) {
-        onChange({ [key]: values[0] })
-      } else {
-        onChange({ [key]: null })
-      }
-    }
-  }
-
   const handleComparisonToggle = (key, value, shouldEnable) => {
     const currentValues = safeComparisonFilters[key] ?? []
     const exists = currentValues.includes(value)
@@ -85,7 +71,6 @@ function FiltersPanel({
       [key]: nextValues,
     }
     onComparisonFiltersChange(updated)
-    syncFiltersFromComparison(key, nextValues)
   }
 
   const handleResetComparison = () => {
