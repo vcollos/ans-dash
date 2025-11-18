@@ -101,6 +101,30 @@ export const REGULATORY_INDICATORS = [
     trend: 'higher',
     weight: 0.05,
   },
+  {
+    id: 'retorno_pl_pct',
+    label: 'Retorno sobre PL (ROE)',
+    format: 'percent',
+    unit: '%',
+    trend: 'higher',
+    category: 'uniodonto',
+  },
+  {
+    id: 'despesas_operacionais_pct',
+    label: 'Despesas Operacionais (DOP)',
+    format: 'percent',
+    unit: '%',
+    trend: 'lower',
+    category: 'uniodonto',
+  },
+  {
+    id: 'capital_terceiros_sobre_pl',
+    label: 'Capital de Terceiros / PL (CT/CP)',
+    format: 'decimal',
+    unit: 'x',
+    trend: 'lower',
+    category: 'uniodonto',
+  },
 ]
 
 export const REGULATORY_SOLVENCY_BLOCK = {

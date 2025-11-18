@@ -3,6 +3,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { cn, formatNumber, formatPercent } from '../../lib/utils'
 import { metricFormulas } from '../../lib/metricFormulas'
 import { Badge } from '../ui/badge'
+import { REGULATORY_BASE_TEXT } from '../../lib/regulatoryScore'
 
 const indicatorSpec = metricFormulas
   .filter((metric) => metric.showInCards)
@@ -76,21 +77,6 @@ function ScoreBadge({ label }) {
   return <Badge className={cn('text-xs font-semibold', style)}>{label}</Badge>
 }
 
-function formatBoolean(value) {
-  if (value === true) return 'Sim'
-  if (value === false) return 'Não'
-  return '—'
-}
-
-function MetaItem({ label, value }) {
-  return (
-    <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-sm">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="font-medium text-foreground">{value ?? '—'}</p>
-    </div>
-  )
-}
-
 function getComparisonTrendClass(operatorValue, peerValue, direction = 'higher') {
   if (
     operatorValue === null ||
@@ -132,6 +118,31 @@ function KpiCards({
       regulatoryMetricMap[metric.id] = metric
     })
   }
+  const explanationText = (() => {
+    if (!regulatoryData) return null
+    const highs = regulatoryData.metrics.filter((metric) => metric.note === 4).map((metric) => metric.label)
+    const lows = regulatoryData.metrics.filter((metric) => metric.note === 1).map((metric) => metric.label)
+    const lcMetric = regulatoryMetricMap.liquidez_corrente
+    const solvency = regulatoryData.solvency ?? {}
+    const parts = []
+    if (highs.length) {
+      parts.push(`Acima do Q3: ${highs.join(', ')}.`)
+    }
+    if (lows.length) {
+      parts.push(`Abaixo do Q1: ${lows.join(', ')}.`)
+    }
+    if (solvency?.classification) {
+      const lcValue =
+        lcMetric?.value !== null && lcMetric?.value !== undefined ? formatValue(lcMetric.value, lcMetric.format) : '—'
+      parts.push(`Solvência: ${solvency.classification} (LC ${lcValue}, bloco ${solvency.classification}).`)
+    }
+    if (regulatoryData.finalScore?.label) {
+      parts.push(
+        `Desempenho operacional: ${regulatoryData.finalScore.label} (resultado operacional e margem líquida considerados nos pesos regulatórios).`,
+      )
+    }
+    return parts.join(' ')
+  })()
 
   const handlePeriodChange = (value) => {
     if (!value) return
@@ -211,16 +222,7 @@ function KpiCards({
       </CardHeader>
       <CardContent>
         <div className="space-y-6">
-          <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <MetaItem label="Período" value={selectedPeriod?.periodo ?? `${selectedPeriod?.ano ?? '—'}T${selectedPeriod?.trimestre ?? '—'}`} />
-              <MetaItem label="Modalidade" value={snapshot?.operator?.modalidade ?? '—'} />
-              <MetaItem label="Porte" value={snapshot?.operator?.porte ?? '—'} />
-              <MetaItem label="Uniodonto" value={formatBoolean(snapshot?.operator?.uniodonto)} />
-              <MetaItem label="Ativa" value={formatBoolean(snapshot?.operator?.ativa)} />
-              <MetaItem label="Reg. ANS" value={snapshot?.operator?.reg_ans ?? snapshot?.operator?.regAns ?? '—'} />
-            </div>
-            <div className="rounded-lg border border-border/70 bg-background/40 p-4">
+          <div className="rounded-lg border border-border/70 bg-background/40 p-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Score geral ponderado</p>
@@ -239,7 +241,6 @@ function KpiCards({
                   : `${peerLabel ?? 'Sem comparação definida'}${peerCount ? ` (n=${peerCount})` : ''}`}
               </p>
             </div>
-          </div>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {indicatorSpec.map((metric) => {
               const operatorValue = snapshot?.operator?.[metric.key]
@@ -268,6 +269,13 @@ function KpiCards({
                 </div>
               )
             })}
+            {regulatoryData && explanationText ? (
+              <div className="sm:col-span-2 xl:col-span-3 2xl:col-span-4 rounded-lg border border-border/70 bg-muted/20 px-4 py-4 text-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Explicação técnica</p>
+                <p className="mt-1 text-foreground">{explanationText}</p>
+                <p className="mt-2 text-xs text-muted-foreground">{REGULATORY_BASE_TEXT}</p>
+              </div>
+            ) : null}
           </div>
         </div>
       </CardContent>

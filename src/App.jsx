@@ -1,6 +1,6 @@
 import './lib/charts'
 import { useState, useMemo } from 'react'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Download } from 'lucide-react'
 import { useDashboardController } from './hooks/useDashboardController'
 import AppHeader from './components/layout/AppHeader'
 import FiltersPanel from './components/filters/FiltersPanel'
@@ -13,6 +13,7 @@ import { Skeleton } from './components/ui/skeleton'
 import { Card, CardContent } from './components/ui/card'
 import { Button } from './components/ui/button'
 import { describeComparisonFilters } from './lib/comparisonModes'
+import ExportMenu from './components/dashboard/ExportMenu'
 
 function LoadingState() {
   return (
@@ -110,12 +111,9 @@ function App() {
     <div className="min-h-screen bg-muted/20">
       <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 pb-12 pt-4 sm:px-6 sm:pt-6">
         <AppHeader
-          onResetFilters={resetFilters}
           tableData={tableData}
           sourceInfo={sourceInfo}
           summary={kpis}
-          operatorName={operatorInsight?.operatorName}
-          operatorContext={operatorContext}
           onUploadDataset={replaceDataset}
           isUploading={isUploading}
           uploadFeedback={uploadFeedback}
@@ -134,7 +132,7 @@ function App() {
                   Fechar
                 </Button>
               </div>
-              <div className="flex-1 overflow-y-auto px-4 py-4">
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
                 <FiltersPanel
                   filters={filters}
                   options={options}
@@ -145,6 +143,15 @@ function App() {
                   comparisonFilters={comparisonFilters}
                   onComparisonFiltersChange={updateComparisonFilters}
                 />
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-4 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Exportar dados</p>
+                  <div className="mt-2">
+                    <ExportMenu tableData={tableData} />
+                  </div>
+                  <Button variant="outline" className="mt-3 w-full gap-2" onClick={() => window.print()}>
+                    <Download className="h-4 w-4" /> Exportar PDF
+                  </Button>
+                </div>
               </div>
               <div className="border-t p-4">
                 <Button className="w-full" onClick={() => setMobileFiltersOpen(false)}>
@@ -156,15 +163,26 @@ function App() {
         </div>
         <div className="grid gap-6 lg:grid-cols-[320px,minmax(0,1fr)] lg:items-start lg:gap-8">
           <div className="hidden min-w-0 lg:block">
-            <FiltersPanel
-              filters={filters}
-              options={options}
-              onChange={updateFilters}
-              onReset={resetFilters}
-              onOperatorSelect={applyOperatorSelection}
-              comparisonFilters={comparisonFilters}
-              onComparisonFiltersChange={updateComparisonFilters}
-            />
+            <div className="sticky top-6 space-y-4">
+              <FiltersPanel
+                filters={filters}
+                options={options}
+                onChange={updateFilters}
+                onReset={resetFilters}
+                onOperatorSelect={applyOperatorSelection}
+                comparisonFilters={comparisonFilters}
+                onComparisonFiltersChange={updateComparisonFilters}
+              />
+              <div className="rounded-xl border border-border/60 bg-muted/30 p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Exportar dados</p>
+                <div className="mt-2">
+                  <ExportMenu tableData={tableData} />
+                </div>
+                <Button variant="outline" className="mt-3 w-full gap-2" onClick={() => window.print()}>
+                  <Download className="h-4 w-4" /> Exportar PDF
+                </Button>
+              </div>
+            </div>
           </div>
           <div className="space-y-6 min-w-0">
             <KpiCards
