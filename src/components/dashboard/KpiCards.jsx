@@ -109,11 +109,6 @@ function KpiCards({ snapshot, fallbackSummary, onPeriodChange, period, peerLabel
                 <div key={metric.key} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 px-4 py-3">
                   <p className="text-xs font-medium uppercase text-muted-foreground">{metric.label}</p>
                   <p className="text-2xl font-semibold">{formatValue(value, metric.format)}</p>
-                  {metric.formula ? (
-                    <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
-                      Fórmula: <span className="text-foreground">{metric.formula}</span>
-                    </p>
-                  ) : null}
                 </div>
               )
             })}
@@ -136,12 +131,12 @@ function KpiCards({ snapshot, fallbackSummary, onPeriodChange, period, peerLabel
           {peerLabel ? (
             <p className="text-xs text-muted-foreground">
               {peerLabel}
-              {peerCount ? ` (n=${peerCount})` : ''}
-            </p>
-          ) : null}
-        </div>
-        {periodSelect}
-      </CardHeader>
+          {peerCount ? ` (n=${peerCount})` : ''}
+          </p>
+        ) : null}
+      </div>
+      {periodSelect}
+    </CardHeader>
       <CardContent>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {indicatorSpec.map((metric) => {
@@ -161,13 +156,8 @@ function KpiCards({ snapshot, fallbackSummary, onPeriodChange, period, peerLabel
                   {snapshot?.isLoading ? '...' : formatValue(operatorValue, metric.format)}
                 </p>
               <p className="text-xs text-muted-foreground">
-                {peerLabel ?? 'Média dos pares'}: {snapshot?.isLoading ? '...' : formatValue(peerValue, metric.format)}
+                Média filtrada: {snapshot?.isLoading ? '...' : formatValue(peerValue, metric.format)}
               </p>
-              {metric.formula ? (
-                <p className="text-[11px] leading-tight text-muted-foreground">
-                  Fórmula: <span className="text-foreground">{metric.formula}</span>
-                </p>
-              ) : null}
             </div>
           )
         })}

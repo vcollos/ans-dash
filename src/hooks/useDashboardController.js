@@ -5,6 +5,7 @@ import {
   fetchOperatorLatestSnapshot,
   fetchOperatorSnapshot,
   fetchKpiSummary,
+  fetchMonetarySummary,
   fetchRanking,
   fetchTrendSeries,
   fetchTableData,
@@ -67,6 +68,7 @@ export function useDashboardController() {
   const [options, setOptions] = useState(defaultOptions)
   const [periodOptions, setPeriodOptions] = useState([])
   const [kpis, setKpis] = useState(null)
+  const [monetarySummary, setMonetarySummary] = useState(null)
   const [rankingMetric, setRankingMetric] = useState(DEFAULT_RANKING_METRIC)
   const [rankingData, setRankingData] = useState({ rows: [], operatorRow: null })
   const [rankingOrder, setRankingOrder] = useState('DESC')
@@ -214,15 +216,17 @@ export function useDashboardController() {
               operatorName: operatorContext.name,
             }
           : {}
-        const [summary, ranking, table] = await Promise.all([
+        const [summary, ranking, table, monetary] = await Promise.all([
           fetchKpiSummary(summaryFilters),
           fetchRanking(rankingMetric, rankingFilters, 10, rankingOrder, { operatorName: operatorContext?.name ?? null }),
           fetchTableData(resolvedFilters, tableOptions),
+          fetchMonetarySummary(summaryFilters),
         ])
         if (cancelled) return
         setKpis(summary)
         setRankingData(ranking)
         setTableData(table)
+        setMonetarySummary(monetary)
       } catch (err) {
         if (cancelled) return
         console.error('[Dashboard] Query error', err)
@@ -307,7 +311,18 @@ export function useDashboardController() {
       setFilters((prev) => ({
         ...prev,
         search: operatorName,
+        modalidades: latest.modalidade ? [latest.modalidade] : [],
+        portes: latest.porte ? [latest.porte] : [],
+        uniodonto: typeof latest.uniodonto === 'boolean' ? latest.uniodonto : null,
+        ativa: typeof latest.ativa === 'boolean' ? latest.ativa : null,
       }))
+      const nextComparison = sanitizeComparisonFilters({
+        modalidades: latest.modalidade ? [latest.modalidade] : undefined,
+        portes: latest.porte ? [latest.porte] : undefined,
+        uniodonto: typeof latest.uniodonto === 'boolean' ? [latest.uniodonto] : undefined,
+        ativa: typeof latest.ativa === 'boolean' ? [latest.ativa] : undefined,
+      })
+      setComparisonFilters(nextComparison)
       setOperatorContext({
         name: operatorName,
         modalidade: latest.modalidade ?? null,
@@ -418,5 +433,6 @@ export function useDashboardController() {
     setOperatorPeriod,
     comparisonFilters,
     updateComparisonFilters,
+    monetarySummary,
   }
 }

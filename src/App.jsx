@@ -83,6 +83,7 @@ function App() {
     operatorContext,
     comparisonFilters,
     updateComparisonFilters,
+    monetarySummary,
   } = useDashboardController()
 
   const comparisonLabel = useMemo(() => describeComparisonFilters(comparisonFilters), [comparisonFilters])
@@ -184,7 +185,7 @@ function App() {
                 operatorName={operatorInsight?.operatorName}
                 comparisonLabel={comparisonLabel}
               />
-              <MonetarySummary data={kpis} isLoading={isQuerying} className="h-full" />
+              <MonetarySummary summary={monetarySummary} isLoading={isQuerying} className="h-full" />
             </div>
             <IndicatorTrendChart
               data={trendSeries.rows}

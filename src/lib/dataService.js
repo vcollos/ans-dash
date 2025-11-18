@@ -1,4 +1,10 @@
 import { metricFormulas, metricSql } from './metricFormulas'
+import {
+  applyDerivedMonetaryValues,
+  monetaryIndicatorColumnMap,
+  monetaryIndicatorColumns,
+  monetaryIndicatorPhysicalColumns,
+} from './monetaryIndicators'
 
 export const DETAIL_TABLE_FIELDS = [
   'nome_operadora',
@@ -33,10 +39,25 @@ export const DETAIL_TABLE_FIELDS = [
 ]
 
 const DEFAULT_VIEW = import.meta.env?.VITE_DATASET_VIEW ?? 'indicadores_curados'
+const VIEW_IDENTIFIER = (() => {
+  const raw = DEFAULT_VIEW.replace(/"/g, '')
+  if (raw.includes('.')) {
+    const [schema, table] = raw.split('.')
+    return {
+      schema: schema && schema.trim().length ? schema.trim() : 'public',
+      table: table && table.trim().length ? table.trim() : null,
+    }
+  }
+  return {
+    schema: 'public',
+    table: raw.trim(),
+  }
+})()
 let cachedViewColumns = null
 
 const sanitizeList = (values = []) => values.filter((value) => value !== null && value !== undefined && value !== '')
 const sanitizeSql = (value) => (value ? value.replaceAll("'", "''") : value)
+const quoteIdentifier = (value) => `"${String(value).replace(/"/g, '""')}"`
 
 function buildWhereClause(filters = {}) {
   const clauses = []
@@ -102,6 +123,33 @@ function getWhereExpression(filters = {}) {
   return clauses.join(' AND ')
 }
 
+function resolveMonetaryColumnSource(column, availableColumns = []) {
+  const candidates = monetaryIndicatorColumnMap[column] ?? [column]
+  return candidates.find((candidate) => availableColumns.includes(candidate))
+}
+
+function buildMonetaryAggregateFragments(availableColumns = []) {
+  return monetaryIndicatorPhysicalColumns.map((column) => {
+    const source = resolveMonetaryColumnSource(column, availableColumns)
+    const expression = source ? `COALESCE(base.${quoteIdentifier(source)}, 0)` : 'NULL::numeric'
+    return `SUM(${expression}) AS ${quoteIdentifier(column)}`
+  })
+}
+
+function buildMonetarySelectList(alias, prefix = '') {
+  if (!monetaryIndicatorPhysicalColumns.length) return ''
+  return monetaryIndicatorPhysicalColumns
+    .map((column) => `${alias}.${quoteIdentifier(column)} AS ${quoteIdentifier(`${prefix}${column}`)}`)
+    .join(',\n      ')
+}
+
+const computeDeltaPercent = (current, previous) => {
+  if (current === null || current === undefined) return null
+  if (previous === null || previous === undefined || previous === 0) return null
+  const delta = ((current - previous) / Math.abs(previous)) * 100
+  return Number.isFinite(delta) ? delta : null
+}
+
 async function runQuery(sql) {
   const response = await fetch('/api/query', {
     method: 'POST',
@@ -122,10 +170,17 @@ async function getViewColumns() {
   if (cachedViewColumns) {
     return cachedViewColumns
   }
+  const sampleRows = await runQuery(`SELECT * FROM ${DEFAULT_VIEW} LIMIT 1`)
+  if (sampleRows[0]) {
+    cachedViewColumns = Object.keys(sampleRows[0])
+    return cachedViewColumns
+  }
+  const schema = sanitizeSql(VIEW_IDENTIFIER.schema ?? 'public')
+  const table = sanitizeSql(VIEW_IDENTIFIER.table ?? DEFAULT_VIEW)
   const rows = await runQuery(`
     SELECT column_name
     FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = '${DEFAULT_VIEW}'
+    WHERE lower(table_schema) = lower('${schema}') AND lower(table_name) = lower('${table}')
     ORDER BY ordinal_position
   `)
   cachedViewColumns = rows.map((row) => row.column_name)
@@ -267,6 +322,101 @@ export async function fetchKpiSummary(filters) {
     previous = await summarizePeriod(previousFilters)
   }
   return { ...current, previousPeriod: previous }
+}
+
+function extractMonetaryValues(row) {
+  const baseValues = {}
+  monetaryIndicatorPhysicalColumns.forEach((column) => {
+    baseValues[column] = row?.[column] === null || row?.[column] === undefined ? null : Number(row[column])
+  })
+  applyDerivedMonetaryValues(baseValues)
+  const resolved = {}
+  monetaryIndicatorColumns.forEach((column) => {
+    resolved[column] = baseValues[column] ?? null
+  })
+  return resolved
+}
+
+async function queryMonetarySnapshot(filters, availableColumns, options = {}) {
+  const { whereClause } = buildFilterClauses(filters, options)
+  const aggregateFragments = buildMonetaryAggregateFragments(availableColumns)
+  const selectList = buildMonetarySelectList('latest')
+  const query = `
+    WITH base AS (
+      SELECT *
+      FROM ${DEFAULT_VIEW}
+      ${whereClause}
+    ), aggregated AS (
+      SELECT
+        periodo_id,
+        periodo,
+        ano,
+        trimestre,
+        ${aggregateFragments.join(',\n        ')}
+      FROM base
+      GROUP BY periodo_id, periodo, ano, trimestre
+    ), latest AS (
+      SELECT *
+      FROM aggregated
+      ORDER BY periodo_id DESC NULLS LAST, ano DESC, trimestre DESC
+      LIMIT 1
+    )
+    SELECT
+      latest.periodo_id,
+      latest.periodo,
+      latest.ano,
+      latest.trimestre
+      ${selectList ? `,\n      ${selectList}` : ''}
+    FROM latest
+  `
+  const rows = await runQuery(query)
+  return rows[0] ?? null
+}
+
+export async function fetchMonetarySummary(filters = {}) {
+  const availableColumns = await getViewColumns()
+  const currentRow = await queryMonetarySnapshot(filters, availableColumns)
+  if (!currentRow) return null
+  const currentValues = extractMonetaryValues(currentRow)
+  let previousRow = null
+  if (typeof currentRow.ano === 'number' && typeof currentRow.trimestre === 'number' && currentRow.ano > 0) {
+    const previousFilters = {
+      ...filters,
+      anos: [currentRow.ano - 1],
+      trimestres: [currentRow.trimestre],
+    }
+    previousRow = await queryMonetarySnapshot(previousFilters, availableColumns, { latestOnlyDefault: false })
+  }
+  const previousComputedValues = previousRow ? extractMonetaryValues(previousRow) : null
+  const values = {}
+  const previousValues = {}
+  const deltas = {}
+  monetaryIndicatorColumns.forEach((column) => {
+    values[column] = currentValues[column] ?? null
+    previousValues[column] = previousComputedValues?.[column] ?? null
+    deltas[column] = computeDeltaPercent(values[column], previousValues[column])
+  })
+  return {
+    period: currentRow.periodo
+      ? {
+          label: currentRow.periodo,
+          ano: currentRow.ano,
+          trimestre: currentRow.trimestre,
+          periodo_id: currentRow.periodo_id ?? null,
+        }
+      : null,
+    previousPeriod:
+      previousRow && previousRow.periodo
+        ? {
+            label: previousRow.periodo,
+            ano: previousRow.ano,
+            trimestre: previousRow.trimestre,
+          }
+        : null,
+    values,
+    previousValues,
+    deltas,
+  }
 }
 
 export async function fetchTrendSeries(metric, filters, comparisonContext = null) {

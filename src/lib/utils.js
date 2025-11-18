@@ -7,6 +7,7 @@ export function cn(...inputs) {
 
 const RECEITA_PATTERNS = /(receita|cr[eé]dito|resultado liquido|resultado líquido|outras receitas)/i
 const DESPESA_PATTERNS = /(despesa|evento assistencial|evento a liquidar|provis[aã]o)/i
+const DESPESA_STRICT_PATTERNS = /(impostos|participa[cç][aã]o|69|apura[cç][aã]o do resultado)/i
 const ATIVO_PATTERNS = /(ativo|patrim[oô]nio|\bpl\b|capital|ativos garantidores)/i
 const PASSIVO_PATTERNS = /(passivo|obriga[cç][aã]o|provis[aã]o)/i
 
@@ -30,10 +31,15 @@ export function getVariationColor(indicador, variacao) {
     .toLowerCase()
     .trim()
 
-  if (RECEITA_PATTERNS.test(name)) {
+  const isReceita = RECEITA_PATTERNS.test(name) && !DESPESA_PATTERNS.test(name)
+  if (isReceita) {
     return normalizedNumber > 0 ? 'text-emerald-600' : 'text-red-600'
   }
-  if (DESPESA_PATTERNS.test(name)) {
+  const isDespesa = DESPESA_PATTERNS.test(name)
+  if (isDespesa) {
+    if (DESPESA_STRICT_PATTERNS.test(name)) {
+      return normalizedNumber > 0 ? 'text-red-600' : 'text-emerald-600'
+    }
     return normalizedNumber > 0 ? 'text-red-600' : 'text-emerald-600'
   }
   if (ATIVO_PATTERNS.test(name)) {
