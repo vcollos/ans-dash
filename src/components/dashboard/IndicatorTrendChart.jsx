@@ -66,6 +66,7 @@ function IndicatorTrendChart({
   }, [data])
 
   const hasData = chartData.some((item) => item.primary !== null || item.comparison !== null)
+  const hasComparisonSeries = chartData.some((item) => item.comparison !== null)
   const chartConfig = useMemo(
     () => ({
       primary: {
@@ -104,7 +105,7 @@ function IndicatorTrendChart({
         <div className="space-y-4">
           <div className="flex flex-wrap gap-4">
             <LegendItem label={chartConfig.primary.label} color="hsl(var(--chart-1))" />
-            <LegendItem label={chartConfig.comparison.label} color="hsl(var(--chart-2))" />
+            {hasComparisonSeries ? <LegendItem label={chartConfig.comparison.label} color="hsl(var(--chart-2))" /> : null}
           </div>
           <div className="relative">
             {isLoading ? (
@@ -153,16 +154,18 @@ function IndicatorTrendChart({
                       />
                     }
                   />
-                  <Area
-                    type="monotone"
-                    dataKey="comparison"
-                    stroke="var(--color-comparison)"
-                    strokeWidth={2}
-                    fill={`url(#fill-comparison-${chartId})`}
-                    dot={false}
-                    connectNulls
-                    name={chartConfig.comparison.label}
-                  />
+                  {hasComparisonSeries ? (
+                    <Area
+                      type="monotone"
+                      dataKey="comparison"
+                      stroke="var(--color-comparison)"
+                      strokeWidth={2}
+                      fill={`url(#fill-comparison-${chartId})`}
+                      dot={false}
+                      connectNulls
+                      name={chartConfig.comparison.label}
+                    />
+                  ) : null}
                   <Area
                     type="monotone"
                     dataKey="primary"

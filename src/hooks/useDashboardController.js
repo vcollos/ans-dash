@@ -249,10 +249,13 @@ export function useDashboardController() {
     setTrendSeries((prev) => ({ ...prev, isLoading: true }))
     async function loadTrend() {
       try {
-        const series = await fetchTrendSeries(trendMetric, resolvedFilters, {
-          operatorName: operatorContext?.name ?? null,
-          filters: comparisonFilterQuery,
-        })
+        const trendComparison = operatorContext?.name
+          ? {
+              operatorName: operatorContext.name,
+              filters: comparisonFilterQuery,
+            }
+          : null
+        const series = await fetchTrendSeries(trendMetric, filters, trendComparison)
         if (cancelled) return
         setTrendSeries({ rows: series ?? [], isLoading: false })
       } catch (err) {
@@ -266,7 +269,7 @@ export function useDashboardController() {
     return () => {
       cancelled = true
     }
-  }, [status, trendMetric, resolvedFilters, operatorContext?.name, comparisonFilterQuery])
+  }, [status, trendMetric, filters, operatorContext?.name, comparisonFilterQuery])
 
   useEffect(() => {
     if (!operatorContext?.name) {
