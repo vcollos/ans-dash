@@ -9,7 +9,7 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/projetos/indicadores/ans-dashboard
 Environment=NODE_ENV=production
 Environment=SERVER_PORT=4000
-ExecStart=/usr/bin/env npm run dev
+ExecStart=/usr/bin/env bash /home/ubuntu/projetos/indicadores/ans-dashboard/scripts/start-dashboard.sh
 Restart=always
 RestartSec=5
 

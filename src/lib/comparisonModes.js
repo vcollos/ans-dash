@@ -43,13 +43,33 @@ function ensureSelection(values, options) {
   return sanitized.length ? sanitized : allowedValues
 }
 
+function sanitizeBooleanOptions(values, options, { allowEmpty = false } = {}) {
+  if (!Array.isArray(values)) {
+    return allowEmpty ? [] : options.map((option) => option.value)
+  }
+  const allowedValues = options.map((option) => option.value)
+  const sanitized = values.filter((value) => allowedValues.includes(value))
+  if (!sanitized.length && !allowEmpty) {
+    return options.map((option) => option.value)
+  }
+  return sanitized
+}
+
 export function sanitizeComparisonFilters(filters = {}) {
-  return {
+  const sanitized = {
     modalidades: ensureSelection(filters.modalidades, MODALITY_OPTIONS),
     portes: ensureSelection(filters.portes, PORTE_OPTIONS),
-    uniodonto: ensureSelection(filters.uniodonto, BOOLEAN_OPTIONS.uniodonto),
+    uniodonto: sanitizeBooleanOptions(filters.uniodonto, BOOLEAN_OPTIONS.uniodonto, { allowEmpty: true }),
     ativa: ensureSelection(filters.ativa, BOOLEAN_OPTIONS.ativa),
   }
+  const hasGroup = sanitized.modalidades.includes('Odontologia de Grupo')
+  const hasCoop = sanitized.modalidades.includes('Cooperativa odontológica')
+  if (hasGroup) {
+    sanitized.uniodonto = BOOLEAN_OPTIONS.uniodonto.map((option) => option.value)
+  } else if (!hasCoop) {
+    sanitized.uniodonto = []
+  }
+  return sanitized
 }
 
 function isFullSelection(key, values) {

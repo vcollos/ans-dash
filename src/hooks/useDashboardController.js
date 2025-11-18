@@ -7,20 +7,25 @@ import {
   fetchKpiSummary,
   fetchMonetarySummary,
   fetchRanking,
+  fetchRegulatoryScoreRanking,
   fetchTrendSeries,
   fetchTableData,
   persistDatasetFile,
   fetchAvailablePeriods,
   fetchRegulatoryReport,
+  fetchRegulatoryScoreForFilters,
 } from '../lib/dataService'
 import { DEFAULT_COMPARISON_FILTERS, comparisonFiltersToQuery, sanitizeComparisonFilters } from '../lib/comparisonModes'
 import { metricFormulas } from '../lib/metricFormulas'
 import { evaluateRegulatoryScore } from '../lib/regulatoryScore'
 
 const rankingCatalog = metricFormulas.filter((metric) => metric.showInCards)
-const DEFAULT_RANKING_METRIC = rankingCatalog[0]?.id ?? 'resultado_liquido'
+const DEFAULT_RANKING_METRIC = 'regulatory_score'
 
-const getMetricTrend = (metricId) => rankingCatalog.find((metric) => metric.id === metricId)?.trend ?? 'higher'
+const getMetricTrend = (metricId) => {
+  if (metricId === 'regulatory_score') return 'higher'
+  return rankingCatalog.find((metric) => metric.id === metricId)?.trend ?? 'higher'
+}
 const getMetricOrder = (metricId) => (getMetricTrend(metricId) === 'lower' ? 'ASC' : 'DESC')
 
 const defaultFilters = {
@@ -128,6 +133,24 @@ export function useDashboardController() {
     }
     return nextFilters
   }, [filters, operatorPeriod?.trimestre, operatorContext?.name])
+
+  const operatorPeerFilters = useMemo(() => {
+    if (!operatorContext?.name) return null
+    const peerFilters = {}
+    if (operatorContext?.modalidade) {
+      peerFilters.modalidades = [operatorContext.modalidade]
+    }
+    if (operatorContext?.porte) {
+      peerFilters.portes = [operatorContext.porte]
+    }
+    if (typeof operatorContext?.uniodonto === 'boolean') {
+      peerFilters.uniodonto = [operatorContext.uniodonto]
+    }
+    if (typeof operatorContext?.ativa === 'boolean') {
+      peerFilters.ativa = [operatorContext.ativa]
+    }
+    return peerFilters
+  }, [operatorContext?.name, operatorContext?.modalidade, operatorContext?.porte, operatorContext?.uniodonto, operatorContext?.ativa])
 
   const applyComparisonFilters = useCallback(
     (baseFilters) => {
@@ -244,9 +267,15 @@ export function useDashboardController() {
               operatorName: operatorContext.name,
             }
           : {}
+        const rankingPromise =
+          rankingMetricState === 'regulatory_score'
+            ? fetchRegulatoryScoreRanking(rankingFilters, 10, rankingOrder, { operatorName: operatorContext?.name ?? null })
+            : fetchRanking(rankingMetricState, rankingFilters, 10, rankingOrder, {
+                operatorName: operatorContext?.name ?? null,
+              })
         const [summary, ranking, table, monetary] = await Promise.all([
           fetchKpiSummary(summaryFilters),
-          fetchRanking(rankingMetricState, rankingFilters, 10, rankingOrder, { operatorName: operatorContext?.name ?? null }),
+          rankingPromise,
           fetchTableData(resolvedFilters, tableOptions),
           fetchMonetarySummary(summaryFilters),
         ])
@@ -301,30 +330,34 @@ export function useDashboardController() {
 
   useEffect(() => {
     if (status !== 'ready') return
-    if (!operatorContext?.name || !operatorPeriod?.ano || !operatorPeriod?.trimestre) {
-      setRegulatoryScore({ data: null, isLoading: false, error: null })
-      return
-    }
     let cancelled = false
     setRegulatoryScore((prev) => ({ ...prev, isLoading: true, error: null }))
     async function loadRegulatoryScore() {
       try {
-        const operatorFilters = {
-          ...resolvedFilters,
-          anos: [operatorPeriod.ano],
-          trimestres: [operatorPeriod.trimestre],
-          operatorName: operatorContext.name,
-        }
+        let response = null
+        if (operatorContext?.name && operatorPeriod?.ano && operatorPeriod?.trimestre) {
+          const operatorFilters = {
+            ...resolvedFilters,
+            anos: [operatorPeriod.ano],
+            trimestres: [operatorPeriod.trimestre],
+            operatorName: operatorContext.name,
+          }
         if (operatorContext?.regAns) {
           operatorFilters.regAns = [operatorContext.regAns]
         }
-        const peerBaseFilters = {
-          ...(operatorContext?.name ? { ...resolvedFilters, search: '' } : resolvedFilters),
+        const peerFiltersForScore = {
+          ...(operatorPeerFilters ?? {}),
           anos: [operatorPeriod.ano],
           trimestres: [operatorPeriod.trimestre],
         }
-        const peerFilters = applyComparisonFilters(peerBaseFilters)
-        const response = await fetchRegulatoryReport(operatorFilters, peerFilters)
+        response = await fetchRegulatoryReport(operatorFilters, peerFiltersForScore)
+        } else {
+          const baseFilters = applyComparisonFilters({
+            anos: resolvedFilters.anos ?? [],
+            trimestres: resolvedFilters.trimestres ?? [],
+          })
+          response = await fetchRegulatoryScoreForFilters(baseFilters, baseFilters)
+        }
         if (cancelled) return
         setRegulatoryScore({
           data: evaluateRegulatoryScore(response),
@@ -349,6 +382,7 @@ export function useDashboardController() {
     operatorPeriod?.trimestre,
     resolvedFilters,
     applyComparisonFilters,
+    operatorPeerFilters,
   ])
 
   useEffect(() => {
@@ -406,7 +440,8 @@ export function useDashboardController() {
         name: operatorName,
         modalidade: latest.modalidade ?? null,
         porte: latest.porte ?? null,
-        uniodonto: latest.uniodonto ?? null,
+        uniodonto: typeof latest.uniodonto === 'boolean' ? latest.uniodonto : null,
+        ativa: typeof latest.ativa === 'boolean' ? latest.ativa : null,
         regAns: latest.reg_ans ?? null,
       })
       setOperatorPeriod({ ano: latest.ano, trimestre: latest.trimestre, periodo: latest.periodo ?? `${latest.ano}T${latest.trimestre}` })

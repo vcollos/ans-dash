@@ -6,13 +6,20 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from '../ui/chart'
 import { metricFormulas } from '../../lib/metricFormulas'
 import { formatNumber, formatPercent, toNumber } from '../../lib/utils'
 
-const metricOptions = metricFormulas
-  .filter((metric) => metric.showInCards)
-  .map((metric) => ({
-    id: metric.id,
-    label: metric.label,
-    format: metric.format,
-  }))
+const metricOptions = [
+  {
+    id: 'regulatory_score',
+    label: 'Score regulatório ponderado',
+    format: 'score',
+  },
+  ...metricFormulas
+    .filter((metric) => metric.showInCards)
+    .map((metric) => ({
+      id: metric.id,
+      label: metric.label,
+      format: metric.format,
+    })),
+]
 
 const OPERATOR_COLOR = '#550039'
 const FILTER_AVERAGE_COLOR = '#e1ff7b'
@@ -20,6 +27,9 @@ const FILTER_AVERAGE_COLOR = '#e1ff7b'
 function formatMetricValue(value, format, { compact = false } = {}) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return '—'
+  }
+  if (format === 'score') {
+    return formatNumber(value, { minimumFractionDigits: compact ? 1 : 2, maximumFractionDigits: 2 })
   }
   if (format === 'percent') {
     return formatPercent(value, compact ? 0 : 2)

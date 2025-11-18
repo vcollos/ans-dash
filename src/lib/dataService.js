@@ -10,6 +10,7 @@ import {
   REGULATORY_PERCENTILE_KEYS,
   REGULATORY_PERCENTILES,
   getIndicatorSql,
+  evaluateRegulatoryScore,
 } from './regulatoryScore'
 
 export const DETAIL_TABLE_FIELDS = [
@@ -64,6 +65,34 @@ let cachedViewColumns = null
 const sanitizeList = (values = []) => values.filter((value) => value !== null && value !== undefined && value !== '')
 const sanitizeSql = (value) => (value ? value.replaceAll("'", "''") : value)
 const quoteIdentifier = (value) => `"${String(value).replace(/"/g, '""')}"`
+
+function buildRegulatoryIndicatorProjection({ aggregate = false } = {}) {
+  return REGULATORY_INDICATORS.map((indicator) => {
+    const expression = getIndicatorSql(indicator.id)
+    if (!expression) {
+      throw new Error(`Sem expressão SQL para indicador ${indicator.id}`)
+    }
+    const trimmed = expression.trim()
+    if (aggregate) {
+      return `AVG(${trimmed}) AS ${indicator.id}`
+    }
+    return `${trimmed} AS ${indicator.id}`
+  })
+}
+
+function buildRegulatoryPercentileFragments(baseAlias = 'peer_base') {
+  const fragments = []
+  REGULATORY_INDICATORS.forEach((indicator) => {
+    const column = `${baseAlias}.${indicator.id}`
+    REGULATORY_PERCENTILE_KEYS.forEach((key) => {
+      const percentileValue = REGULATORY_PERCENTILES[key]
+      fragments.push(
+        `percentile_cont(${percentileValue}) WITHIN GROUP (ORDER BY ${column}) FILTER (WHERE ${column} IS NOT NULL) AS ${indicator.id}_${key}`,
+      )
+    })
+  })
+  return fragments
+}
 
 function buildWhereClause(filters = {}) {
   const clauses = []
@@ -427,24 +456,8 @@ export async function fetchMonetarySummary(filters = {}) {
 
 export async function fetchRegulatoryReport(operatorFilters = {}, peerFilters = {}) {
   if (!operatorFilters?.operatorName) return null
-  const indicatorSelects = REGULATORY_INDICATORS.map((indicator) => {
-    const expression = getIndicatorSql(indicator.id)
-    if (!expression) {
-      throw new Error(`Sem expressão SQL para indicador ${indicator.id}`)
-    }
-    return `${expression.trim()} AS ${indicator.id}`
-  })
-  const indicatorProjection = indicatorSelects.join(',\n        ')
-  const percentileFragments = []
-  REGULATORY_INDICATORS.forEach((indicator) => {
-    const column = `peer_base.${indicator.id}`
-    REGULATORY_PERCENTILE_KEYS.forEach((key) => {
-      const percentileValue = REGULATORY_PERCENTILES[key]
-      percentileFragments.push(
-        `percentile_cont(${percentileValue}) WITHIN GROUP (ORDER BY ${column}) FILTER (WHERE ${column} IS NOT NULL) AS ${indicator.id}_${key}`,
-      )
-    })
-  })
+  const indicatorProjection = buildRegulatoryIndicatorProjection().join(',\n        ')
+  const percentileFragments = buildRegulatoryPercentileFragments()
   const { whereClause: operatorWhereClause } = buildFilterClauses(operatorFilters, { latestOnlyDefault: false })
   if (!operatorWhereClause) {
     return null
@@ -492,7 +505,75 @@ export async function fetchRegulatoryReport(operatorFilters = {}, peerFilters = 
   }
 }
 
+export async function fetchRegulatoryScoreForFilters(baseFilters = {}, peerFilters = {}) {
+  const indicatorProjection = buildRegulatoryIndicatorProjection().join(',\n        ')
+  const aggregateProjection = buildRegulatoryIndicatorProjection({ aggregate: true }).join(',\n        ')
+  const percentileFragments = buildRegulatoryPercentileFragments()
+  const { whereClause: baseWhereClause } = buildFilterClauses(baseFilters, { latestOnlyDefault: false })
+  const { whereClause: peerWhereClause } = buildFilterClauses(peerFilters, { latestOnlyDefault: false })
+  const query = `
+    WITH aggregate_operator AS (
+      SELECT
+        'Média dos filtros' AS nome_operadora,
+        NULL::text AS reg_ans,
+        NULL::int AS ano,
+        NULL::int AS trimestre,
+        NULL::text AS periodo
+        ${aggregateProjection ? `,\n        ${aggregateProjection}` : ''}
+      FROM ${DEFAULT_VIEW}
+      ${baseWhereClause ?? ''}
+    ), peer_base AS (
+      SELECT
+        ${indicatorProjection}
+      FROM ${DEFAULT_VIEW}
+      ${peerWhereClause ?? ''}
+    ), peer_stats AS (
+      SELECT
+        COUNT(*) AS peer_total
+        ${percentileFragments.length ? `,\n        ${percentileFragments.join(',\n        ')}` : ''}
+      FROM peer_base
+    )
+    SELECT
+      row_to_json(aggregate_operator) AS operator,
+      row_to_json(peer_stats) AS peers
+    FROM aggregate_operator
+    CROSS JOIN peer_stats
+  `
+  const rows = await runQuery(query)
+  const payload = rows[0]
+  if (!payload?.operator) {
+    return null
+  }
+  return {
+    operator: payload.operator,
+    peers: payload.peers,
+  }
+}
+
+async function fetchRegulatoryPeerStats(filters = {}) {
+  const indicatorProjection = buildRegulatoryIndicatorProjection().join(',\n        ')
+  const percentileFragments = buildRegulatoryPercentileFragments()
+  const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
+  const query = `
+    WITH peer_base AS (
+      SELECT
+        ${indicatorProjection}
+      FROM ${DEFAULT_VIEW}
+      ${whereClause ?? ''}
+    )
+    SELECT
+      COUNT(*) AS peer_total
+      ${percentileFragments.length ? `,\n        ${percentileFragments.join(',\n        ')}` : ''}
+    FROM peer_base
+  `
+  const rows = await runQuery(query)
+  return rows[0] ?? null
+}
+
 export async function fetchTrendSeries(metric, filters, comparisonContext = null) {
+  if (metric === 'regulatory_score') {
+    return fetchRegulatoryScoreTrend(filters, comparisonContext)
+  }
   const sqlMetric = metricSql[metric ?? 'sinistralidade_pct'] ?? metricSql.sinistralidade_pct
   if (comparisonContext?.operatorName) {
     const sanitizedName = sanitizeSql(comparisonContext.operatorName)
@@ -573,6 +654,124 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
     ORDER BY ano, trimestre
   `
   return runQuery(query)
+}
+
+async function fetchRegulatoryScoreTrend(filters, comparisonContext = null) {
+  if (comparisonContext?.operatorName) {
+    const sanitizedName = sanitizeSql(comparisonContext.operatorName)
+    const indicatorProjection = buildRegulatoryIndicatorProjection().join(',\n        ')
+    const aggregateProjection = buildRegulatoryIndicatorProjection({ aggregate: true }).join(',\n        ')
+    const baseFilter = buildWhereClause({ ...filters, search: '' })
+    const operatorFilter = baseFilter ? baseFilter.replace(/^WHERE\s+/i, '') : ''
+    const operatorQuery = `
+      SELECT
+        ano,
+        trimestre,
+        periodo
+        ${indicatorProjection ? `,\n        ${indicatorProjection}` : ''}
+      FROM ${DEFAULT_VIEW}
+      WHERE nome_operadora = '${sanitizedName}'
+      ${operatorFilter ? ` AND ${operatorFilter}` : ''}
+      ORDER BY ano, trimestre
+    `
+    const operatorRows = await runQuery(operatorQuery)
+    if (!operatorRows.length) {
+      return []
+    }
+    const comparisonFilters = {
+      ...(comparisonContext.filters ?? {}),
+    }
+    const yearList = sanitizeList(filters?.anos)
+    const quarterList = sanitizeList(filters?.trimestres)
+    if (yearList.length) {
+      comparisonFilters.anos = yearList
+    }
+    if (quarterList.length) {
+      comparisonFilters.trimestres = quarterList
+    }
+    const { whereClause: comparisonWhereClause } = buildFilterClauses(comparisonFilters, { latestOnlyDefault: false })
+    const peersQuery = `
+      SELECT
+        ano,
+        trimestre,
+        periodo
+        ${aggregateProjection ? `,\n        ${aggregateProjection}` : ''}
+      FROM ${DEFAULT_VIEW}
+      ${comparisonWhereClause ?? ''}
+      GROUP BY ano, trimestre, periodo
+      ORDER BY ano, trimestre
+    `
+    const peerRows = await runQuery(peersQuery)
+    const peerStats = await fetchRegulatoryPeerStats(comparisonFilters)
+    const seriesMap = new Map()
+    operatorRows.forEach((row) => {
+      const evaluation = evaluateRegulatoryScore({ operator: row, peers: peerStats })
+      const key = `${row.ano}-${row.trimestre}`
+      const entry =
+        seriesMap.get(key) ??
+        {
+          ano: row.ano,
+          trimestre: row.trimestre,
+          periodo: row.periodo,
+          operador_valor: null,
+          pares_valor: null,
+        }
+      entry.operador_valor = evaluation?.finalScore?.value ?? null
+      seriesMap.set(key, entry)
+    })
+    peerRows.forEach((row) => {
+      const evaluation = evaluateRegulatoryScore({ operator: row, peers: peerStats })
+      const key = `${row.ano}-${row.trimestre}`
+      const entry =
+        seriesMap.get(key) ??
+        {
+          ano: row.ano,
+          trimestre: row.trimestre,
+          periodo: row.periodo,
+          operador_valor: null,
+          pares_valor: null,
+        }
+      entry.pares_valor = evaluation?.finalScore?.value ?? null
+      if (!entry.periodo) {
+        entry.periodo = row.periodo
+      }
+      seriesMap.set(key, entry)
+    })
+    return Array.from(seriesMap.values()).sort((a, b) => {
+      if (a.ano === b.ano) {
+        return a.trimestre - b.trimestre
+      }
+      return a.ano - b.ano
+    })
+  }
+  const aggregateProjection = buildRegulatoryIndicatorProjection({ aggregate: true }).join(',\n        ')
+  const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
+  const query = `
+    SELECT
+      ano,
+      trimestre,
+      periodo
+      ${aggregateProjection ? `,\n        ${aggregateProjection}` : ''}
+    FROM ${DEFAULT_VIEW}
+    ${whereClause ?? ''}
+    GROUP BY ano, trimestre, periodo
+    ORDER BY ano, trimestre
+  `
+  const rows = await runQuery(query)
+  if (!rows.length) {
+    return []
+  }
+  const peerStats = await fetchRegulatoryPeerStats(filters)
+  return rows.map((row) => {
+    const evaluation = evaluateRegulatoryScore({ operator: row, peers: peerStats })
+    return {
+      ano: row.ano,
+      trimestre: row.trimestre,
+      periodo: row.periodo,
+      operador_valor: evaluation?.finalScore?.value ?? null,
+      pares_valor: null,
+    }
+  })
 }
 
 export async function fetchOperatorSnapshot(nomeOperadora, targetPeriod = {}, comparisonFilters = {}) {
@@ -687,6 +886,59 @@ export async function fetchRanking(metric, filters, limit = 10, order = 'DESC', 
     operatorRow = result[0] ?? null
   }
   return { rows, operatorRow }
+}
+
+export async function fetchRegulatoryScoreRanking(filters, limit = 10, order = 'DESC', options = {}) {
+  const indicatorProjection = buildRegulatoryIndicatorProjection().join(',\n      ')
+  const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
+  const query = `
+    SELECT
+      nome_operadora,
+      reg_ans,
+      porte,
+      modalidade,
+      qt_beneficiarios,
+      ano,
+      trimestre,
+      periodo
+      ${indicatorProjection ? `,\n      ${indicatorProjection}` : ''}
+    FROM ${DEFAULT_VIEW}
+    ${whereClause ?? ''}
+  `
+  const rows = await runQuery(query)
+  if (!rows.length) {
+    return { rows: [], operatorRow: null }
+  }
+  const peerStats = await fetchRegulatoryPeerStats(filters)
+  const scoredRows = rows
+    .map((row) => {
+      const evaluation = evaluateRegulatoryScore({ operator: row, peers: peerStats })
+      return {
+        ...row,
+        valor: evaluation?.finalScore?.value ?? null,
+        score_label: evaluation?.finalScore?.label ?? 'SEM DADO',
+      }
+    })
+    .filter((row) => row.valor !== null)
+
+  scoredRows.sort((a, b) => {
+    const aVal = a.valor ?? (order === 'ASC' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY)
+    const bVal = b.valor ?? (order === 'ASC' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY)
+    if (aVal === bVal) return 0
+    if (order === 'ASC') {
+      return aVal > bVal ? 1 : -1
+    }
+    return aVal > bVal ? -1 : 1
+  })
+  scoredRows.forEach((row, index) => {
+    row.rank_position = index + 1
+  })
+  const operatorName = options.operatorName ?? null
+  const operatorRow = operatorName ? scoredRows.find((row) => row.nome_operadora === operatorName) ?? null : null
+  return {
+    rows: scoredRows.slice(0, limit),
+    operatorRow,
+  }
 }
 
 export async function fetchScatter(xMetric, yMetric, filters, limit = 200) {

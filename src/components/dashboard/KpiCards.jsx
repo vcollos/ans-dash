@@ -4,6 +4,8 @@ import { cn, formatNumber, formatPercent } from '../../lib/utils'
 import { metricFormulas } from '../../lib/metricFormulas'
 import { Badge } from '../ui/badge'
 import { REGULATORY_BASE_TEXT } from '../../lib/regulatoryScore'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
+import { Info } from 'lucide-react'
 
 const indicatorSpec = metricFormulas
   .filter((metric) => metric.showInCards)
@@ -193,60 +195,106 @@ function KpiCards({
     </Select>
   ) : null
 
-  if (!operatorName) {
+  const renderIndicatorHeader = (metric) => {
+    const tooltipText = metric.formula || 'Fórmula não disponível.'
     return (
-      <Card className="min-w-0">
-        <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{metric.label}</p>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="rounded-full p-1 text-muted-foreground transition hover:bg-muted/80"
+              aria-label={`Ver fórmula de ${metric.label}`}
+            >
+              <Info className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-[240px] text-xs leading-snug">
+            <p>{tooltipText}</p>
+          </TooltipContent>
+        </Tooltip>
+      </div>
+    )
+  }
+
+  const content = () => {
+    if (!operatorName) {
+      return (
+        <>
+          <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <CardTitle className="text-lg">Indicadores agregados</CardTitle>
+              <CardDescription>
+                {peerLabel
+                  ? `Visualizando a media definida em "Comparar com": ${peerLabel}.`
+                  : 'Selecione uma operadora para destravar a comparacao com seus pares.'}
+              </CardDescription>
+              {selectedPeriod ? (
+                <p className="text-xs text-muted-foreground">
+                  Período ativo: {selectedPeriod.periodo ?? `${selectedPeriod.ano}T${selectedPeriod.trimestre}`}
+                </p>
+              ) : null}
+            </div>
+            {periodSelect}
+          </CardHeader>
+          <CardContent>
+            <div className="mb-4 rounded-lg border border-border/70 bg-muted/30 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Score ponderado</p>
+                  <div className="flex items-center gap-3">
+                    <p className="text-3xl font-semibold">
+                      {regulatoryLoading ? '...' : regulatoryData?.finalScore?.value ? regulatoryData.finalScore.value.toFixed(2) : '—'}
+                    </p>
+                    <ScoreBadge label={regulatoryLoading ? null : regulatoryData?.finalScore?.label} />
+                  </div>
+                </div>
+                <ScoreGauge
+                  value={regulatoryLoading ? null : regulatoryData?.finalScore?.value ?? null}
+                  classification={regulatoryLoading ? null : regulatoryData?.finalScore?.label}
+                />
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {regulatoryLoading ? 'Calculando score para o filtro atual...' : peerLabel ?? 'Comparação geral'}
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {indicatorSpec.map((metric) => {
+                const value = fallbackSummary?.[metric.key]
+                return (
+                  <div key={metric.key} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 px-4 py-3">
+                    {renderIndicatorHeader(metric)}
+                    <p className="text-2xl font-semibold">{formatValue(value, metric.format)}</p>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </>
+      )
+    }
+
+    return (
+      <>
+        <CardHeader className="flex min-w-0 flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <CardTitle className="text-lg">Indicadores agregados</CardTitle>
+            <CardTitle className="text-lg">{operatorName}</CardTitle>
             <CardDescription>
-              {peerLabel
-                ? `Visualizando a media definida em "Comparar com": ${peerLabel}.`
-                : 'Selecione uma operadora para destravar a comparacao com seus pares.'}
+              {selectedPeriod ? `Período ${selectedPeriod.periodo}` : 'Selecione um período disponível para consultar os indicadores.'}
             </CardDescription>
-            {selectedPeriod ? (
-              <p className="text-xs text-muted-foreground">Período ativo: {selectedPeriod.periodo ?? `${selectedPeriod.ano}T${selectedPeriod.trimestre}`}</p>
+            {peerLabel ? (
+              <p className="text-xs text-muted-foreground">
+                {peerLabel}
+                {peerCount ? ` (n=${peerCount})` : ''}
+              </p>
             ) : null}
           </div>
           {periodSelect}
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {indicatorSpec.map((metric) => {
-              const value = fallbackSummary?.[metric.key]
-              return (
-                <div key={metric.key} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 px-4 py-3">
-                  <p className="text-xs font-medium uppercase text-muted-foreground">{metric.label}</p>
-                  <p className="text-2xl font-semibold">{formatValue(value, metric.format)}</p>
-                </div>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  return (
-    <Card className="min-w-0">
-      <CardHeader className="flex min-w-0 flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <CardTitle className="text-lg">{operatorName}</CardTitle>
-          <CardDescription>
-            {selectedPeriod ? `Período ${selectedPeriod.periodo}` : 'Selecione um período disponível para consultar os indicadores.'}
-          </CardDescription>
-          {peerLabel ? (
-            <p className="text-xs text-muted-foreground">
-              {peerLabel}
-              {peerCount ? ` (n=${peerCount})` : ''}
-            </p>
-          ) : null}
-        </div>
-        {periodSelect}
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-6">
-          <div className="rounded-lg border border-border/70 bg-background/40 p-4">
+          <div className="space-y-6">
+            <div className="rounded-lg border border-border/70 bg-background/40 p-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Score geral ponderado</p>
@@ -268,49 +316,53 @@ function KpiCards({
                   : `${peerLabel ?? 'Sem comparação definida'}${peerCount ? ` (n=${peerCount})` : ''}`}
               </p>
             </div>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {indicatorSpec.map((metric) => {
-              const operatorValue = snapshot?.operator?.[metric.key]
-              const peerValue = snapshot?.peers?.[metric.key]
-              const regMetric = regulatoryMetricMap[metric.key]
-              return (
-                <div key={metric.key} className="min-w-0 space-y-2 rounded-lg border border-border/70 bg-muted/20 px-4 py-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{metric.label}</p>
-                    <ScoreBadge label={regulatoryLoading ? null : regMetric?.classification} />
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {indicatorSpec.map((metric) => {
+                const operatorValue = snapshot?.operator?.[metric.key]
+                const peerValue = snapshot?.peers?.[metric.key]
+                const regMetric = regulatoryMetricMap[metric.key]
+                return (
+                  <div key={metric.key} className="min-w-0 space-y-2 rounded-lg border border-border/70 bg-muted/20 px-4 py-3">
+                    {renderIndicatorHeader(metric)}
+                    <p
+                      className={cn(
+                        'text-2xl font-semibold leading-tight',
+                        snapshot?.isLoading
+                          ? ''
+                          : getComparisonTrendClass(operatorValue, peerValue, metric.direction ?? 'higher'),
+                      )}
+                    >
+                      {snapshot?.isLoading ? '...' : formatValue(operatorValue, metric.format)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Média filtrada: {snapshot?.isLoading ? '...' : formatValue(peerValue, metric.format)}
+                    </p>
+                    <ScoreGauge
+                      value={regulatoryLoading ? null : regMetric?.note ?? null}
+                      steps={6}
+                      classification={regulatoryLoading ? null : regMetric?.classification}
+                    />
                   </div>
-                  <p
-                    className={cn(
-                      'text-2xl font-semibold leading-tight',
-                      snapshot?.isLoading
-                        ? ''
-                        : getComparisonTrendClass(operatorValue, peerValue, metric.direction ?? 'higher'),
-                    )}
-                  >
-                    {snapshot?.isLoading ? '...' : formatValue(operatorValue, metric.format)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Média filtrada: {snapshot?.isLoading ? '...' : formatValue(peerValue, metric.format)}
-                  </p>
-                  <ScoreGauge
-                    value={regulatoryLoading ? null : regMetric?.note ?? null}
-                    steps={6}
-                    classification={regulatoryLoading ? null : regMetric?.classification}
-                  />
+                )
+              })}
+              {regulatoryData && explanationText ? (
+                <div className="sm:col-span-2 xl:col-span-3 2xl:col-span-4 rounded-lg border border-border/70 bg-muted/20 px-4 py-4 text-sm">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Explicação técnica</p>
+                  <p className="mt-1 text-foreground">{explanationText}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{REGULATORY_BASE_TEXT}</p>
                 </div>
-              )
-            })}
-            {regulatoryData && explanationText ? (
-              <div className="sm:col-span-2 xl:col-span-3 2xl:col-span-4 rounded-lg border border-border/70 bg-muted/20 px-4 py-4 text-sm">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Explicação técnica</p>
-                <p className="mt-1 text-foreground">{explanationText}</p>
-                <p className="mt-2 text-xs text-muted-foreground">{REGULATORY_BASE_TEXT}</p>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </>
+    )
+  }
+
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Card className="min-w-0">{content()}</Card>
+    </TooltipProvider>
   )
 }
 

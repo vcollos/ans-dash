@@ -4,17 +4,28 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { cn, formatNumber, formatPercent, toNumber } from '../../lib/utils'
 import { metricFormulas } from '../../lib/metricFormulas'
 
-const rankingOptions = metricFormulas
-  .filter((metric) => metric.showInCards)
-  .map((metric) => ({
-    id: metric.id,
-    label: metric.label,
-    format: metric.format === 'percent' ? 'percent' : metric.format === 'decimal' ? 'number' : metric.format,
-    trend: metric.trend ?? 'higher',
-  }))
+const rankingOptions = [
+  {
+    id: 'regulatory_score',
+    label: 'Score regulatório ponderado',
+    format: 'score',
+    trend: 'higher',
+  },
+  ...metricFormulas
+    .filter((metric) => metric.showInCards)
+    .map((metric) => ({
+      id: metric.id,
+      label: metric.label,
+      format: metric.format === 'percent' ? 'percent' : metric.format === 'decimal' ? 'number' : metric.format,
+      trend: metric.trend ?? 'higher',
+    })),
+]
 
 function formatValue(value, format) {
   const numeric = toNumber(value)
+  if (format === 'score') {
+    return formatNumber(numeric, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
   if (format === 'percent') {
     return formatPercent(numeric, 2)
   }

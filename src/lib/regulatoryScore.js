@@ -171,12 +171,17 @@ export function classifyIndicator(value, percentiles, trend) {
   return { note, classification: NOTE_LABELS[note] }
 }
 
-function computeWeightedAverage(entries) {
+function computeWeightedAverage(entries, { normalizeMissing = false } = {}) {
   let totalWeight = 0
   let weightedSum = 0
   entries.forEach(({ note, weight }) => {
-    if (note === null || note === undefined) return
     if (!weight || weight <= 0) return
+    if (note === null || note === undefined) {
+      if (normalizeMissing) {
+        totalWeight += weight
+      }
+      return
+    }
     totalWeight += weight
     weightedSum += note * weight
   })
@@ -210,14 +215,14 @@ export function evaluateRegulatoryScore(payload) {
     }
   })
   const byId = Object.fromEntries(metrics.map((metric) => [metric.id, metric]))
-  const solvencyMetrics = REGULATORY_SOLVENCY_BLOCK.indicators
-    .map((id) => byId[id])
-    .filter(Boolean)
+  const solvencyMetrics = REGULATORY_SOLVENCY_BLOCK.indicators.map((id) => byId[id] ?? null)
+  const solvencyWeight = 1 / Math.max(REGULATORY_SOLVENCY_BLOCK.indicators.length, 1)
   const solvencyScore = computeWeightedAverage(
     solvencyMetrics.map((metric) => ({
-      note: metric.note,
-      weight: 1 / Math.max(solvencyMetrics.length, 1),
+      note: metric?.note ?? null,
+      weight: solvencyWeight,
     })),
+    { normalizeMissing: true },
   )
   const solvencyNote = solvencyScore ? clamp(Math.round(solvencyScore), 1, 4) : null
 
@@ -230,7 +235,7 @@ export function evaluateRegulatoryScore(payload) {
     { note: byId.despesas_adm_pct?.note, weight: 0.1 },
     { note: byId.despesas_comerciais_pct?.note, weight: 0.05 },
     { note: byId.indice_resultado_financeiro_pct?.note, weight: 0.05 },
-  ])
+  ], { normalizeMissing: true })
 
   return {
     operator: {

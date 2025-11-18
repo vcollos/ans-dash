@@ -14,6 +14,7 @@ import { Card, CardContent } from './components/ui/card'
 import { Button } from './components/ui/button'
 import { describeComparisonFilters } from './lib/comparisonModes'
 import ExportMenu from './components/dashboard/ExportMenu'
+import DataLoadingIndicator from './components/dashboard/DataLoadingIndicator'
 
 function LoadingState() {
   return (
@@ -92,6 +93,7 @@ function App() {
 
   const comparisonLabel = useMemo(() => describeComparisonFilters(comparisonFilters), [comparisonFilters])
   const trendPrimaryLabel = operatorInsight?.operatorName ?? 'Média dos filtros'
+  const isRefreshingData = isQuerying || trendSeries.isLoading
 
   if (status === 'loading') {
     return (
@@ -120,6 +122,18 @@ function App() {
           isUploading={isUploading}
           uploadFeedback={uploadFeedback}
         />
+        <DataLoadingIndicator
+          isActive={isRefreshingData}
+          className="hidden lg:block"
+          description="Consultando indicadores e séries históricas para os filtros aplicados."
+        />
+        <div className="lg:hidden">
+          <DataLoadingIndicator
+            isActive={isRefreshingData}
+            className="mb-2"
+            description="Aplicando filtros e atualizando os indicadores."
+          />
+        </div>
         <div className="lg:hidden">
           <div className="sticky top-2 z-20 -mx-4 mb-3 px-4 sm:px-0">
           <Button className="w-full" variant="secondary" onClick={() => setMobileFiltersOpen(true)}>
