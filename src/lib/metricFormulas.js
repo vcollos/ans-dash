@@ -19,6 +19,15 @@ CASE
 END
 `
 
+const ansSinistroNumerator = 'COALESCE(vr_eventos_liquidos, 0) + ABS(COALESCE(vr_corresponsabilidade_cedida, 0))'
+const ansSinistroDenominator = '(COALESCE(vr_contraprestacoes, 0) - COALESCE(vr_provisoes_tecnicas, 0)) + ABS(COALESCE(vr_corresponsabilidade_cedida, 0))'
+const ansSinistroDeltaNumerator =
+  'COALESCE(delta_vr_eventos_liquidos, 0) + ABS(COALESCE(delta_vr_corresponsabilidade_cedida, 0))'
+const ansSinistroDeltaDenominator =
+  '(COALESCE(delta_vr_contraprestacoes, 0) - COALESCE(delta_vr_provisoes_tecnicas, 0)) + ABS(COALESCE(delta_vr_corresponsabilidade_cedida, 0))'
+const ansDopNumerator = `${ansSinistroNumerator} + COALESCE(vr_desp_comerciais, 0) + COALESCE(vr_desp_administrativas, 0) + COALESCE(vr_outras_desp_oper, 0)`
+const ansDopDenominator = `(${ansSinistroDenominator}) + COALESCE(vr_outras_receitas_operacionais, 0)`
+
 export const metricFormulas = [
   {
     id: 'margem_lucro_pct',
@@ -42,24 +51,46 @@ export const metricFormulas = [
     showInCards: true,
     trend: 'higher',
   },
+{
+  id: 'sinistralidade_pct',
+  code: 'DM',
+  label: 'Sinistralidade (DM)',
+  description: '(41 + ABS(3117)) / (31 - 321 + ABS(3117)) — Fórmula oficial ANS (RN 518)',
+  format: 'percent',
+  sql: safePercent(ansSinistroNumerator, ansSinistroDenominator),
+  showInCatalog: true,
+  showInCards: true,
+  trend: 'lower',
+},
   {
-    id: 'sinistralidade_pct',
-    code: 'DM',
-    label: 'Sinistralidade (DM)',
-    description: '41_vr_eventos_liquidos / 311121_vr_contraprestacoes_pre',
+    id: 'sinistralidade_acumulada_pct',
+    code: 'DM_ACUM',
+    label: 'Sinistralidade acumulada (DM_ACUM)',
+    description: 'Cálculo acumulado no ano conforme metodologia ANS (RN 518).',
     format: 'percent',
-    sql: safePercent('vr_eventos_liquidos', 'vr_contraprestacoes_pre'),
+    sql: safePercent(ansSinistroNumerator, ansSinistroDenominator),
     showInCatalog: true,
-    showInCards: true,
+    showInCards: false,
+    trend: 'lower',
+  },
+  {
+    id: 'sinistralidade_trimestral_pct',
+    code: 'DM_TRIM',
+    label: 'Sinistralidade do trimestre (DM_TRIM)',
+    description: 'Fluxo trimestral obtido pelas variações das contas 41, 311, 32 e 3117.',
+    format: 'percent',
+    sql: safePercent(ansSinistroDeltaNumerator, ansSinistroDeltaDenominator),
+    showInCatalog: true,
+    showInCards: false,
     trend: 'lower',
   },
   {
     id: 'despesas_adm_pct',
     code: 'DA',
     label: 'Despesas Administrativas (DA)',
-    description: '46_vr_desp_administrativas / 311121_vr_contraprestacoes_pre',
+    description: '46_vr_desp_administrativas / (31 - 32 + |3117|) — base ANS.',
     format: 'percent',
-    sql: safePercent('vr_desp_administrativas', 'vr_contraprestacoes_pre'),
+    sql: safePercent('COALESCE(vr_desp_administrativas, 0)', ansSinistroDenominator),
     showInCatalog: true,
     showInCards: true,
     trend: 'lower',
@@ -68,9 +99,9 @@ export const metricFormulas = [
     id: 'despesas_comerciais_pct',
     code: 'DC',
     label: 'Despesas Comerciais (DC)',
-    description: '43_vr_desp_comerciais / 311121_vr_contraprestacoes_pre',
+    description: '43_vr_desp_comerciais / (31 - 32 + |3117|) — base ANS.',
     format: 'percent',
-    sql: safePercent('vr_desp_comerciais', 'vr_contraprestacoes_pre'),
+    sql: safePercent('COALESCE(vr_desp_comerciais, 0)', ansSinistroDenominator),
     showInCatalog: true,
     showInCards: true,
     trend: 'lower',
@@ -80,12 +111,9 @@ export const metricFormulas = [
     code: 'DOP',
     label: 'Despesas Operacionais (DOP)',
     description:
-      '(41_vr_eventos_liquidos + 43_vr_desp_comerciais + 46_vr_desp_administrativas + 44_vr_outras_desp_oper) / (311_vr_contraprestacoes + 33_vr_outras_receitas_operacionais)',
+      '(41 + |3117| + 43 + 46 + 44) / [(31 - 32 + |3117|) + 33] — fórmula ANS (RN 518)',
     format: 'percent',
-    sql: safePercent(
-      'COALESCE(vr_eventos_liquidos, 0) + COALESCE(vr_desp_comerciais, 0) + COALESCE(vr_desp_administrativas, 0) + COALESCE(vr_outras_desp_oper, 0)',
-      'COALESCE(vr_contraprestacoes, 0) + COALESCE(vr_outras_receitas_operacionais, 0)',
-    ),
+    sql: safePercent(ansDopNumerator, ansDopDenominator),
     showInCatalog: true,
     showInCards: true,
     trend: 'lower',
@@ -139,7 +167,7 @@ export const metricFormulas = [
     label: 'Prazo Médio de Contraprestações (PMCR)',
     description: '(1231_vr_creditos_operacoes_saude * 90) / 311121_vr_contraprestacoes_pre',
     format: 'days',
-    sql: safeDays('COALESCE(vr_creditos_operacoes_saude, 0)', 'vr_contraprestacoes_pre', 90),
+    sql: safeDays('COALESCE(vr_creditos_operacoes_saude, 0)', 'COALESCE(vr_contraprestacoes_pre, 0)', 90),
     showInCatalog: true,
     showInCards: true,
     trend: 'lower',
@@ -150,7 +178,7 @@ export const metricFormulas = [
     label: 'Prazo Médio de Pagamento de Eventos (PMPE)',
     description: '(2111_vr_eventos_a_liquidar * 90) / 41_vr_eventos_liquidos',
     format: 'days',
-    sql: safeDays('COALESCE(vr_eventos_a_liquidar, 0)', 'vr_eventos_liquidos', 90),
+    sql: safeDays('COALESCE(vr_eventos_a_liquidar, 0)', 'COALESCE(vr_eventos_liquidos, 0)', 90),
     showInCatalog: true,
     showInCards: true,
     trend: 'lower',

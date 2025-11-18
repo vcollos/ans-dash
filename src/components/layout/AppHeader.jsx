@@ -71,9 +71,9 @@ function AppHeader({
           <Button variant="ghost" size="sm" className="gap-2" onClick={onResetFilters}>
             <RefreshCcw className="h-4 w-4" /> Limpar filtros
           </Button>
-          <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleFileChange} />
+          <input ref={fileInputRef} type="file" accept=".csv,.parquet" className="hidden" onChange={handleFileChange} />
           <Button variant="outline" size="sm" className="gap-2" onClick={handleUploadClick} disabled={isUploading}>
-            <Download className={`h-4 w-4 rotate-180 ${isUploading ? 'animate-spin' : ''}`} /> {isUploading ? 'Importando...' : 'Atualizar CSV'}
+            <Download className={`h-4 w-4 rotate-180 ${isUploading ? 'animate-spin' : ''}`} /> {isUploading ? 'Importando...' : 'Atualizar arquivo'}
           </Button>
           <ExportMenu tableData={tableData} />
           <Button variant="default" size="sm" className="gap-2" onClick={() => window.print()}>
@@ -86,7 +86,7 @@ function AppHeader({
         </div>
         {isUploading || uploadFeedback ? (
           <p className="text-xs text-muted-foreground">
-            {isUploading ? 'Processando CSV, aguarde alguns segundos…' : uploadFeedback?.message}
+            {isUploading ? 'Processando arquivo, aguarde alguns segundos…' : uploadFeedback?.message}
           </p>
         ) : null}
       </div>

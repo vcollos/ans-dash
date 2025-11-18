@@ -1,3 +1,6 @@
+import { useMemo, useState } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { formatNumber, formatPercent, getVariationColor } from '../../lib/utils'
 
@@ -5,6 +8,8 @@ const monetarySpec = [
   { key: 'vr_receitas', label: '3 - Receitas' },
   { key: 'vr_despesas', label: '4 - Despesas' },
   { key: 'vr_contraprestacoes', label: '311 - Receitas de contraprestações' },
+  { key: 'vr_contraprestacoes_efetivas', label: '3111 - Contraprestações efetivas' },
+  { key: 'vr_corresponsabilidade_cedida', label: '3117 - Corresponsabilidade cedida' },
   { key: 'vr_contraprestacoes_pre', label: '311121 - Receitas de contraprestações (pré)' },
   { key: 'vr_creditos_operacoes_saude', label: '1231 - Créditos de operações de saúde' },
   { key: 'vr_eventos_liquidos', label: '41 - Eventos assistenciais líquidos' },
@@ -35,6 +40,94 @@ const monetarySpec = [
   { key: 'resultado_liquido', label: 'Resultado líquido (em uso)' },
 ]
 
+const specWithCodes = monetarySpec.map((metric, index) => ({
+  ...metric,
+  code: extractAccountCode(metric.label),
+  order: index,
+}))
+
+const accountTree = (() => {
+  const tree = buildAccountTree(specWithCodes)
+  sortAccountNodes(tree)
+  return tree
+})()
+
+function extractAccountCode(label) {
+  const match = label.match(/^(\d[\d]*)\s*-/)
+  return match ? match[1] : null
+}
+
+function buildAccountTree(spec) {
+  const nodes = spec.map((metric) => ({
+    ...metric,
+    children: [],
+  }))
+  const codeMap = new Map()
+  nodes.forEach((node) => {
+    if (node.code) {
+      codeMap.set(node.code, node)
+    }
+  })
+  const roots = []
+  nodes.forEach((node) => {
+    if (!node.code) {
+      roots.push(node)
+      return
+    }
+    const parentCode = findParentCode(node.code, codeMap)
+    if (parentCode) {
+      codeMap.get(parentCode).children.push(node)
+    } else {
+      roots.push(node)
+    }
+  })
+  return roots
+}
+
+function findParentCode(code, codeMap) {
+  for (let i = code.length - 1; i > 0; i -= 1) {
+    const candidate = code.slice(0, i)
+    if (codeMap.has(candidate)) {
+      return candidate
+    }
+  }
+  return null
+}
+
+function sortAccountNodes(nodes) {
+  nodes.sort((a, b) => compareNodes(a, b))
+  nodes.forEach((node) => {
+    if (node.children.length) {
+      sortAccountNodes(node.children)
+    }
+  })
+}
+
+function compareNodes(a, b) {
+  if (a.code && b.code) {
+    const lengthDiff = a.code.length - b.code.length
+    if (lengthDiff !== 0) {
+      return lengthDiff
+    }
+    return a.code.localeCompare(b.code, undefined, { numeric: true })
+  }
+  if (a.code) return -1
+  if (b.code) return 1
+  return a.order - b.order
+}
+
+function flattenTree(nodes, expandedNodes, depth = 0) {
+  const rows = []
+  nodes.forEach((node) => {
+    rows.push({ node, depth })
+    const nodeId = node.code ?? node.key
+    if (node.children.length && expandedNodes.has(nodeId)) {
+      rows.push(...flattenTree(node.children, expandedNodes, depth + 1))
+    }
+  })
+  return rows
+}
+
 function computeVariation(current, previous) {
   if (current === null || current === undefined) return null
   if (previous === null || previous === undefined || previous === 0) return null
@@ -43,8 +136,22 @@ function computeVariation(current, previous) {
 }
 
 function MonetarySummary({ data, isLoading, className }) {
+  const [expandedNodes, setExpandedNodes] = useState(() => new Set())
   const previousPeriodLabel = data?.previousPeriod?.periodo ?? null
   const comparisonLabel = previousPeriodLabel ? `Variação vs ${previousPeriodLabel}` : 'Variação (YoY)'
+  const rows = useMemo(() => flattenTree(accountTree, expandedNodes), [expandedNodes])
+
+  const toggleNode = (nodeId) => {
+    setExpandedNodes((prev) => {
+      const next = new Set(prev)
+      if (next.has(nodeId)) {
+        next.delete(nodeId)
+      } else {
+        next.add(nodeId)
+      }
+      return next
+    })
+  }
 
   return (
     <Card className={className}>
@@ -65,25 +172,32 @@ function MonetarySummary({ data, isLoading, className }) {
               </tr>
             </thead>
             <tbody>
-              {monetarySpec.map((metric) => {
-                const rawValue = data?.[metric.key]
-                const previousValue = data?.previousPeriod?.[metric.key]
-                const displayValue = isLoading
-                  ? '...'
-                  : formatNumber(rawValue, { style: 'currency', minimumFractionDigits: 0, maximumFractionDigits: 0 })
-                const variationValue = isLoading ? null : computeVariation(rawValue, previousValue)
-                const variationDisplay =
-                  isLoading || variationValue === null
-                    ? isLoading
-                      ? '...'
-                      : '—'
-                    : `${variationValue > 0 ? '+' : ''}${formatPercent(variationValue, 2)}`
-                const variationClass = variationValue === null ? 'text-muted-foreground' : getVariationColor(metric.label, variationDisplay)
+              {rows.map(({ node, depth }) => {
+                const info = getMetricDisplays(node, data, isLoading)
+                const nodeId = node.code ?? node.key
+                const isExpandable = node.children.length > 0
+                const isExpanded = isExpandable && expandedNodes.has(nodeId)
                 return (
-                  <tr key={metric.key} className="border-b border-border/60 last:border-b-0">
-                    <td className="py-2 pr-4 font-medium text-muted-foreground align-top">{metric.label}</td>
-                    <td className="py-2 pr-4 text-right font-semibold">{displayValue}</td>
-                    <td className={`py-2 text-right text-sm font-semibold ${variationClass}`}>{variationDisplay}</td>
+                  <tr key={node.key} className="border-b border-border/60 last:border-b-0">
+                    <td className="py-2 pr-4 align-top">
+                      <div className="flex items-center gap-2" style={{ paddingLeft: depth * 16 }}>
+                        {isExpandable ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleNode(nodeId)}
+                            className="h-4 w-4 text-muted-foreground transition hover:text-foreground"
+                            aria-label={`${isExpanded ? 'Recolher' : 'Expandir'} ${node.label}`}
+                          >
+                            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </button>
+                        ) : (
+                          <span className="h-4 w-4" />
+                        )}
+                        <span className="font-medium text-muted-foreground">{node.label}</span>
+                      </div>
+                    </td>
+                    <td className="py-2 pr-4 text-right font-semibold">{info.displayValue}</td>
+                    <td className={`py-2 text-right text-sm font-semibold ${info.variationClass}`}>{info.variationDisplay}</td>
                   </tr>
                 )
               })}
@@ -96,3 +210,21 @@ function MonetarySummary({ data, isLoading, className }) {
 }
 
 export default MonetarySummary
+
+function getMetricDisplays(node, data, isLoading) {
+  const rawValue = data?.[node.key]
+  const previousValue = data?.previousPeriod?.[node.key]
+  const displayValue = isLoading
+    ? '...'
+    : formatNumber(rawValue, { style: 'currency', minimumFractionDigits: 0, maximumFractionDigits: 0 })
+  const variationValue = isLoading ? null : computeVariation(rawValue, previousValue)
+  const variationDisplay =
+    isLoading || variationValue === null
+      ? isLoading
+        ? '...'
+        : '—'
+      : `${variationValue > 0 ? '+' : ''}${formatPercent(variationValue, 2)}`
+  const variationClass =
+    variationValue === null ? 'text-muted-foreground' : getVariationColor(node.label, variationDisplay)
+  return { displayValue, variationDisplay, variationClass }
+}

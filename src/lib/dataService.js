@@ -1,5 +1,3 @@
-import { getDuckDB, getConnection } from './duckdbClient'
-import { tableToObjects } from './arrow'
 import { metricFormulas, metricSql } from './metricFormulas'
 
 export const DETAIL_TABLE_FIELDS = [
@@ -11,6 +9,8 @@ export const DETAIL_TABLE_FIELDS = [
   'trimestre',
   'qt_beneficiarios',
   'sinistralidade_pct',
+  'sinistralidade_acumulada_pct',
+  'sinistralidade_trimestral_pct',
   'margem_lucro_pct',
   'despesas_adm_pct',
   'despesas_comerciais_pct',
@@ -27,39 +27,16 @@ export const DETAIL_TABLE_FIELDS = [
   'vr_despesas',
   'vr_receitas_patrimoniais',
   'vr_contraprestacoes',
+  'vr_contraprestacoes_efetivas',
+  'vr_corresponsabilidade_cedida',
   'vr_eventos_liquidos',
 ]
 
-const DEFAULT_VIEW = 'diops_curated'
-
+const DEFAULT_VIEW = import.meta.env?.VITE_DATASET_VIEW ?? 'indicadores_curados'
 let cachedViewColumns = null
 
 const sanitizeList = (values = []) => values.filter((value) => value !== null && value !== undefined && value !== '')
 const sanitizeSql = (value) => (value ? value.replaceAll("'", "''") : value)
-const quoteIdentifier = (value) => `"${String(value).replace(/"/g, '""')}"`
-const metricSelectSql = metricFormulas.map(({ id, sql }) => `${sql.trim()} AS ${id}`).join(',\n        ')
-
-async function getViewColumns(conn) {
-  if (cachedViewColumns) {
-    return cachedViewColumns
-  }
-  const info = await conn.query(`PRAGMA table_info('${DEFAULT_VIEW}')`)
-  cachedViewColumns = tableToObjects(info).map((row) => row.name)
-  return cachedViewColumns
-}
-
-function invalidateSchemaCache() {
-  cachedViewColumns = null
-}
-
-async function fetchAsText(url) {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`Falha ao acessar ${url}: ${response.status}`)
-  }
-  const buffer = await response.arrayBuffer()
-  return new TextDecoder().decode(buffer)
-}
 
 function buildWhereClause(filters = {}) {
   const clauses = []
@@ -102,151 +79,83 @@ function buildFilterClauses(filters = {}, { latestOnlyDefault = true } = {}) {
   if (latestFilterApplies) {
     whereClause = whereClause ? `${whereClause} AND trimestre_rank = 1` : 'WHERE trimestre_rank = 1'
   }
-  return { whereClause, latestFilterApplies }
+
+  return {
+    whereClause,
+  }
 }
 
 function getWhereExpression(filters = {}) {
-  const clause = buildWhereClause(filters)
-  return clause ? clause.replace(/^WHERE\s+/i, '') : ''
+  const clauses = []
+  if (filters.modalidades?.length) {
+    clauses.push(`modalidade IN (${filters.modalidades.map((value) => `'${sanitizeSql(value)}'`).join(',')})`)
+  }
+  if (filters.portes?.length) {
+    clauses.push(`porte IN (${filters.portes.map((value) => `'${sanitizeSql(value)}'`).join(',')})`)
+  }
+  if (filters.uniodonto !== undefined) {
+    clauses.push(`COALESCE(uniodonto, FALSE) IS ${filters.uniodonto ? 'TRUE' : 'FALSE'}`)
+  }
+  if (filters.ativa !== undefined) {
+    clauses.push(`ativa IS ${filters.ativa ? 'TRUE' : 'FALSE'}`)
+  }
+  return clauses.join(' AND ')
 }
 
-export async function loadDataset({ csvUrl, csvText, filename } = {}) {
-  if (!csvUrl && !csvText) {
-    throw new Error('É necessário informar o caminho do CSV de indicadores.')
+async function runQuery(sql) {
+  const response = await fetch('/api/query', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ sql }),
+  })
+  if (!response.ok) {
+    const message = (await response.json().catch(() => ({}))).error ?? `Falha ao executar consulta: ${response.status}`
+    throw new Error(message)
   }
-  const db = await getDuckDB()
-  const conn = await getConnection()
+  const payload = await response.json()
+  return payload.rows ?? []
+}
 
-  await db.dropFiles()
-  await conn.query('DROP VIEW IF EXISTS diops_curated')
-  await conn.query('DROP TABLE IF EXISTS diops_raw')
-  invalidateSchemaCache()
-
-  const text = csvText ?? (await fetchAsText(csvUrl))
-  await db.registerFileText('diops.csv', text)
-  await conn.query("CREATE OR REPLACE TABLE diops_raw AS SELECT * FROM read_csv_auto('diops.csv', HEADER=TRUE, SAMPLE_SIZE=-1, ALL_VARCHAR=TRUE)")
-
-  const rawInfo = await conn.query("PRAGMA table_info('diops_raw')")
-  const rawColumns = tableToObjects(rawInfo).map((row) => row.name)
-  const conta61Column = rawColumns.find((name) => /^61/i.test(name)) ?? null
-  const conta61Select = conta61Column
-    ? `TRY_CAST(NULLIF(${quoteIdentifier(conta61Column)}, '') AS DOUBLE) AS vr_conta_61`
-    : 'CAST(NULL AS DOUBLE) AS vr_conta_61'
-  const resultadoLiquidoExpression = `COALESCE(vr_receitas, 0) - COALESCE(vr_despesas, 0)`
-  const resultadoLiquidoFinalExpression = `
-        ${resultadoLiquidoExpression}
-        - COALESCE(vr_conta_61, 0)
-  `
-
-  await conn.query(`
-    CREATE OR REPLACE VIEW ${DEFAULT_VIEW} AS
-    WITH parsed AS (
-      SELECT
-        TRIM(nome_operadora) AS nome_operadora,
-        TRIM(modalidade) AS modalidade,
-        TRIM(porte) AS porte,
-        CASE
-          WHEN lower(TRIM(COALESCE(ativa, ''))) IN ('sim', 's', '1', 'true') THEN TRUE
-          WHEN lower(TRIM(COALESCE(ativa, ''))) IN ('nao', 'não', 'n', '0', 'false') THEN FALSE
-          ELSE NULL
-        END AS ativa,
-        CASE
-          WHEN lower(TRIM(COALESCE(uniodonto, ''))) IN ('sim', 's', '1', 'true') THEN TRUE
-          WHEN lower(TRIM(COALESCE(uniodonto, ''))) IN ('nao', 'não', 'n', '0', 'false') THEN FALSE
-          ELSE NULL
-        END AS uniodonto,
-        TRY_CAST(NULLIF(qt_beneficiarios_periodo, '') AS BIGINT) AS qt_beneficiarios,
-        TRY_CAST(NULLIF(reg_ans, '') AS BIGINT) AS reg_ans,
-        TRY_CAST(NULLIF(ano, '') AS INTEGER) AS ano,
-        TRY_CAST(NULLIF(trimestre, '') AS INTEGER) AS trimestre,
-        TRY_CAST(NULLIF(resultado_liquido, '') AS DOUBLE) AS resultado_liquido_informado,
-        TRY_CAST(NULLIF("311_vr_contraprestacoes", '') AS DOUBLE) AS vr_contraprestacoes,
-        TRY_CAST(NULLIF("311121_vr_contraprestacoes_pre", '') AS DOUBLE) AS vr_contraprestacoes_pre,
-        TRY_CAST(NULLIF("1231_vr_creditos_operacoes_saude", '') AS DOUBLE) AS vr_creditos_operacoes_saude,
-        TRY_CAST(NULLIF("3_vr_receitas", '') AS DOUBLE) AS vr_receitas,
-        TRY_CAST(NULLIF("4_vr_despesas", '') AS DOUBLE) AS vr_despesas,
-        TRY_CAST(NULLIF("36_vr_receitas_patrimoniais", '') AS DOUBLE) AS vr_receitas_patrimoniais,
-        TRY_CAST(NULLIF("41_vr_eventos_liquidos", '') AS DOUBLE) AS vr_eventos_liquidos,
-        TRY_CAST(NULLIF("2111_vr_eventos_a_liquidar", '') AS DOUBLE) AS vr_eventos_a_liquidar,
-        TRY_CAST(NULLIF("43_vr_desp_comerciais", '') AS DOUBLE) AS vr_desp_comerciais,
-        TRY_CAST(NULLIF("464119113_vr_desp_comerciais_promocoes", '') AS DOUBLE) AS vr_desp_comerciais_promocoes,
-        TRY_CAST(NULLIF("46_vr_desp_administrativas", '') AS DOUBLE) AS vr_desp_administrativas,
-        TRY_CAST(NULLIF("44_vr_outras_desp_oper", '') AS DOUBLE) AS vr_outras_desp_oper,
-        TRY_CAST(NULLIF("47_vr_desp_tributos", '') AS DOUBLE) AS vr_desp_tributos,
-        TRY_CAST(NULLIF("35_vr_receitas_fin", '') AS DOUBLE) AS vr_receitas_fin,
-        TRY_CAST(NULLIF("45_vr_despesas_fin", '') AS DOUBLE) AS vr_despesas_fin,
-        TRY_CAST(NULLIF("33_vr_outras_receitas_operacionais", '') AS DOUBLE) AS vr_outras_receitas_operacionais,
-        TRY_CAST(NULLIF("12_vr_ativo_circulante", '') AS DOUBLE) AS vr_ativo_circulante,
-        TRY_CAST(NULLIF("13_vr_ativo_permanente", '') AS DOUBLE) AS vr_ativo_permanente,
-        TRY_CAST(NULLIF("21_vr_passivo_circulante", '') AS DOUBLE) AS vr_passivo_circulante,
-        TRY_CAST(NULLIF("23_vr_passivo_nao_circulante", '') AS DOUBLE) AS vr_passivo_nao_circulante,
-        TRY_CAST(NULLIF("25_vr_patrimonio_liquido", '') AS DOUBLE) AS vr_patrimonio_liquido,
-        TRY_CAST(NULLIF("31_vr_ativos_garantidores", '') AS DOUBLE) AS vr_ativos_garantidores,
-        TRY_CAST(NULLIF("32_vr_provisoes_tecnicas", '') AS DOUBLE) AS vr_provisoes_tecnicas,
-        TRY_CAST(NULLIF("2521_vr_pl_ajustado", '') AS DOUBLE) AS vr_pl_ajustado,
-        TRY_CAST(NULLIF("2522_vr_margem_solvencia_exigida", '') AS DOUBLE) AS vr_margem_solvencia_exigida,
-        ${conta61Select}
-      FROM diops_raw
-      WHERE TRY_CAST(NULLIF(ano, '') AS INTEGER) IS NOT NULL
-        AND TRY_CAST(NULLIF(trimestre, '') AS INTEGER) IS NOT NULL
-    ), computed AS (
-      SELECT
-        parsed.*,
-        ${resultadoLiquidoExpression} AS resultado_liquido_calculado,
-        ${resultadoLiquidoFinalExpression} AS resultado_liquido_final_ans,
-        ${resultadoLiquidoExpression} AS resultado_liquido
-      FROM parsed
-    ), enriched AS (
-      SELECT
-        computed.*,
-        COALESCE(vr_receitas_fin, 0) - COALESCE(vr_despesas_fin, 0) AS resultado_financeiro,
-        ${metricSelectSql},
-        (ano * 10 + trimestre) AS periodo_id,
-        CONCAT(ano, 'T', trimestre) AS periodo,
-        ROW_NUMBER() OVER (PARTITION BY nome_operadora, ano ORDER BY trimestre DESC NULLS LAST) AS trimestre_rank
-      FROM computed
-    )
-    SELECT * FROM enriched;
+async function getViewColumns() {
+  if (cachedViewColumns) {
+    return cachedViewColumns
+  }
+  const rows = await runQuery(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = '${DEFAULT_VIEW}'
+    ORDER BY ordinal_position
   `)
+  cachedViewColumns = rows.map((row) => row.column_name)
+  return cachedViewColumns
+}
 
-  await conn.query('ANALYZE')
-
+export async function loadDataset(options = {}) {
+  if (options.csvText || options.parquetBuffer) {
+    throw new Error('Upload manual de dataset não é suportado quando conectado ao PostgreSQL.')
+  }
+  await runQuery(`SELECT 1 FROM ${DEFAULT_VIEW} LIMIT 1`)
   return {
-    source: csvText ? 'upload' : 'csv',
-    filename: filename ?? (csvUrl ? csvUrl.split('/').pop() : null),
+    source: 'postgres',
+    filename: 'postgresql',
     updatedAt: new Date().toISOString(),
   }
 }
 
-export async function persistDatasetFile(filename, content) {
-  try {
-    const response = await fetch('/api/upload-dataset', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ filename, content }),
-    })
-    if (!response.ok) {
-      throw new Error(`Falha ao salvar arquivo no servidor: ${response.status}`)
-    }
-    return await response.json()
-  } catch (err) {
-    console.warn('[DataService] Não foi possível salvar o CSV no servidor', err)
-    return null
-  }
+export async function persistDatasetFile() {
+  throw new Error('Persistência de dataset no servidor não é suportada no modo PostgreSQL.')
 }
 
 export async function fetchAvailablePeriods() {
-  const conn = await getConnection()
-  const query = `
+  const rows = await runQuery(`
     SELECT DISTINCT ano, trimestre, CONCAT(ano, 'T', trimestre) AS periodo
     FROM ${DEFAULT_VIEW}
     WHERE ano IS NOT NULL AND trimestre IS NOT NULL
     ORDER BY ano DESC, trimestre DESC
-  `
-  const table = await conn.query(query)
-  return tableToObjects(table).map((row) => ({
+  `)
+  return rows.map((row) => ({
     ano: row.ano,
     trimestre: row.trimestre,
     periodo: row.periodo ?? `${row.ano}T${row.trimestre}`,
@@ -254,36 +163,37 @@ export async function fetchAvailablePeriods() {
 }
 
 export async function fetchOperatorOptions({ anos = [], trimestres = [] } = {}) {
-  const conn = await getConnection()
   const clauses = []
   if (anos.length) clauses.push(`ano IN (${anos.join(',')})`)
   if (trimestres.length) clauses.push(`trimestre IN (${trimestres.join(',')})`)
   const whereClause = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
-  const query = `
+  const rows = await runQuery(`
     SELECT DISTINCT nome_operadora
     FROM ${DEFAULT_VIEW}
     ${whereClause}
     ORDER BY nome_operadora
-  `
-  const table = await conn.query(query)
-  return tableToObjects(table).map((row) => row.nome_operadora)
+  `)
+  return rows.map((row) => row.nome_operadora)
 }
 
 export async function fetchOperatorPeriods(operatorName) {
   if (!operatorName) return []
-  const conn = await getConnection()
-  const query = `
+  const rows = await runQuery(`
     SELECT DISTINCT ano, trimestre
     FROM ${DEFAULT_VIEW}
     WHERE nome_operadora = '${sanitizeSql(operatorName)}'
     ORDER BY ano, trimestre
-  `
-  const table = await conn.query(query)
-  return tableToObjects(table)
+  `)
+  return rows
 }
 
+const cardMetricDefinitions = metricFormulas.filter((metric) => metric.showInCards)
+
+const cardMetricSelectSql = cardMetricDefinitions.map((metric) => `AVG(${metricSql[metric.id].trim()}) AS ${metric.id}`).join(',\n        ')
+
+const cardMetricColumnsSql = cardMetricDefinitions.map((metric) => `${metricSql[metric.id].trim()} AS ${metric.id}`).join(',\n        ')
+
 async function summarizePeriod(filters) {
-  const conn = await getConnection()
   const { whereClause } = buildFilterClauses(filters)
   const query = `
     WITH base AS (
@@ -296,14 +206,13 @@ async function summarizePeriod(filters) {
         periodo,
         COUNT(DISTINCT nome_operadora) AS operadoras,
         SUM(COALESCE(qt_beneficiarios, 0)) AS beneficiarios,
-        ${metricFormulas
-          .filter((metric) => metric.showInCards)
-          .map((metric) => `AVG(${metric.id}) AS ${metric.id}`)
-          .join(',\n        ')},
+        ${cardMetricSelectSql},
         SUM(COALESCE(vr_receitas, 0)) AS vr_receitas,
         SUM(COALESCE(vr_despesas, 0)) AS vr_despesas,
         SUM(COALESCE(vr_contraprestacoes, 0)) AS vr_contraprestacoes,
+        SUM(COALESCE(vr_contraprestacoes_efetivas, 0)) AS vr_contraprestacoes_efetivas,
         SUM(COALESCE(vr_contraprestacoes_pre, 0)) AS vr_contraprestacoes_pre,
+        SUM(COALESCE(vr_corresponsabilidade_cedida, 0)) AS vr_corresponsabilidade_cedida,
         SUM(COALESCE(vr_creditos_operacoes_saude, 0)) AS vr_creditos_operacoes_saude,
         SUM(COALESCE(vr_eventos_liquidos, 0)) AS vr_eventos_liquidos,
         SUM(COALESCE(vr_eventos_a_liquidar, 0)) AS vr_eventos_a_liquidar,
@@ -334,14 +243,14 @@ async function summarizePeriod(filters) {
       FROM base
       GROUP BY periodo_id, periodo
     )
-    SELECT *
+    SELECT
+      *
     FROM period_data
     ORDER BY periodo_id DESC
     LIMIT 1
   `
-  const table = await conn.query(query)
-  const [row] = tableToObjects(table)
-  return row ?? null
+  const rows = await runQuery(query)
+  return rows[0] ?? null
 }
 
 export async function fetchKpiSummary(filters) {
@@ -361,8 +270,7 @@ export async function fetchKpiSummary(filters) {
 }
 
 export async function fetchTrendSeries(metric, filters, comparisonContext = null) {
-  const conn = await getConnection()
-  const sqlMetric = metric ?? 'sinistralidade_pct'
+  const sqlMetric = metricSql[metric ?? 'sinistralidade_pct'] ?? metricSql.sinistralidade_pct
   if (comparisonContext?.operatorName) {
     const sanitizedName = sanitizeSql(comparisonContext.operatorName)
     const baseFilter = buildWhereClause({ ...filters, search: '' })
@@ -396,8 +304,7 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
       FULL OUTER JOIN pares ON operador.ano = pares.ano AND operador.trimestre = pares.trimestre
       ORDER BY ano, trimestre
     `
-    const table = await conn.query(query)
-    return tableToObjects(table)
+    return runQuery(query)
   }
   const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
   if (comparisonContext) {
@@ -433,8 +340,7 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
       FULL OUTER JOIN pares ON base.ano = pares.ano AND base.trimestre = pares.trimestre
       ORDER BY ano, trimestre
     `
-    const table = await conn.query(query)
-    return tableToObjects(table)
+    return runQuery(query)
   }
   const query = `
     SELECT ano, trimestre, periodo, AVG(${sqlMetric}) AS valor
@@ -443,8 +349,7 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
     GROUP BY ano, trimestre, periodo
     ORDER BY ano, trimestre
   `
-  const table = await conn.query(query)
-  return tableToObjects(table)
+  return runQuery(query)
 }
 
 export async function fetchOperatorSnapshot(nomeOperadora, targetPeriod = {}, comparisonFilters = {}) {
@@ -456,13 +361,11 @@ export async function fetchOperatorSnapshot(nomeOperadora, targetPeriod = {}, co
       selectedPeriod: null,
     }
   }
-  const conn = await getConnection()
   const sanitizedName = sanitizeSql(nomeOperadora)
-  const periodsTable = await conn.query(
+  const periods = await runQuery(
     `SELECT ano, trimestre, periodo FROM ${DEFAULT_VIEW} WHERE nome_operadora = '${sanitizedName}' ORDER BY ano DESC, trimestre DESC`,
   )
-  const availablePeriods = tableToObjects(periodsTable)
-  if (!availablePeriods.length) {
+  if (!periods.length) {
     return {
       operator: null,
       peers: null,
@@ -470,51 +373,52 @@ export async function fetchOperatorSnapshot(nomeOperadora, targetPeriod = {}, co
       selectedPeriod: null,
     }
   }
-  const resolvedPeriod =
-    availablePeriods.find((item) => item.ano === targetPeriod?.ano && item.trimestre === targetPeriod?.trimestre) ?? availablePeriods[0]
-  const operatorTable = await conn.query(`
-    SELECT *
-    FROM ${DEFAULT_VIEW}
+  const resolved =
+    periods.find((item) => item.ano === targetPeriod?.ano && item.trimestre === targetPeriod?.trimestre) ?? periods[0]
+  const operatorQuery = `
+    SELECT
+      base.*
+      ${cardMetricColumnsSql ? `,\n      ${cardMetricColumnsSql}` : ''}
+    FROM ${DEFAULT_VIEW} base
     WHERE nome_operadora = '${sanitizedName}'
-      AND ano = ${resolvedPeriod.ano}
-      AND trimestre = ${resolvedPeriod.trimestre}
+      AND ano = ${resolved.ano}
+      AND trimestre = ${resolved.trimestre}
     LIMIT 1
-  `)
-  const operatorRow = tableToObjects(operatorTable)[0] ?? null
+  `
+  const operator = (await runQuery(operatorQuery))[0] ?? null
 
   const comparisonExpression = getWhereExpression(comparisonFilters)
   const wherePieces = [
-    `ano = ${resolvedPeriod.ano}`,
-    `trimestre = ${resolvedPeriod.trimestre}`,
+    `ano = ${resolved.ano}`,
+    `trimestre = ${resolved.trimestre}`,
     `nome_operadora <> '${sanitizedName}'`,
   ]
   if (comparisonExpression) {
     wherePieces.push(`(${comparisonExpression})`)
   }
+  const peerMetricSelect = metricFormulas
+    .filter((metric) => metric.showInCards)
+    .map((metric) => `AVG(${metricSql[metric.id].trim()}) AS ${metric.id}`)
+    .join(',\n        ')
   const peerQuery = `
     SELECT
       COUNT(DISTINCT nome_operadora) AS peer_count,
-      ${metricFormulas
-        .filter((metric) => metric.showInCards)
-        .map((metric) => `AVG(${metric.id}) AS ${metric.id}`)
-        .join(',\n        ')}
+      ${peerMetricSelect}
     FROM ${DEFAULT_VIEW}
     WHERE ${wherePieces.join('\n        AND ')}
   `
-  const peerTable = await conn.query(peerQuery)
-  const peersRow = tableToObjects(peerTable)[0] ?? null
+  const peers = (await runQuery(peerQuery))[0] ?? null
 
   return {
-    operator: operatorRow,
-    peers: peersRow,
-    availablePeriods,
-    selectedPeriod: resolvedPeriod,
+    operator,
+    peers,
+    availablePeriods: periods,
+    selectedPeriod: resolved,
   }
 }
 
 export async function fetchOperatorLatestSnapshot(nomeOperadora) {
   if (!nomeOperadora) return null
-  const conn = await getConnection()
   const query = `
     SELECT *
     FROM ${DEFAULT_VIEW}
@@ -522,68 +426,47 @@ export async function fetchOperatorLatestSnapshot(nomeOperadora) {
     ORDER BY ano DESC, trimestre DESC
     LIMIT 1
   `
-  const table = await conn.query(query)
-  return tableToObjects(table)[0] ?? null
+  const rows = await runQuery(query)
+  return rows[0] ?? null
 }
 
 export async function fetchRanking(metric, filters, limit = 10, order = 'DESC', options = {}) {
-  const conn = await getConnection()
+  const sqlMetric = metricSql[metric] ?? metricSql.sinistralidade_pct
   const { whereClause } = buildFilterClauses(filters)
-  const sqlMetric = metric ?? 'resultado_liquido'
-  const metricDef = metricFormulas.find((item) => item.id === metric)
-  const lowerIsBetter = metricDef?.trend === 'lower'
-  const aggregator = metricDef?.aggregate === 'sum' ? 'SUM' : 'AVG'
-  const requestedOrder = order?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC'
-  const effectiveOrder = lowerIsBetter ? (requestedOrder === 'ASC' ? 'DESC' : 'ASC') : requestedOrder
-  const rankingCte = `
+  const operatorName = options.operatorName ? sanitizeSql(options.operatorName) : null
+  const query = `
     WITH base AS (
-      SELECT *
+      SELECT nome_operadora, reg_ans, porte, modalidade, qt_beneficiarios, ${sqlMetric} AS valor
       FROM ${DEFAULT_VIEW}
       ${whereClause}
-    ), aggregated AS (
-      SELECT
-        nome_operadora,
-        ${aggregator}(${sqlMetric}) AS valor,
-        MAX(reg_ans) AS reg_ans
-      FROM base
-      GROUP BY nome_operadora
     ), ranked AS (
       SELECT
-        nome_operadora,
-        valor,
-        reg_ans,
-        ROW_NUMBER() OVER (ORDER BY valor ${effectiveOrder}) AS rank_position
-      FROM aggregated
+        base.*,
+        ROW_NUMBER() OVER (ORDER BY valor ${order}) AS rank
+      FROM base
     )
-  `
-  const table = await conn.query(`
-    ${rankingCte}
     SELECT *
     FROM ranked
-    ORDER BY rank_position
+    ORDER BY rank
     LIMIT ${limit}
-  `)
-  const rows = tableToObjects(table)
-
+  `
+  const rows = await runQuery(query)
   let operatorRow = null
-  if (options?.operatorName) {
-    const sanitizedOperator = sanitizeSql(options.operatorName)
+  if (operatorName) {
     const operatorQuery = `
-      ${rankingCte}
-      SELECT *
-      FROM ranked
-      WHERE nome_operadora = '${sanitizedOperator}'
+      SELECT nome_operadora, reg_ans, porte, modalidade, qt_beneficiarios, ${sqlMetric} AS valor
+      FROM ${DEFAULT_VIEW}
+      WHERE nome_operadora = '${operatorName}'
+      ${whereClause ? ` AND ${whereClause.replace(/^WHERE\s+/i, '')}` : ''}
       LIMIT 1
     `
-    const operatorTable = await conn.query(operatorQuery)
-    operatorRow = tableToObjects(operatorTable)[0] ?? null
+    const result = await runQuery(operatorQuery)
+    operatorRow = result[0] ?? null
   }
-
   return { rows, operatorRow }
 }
 
 export async function fetchScatter(xMetric, yMetric, filters, limit = 200) {
-  const conn = await getConnection()
   const { whereClause } = buildFilterClauses(filters)
   const query = `
     WITH base AS (
@@ -603,12 +486,10 @@ export async function fetchScatter(xMetric, yMetric, filters, limit = 200) {
     ORDER BY qt_beneficiarios DESC NULLS LAST
     LIMIT ${limit}
   `
-  const table = await conn.query(query)
-  return tableToObjects(table)
+  return runQuery(query)
 }
 
 export async function fetchTableData(filters, options = {}) {
-  const conn = await getConnection()
   const includeAllColumns = options.includeAllColumns === true
   const ignorePeriodFilters = options.ignorePeriodFilters === true
   const exactOperatorName = options.operatorName ?? null
@@ -634,13 +515,21 @@ export async function fetchTableData(filters, options = {}) {
 
   let selectedFields = options.columns?.length ? options.columns : DETAIL_TABLE_FIELDS
   if (includeAllColumns) {
-    selectedFields = await getViewColumns(conn)
+    selectedFields = await getViewColumns()
   }
   if (!selectedFields || !selectedFields.length) {
     selectedFields = ['*']
   }
 
-  const projection = selectedFields.join(', ')
+  const projection = selectedFields
+    .map((field) => {
+      const expression = metricSql[field]
+      if (expression) {
+        return `(${expression.trim()}) AS ${field}`
+      }
+      return field
+    })
+    .join(', ')
   const limit = options.limit ?? 500
   const offset = options.offset ?? 0
   const query = `
@@ -650,12 +539,15 @@ export async function fetchTableData(filters, options = {}) {
     ORDER BY ano DESC, trimestre DESC, nome_operadora
     LIMIT ${limit} OFFSET ${offset}
   `
-  const table = await conn.query(query)
-  const rows = tableToObjects(table)
+  const rows = await runQuery(query)
   return {
     rows,
     columns: selectedFields,
   }
+}
+
+export async function fetchTableColumns() {
+  return getViewColumns()
 }
 
 export function getMetricsCatalog() {

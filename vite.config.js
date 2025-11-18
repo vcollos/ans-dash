@@ -25,7 +25,7 @@ function createUploadMiddleware() {
     try {
       const rawBody = await readRequestBody(req)
       const payload = rawBody ? JSON.parse(rawBody) : {}
-      const { filename = 'indicadores.csv', content } = payload
+      const { filename = 'indicadores.csv', content, encoding = 'utf8' } = payload
       if (!content) {
         res.statusCode = 400
         res.setHeader('Content-Type', 'application/json')
@@ -36,7 +36,11 @@ function createUploadMiddleware() {
       const targetDir = path.resolve(__dirname, 'public/data')
       await fs.promises.mkdir(targetDir, { recursive: true })
       const targetPath = path.join(targetDir, safeName)
-      await fs.promises.writeFile(targetPath, content, 'utf8')
+      if (encoding === 'base64') {
+        await fs.promises.writeFile(targetPath, Buffer.from(content, 'base64'))
+      } else {
+        await fs.promises.writeFile(targetPath, content, 'utf8')
+      }
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
       res.end(JSON.stringify({ ok: true, path: targetPath }))
@@ -51,15 +55,21 @@ function createUploadMiddleware() {
 
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      '/api': process.env.VITE_API_PROXY ?? 'http://localhost:4000',
+    },
+  },
+  preview: {
+    proxy: {
+      '/api': process.env.VITE_API_PROXY ?? 'http://localhost:4000',
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
     },
   },
-  optimizeDeps: {
-    exclude: ['@duckdb/duckdb-wasm'],
-  },
-  assetsInclude: ['**/*.wasm'],
   worker: {
     format: 'es',
   },
