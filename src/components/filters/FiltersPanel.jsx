@@ -30,6 +30,22 @@ function ComparisonFilterGroup({ title, options, values = [], onToggle }) {
   )
 }
 
+function arraysEqual(a = [], b = []) {
+  if (a.length !== b.length) return false
+  const setB = new Set(b)
+  return a.every((value) => setB.has(value))
+}
+
+function comparisonSelectionsEqual(a, b) {
+  if (!a || !b) return false
+  return (
+    arraysEqual(a.modalidades, b.modalidades) &&
+    arraysEqual(a.portes, b.portes) &&
+    arraysEqual(a.uniodonto, b.uniodonto) &&
+    arraysEqual(a.ativa, b.ativa)
+  )
+}
+
 function cloneDefaultComparisonFilters() {
   const sanitized = sanitizeComparisonFilters(DEFAULT_COMPARISON_FILTERS)
   return {
@@ -48,9 +64,16 @@ function FiltersPanel({
   onOperatorSelect,
   className,
   comparisonFilters,
+  comparisonAppliedFilters,
   onComparisonFiltersChange,
+  onComparisonFiltersApply,
+  onComparisonFiltersReset,
 }) {
   const safeComparisonFilters = sanitizeComparisonFilters(comparisonFilters)
+  const safeAppliedFilters = comparisonAppliedFilters ? sanitizeComparisonFilters(comparisonAppliedFilters) : null
+  const hasPendingComparisonChanges = safeAppliedFilters
+    ? !comparisonSelectionsEqual(safeComparisonFilters, safeAppliedFilters)
+    : false
 
   const handleComparisonToggle = (key, value, shouldEnable) => {
     const currentValues = safeComparisonFilters[key] ?? []
@@ -74,7 +97,15 @@ function FiltersPanel({
   }
 
   const handleResetComparison = () => {
+    if (onComparisonFiltersReset) {
+      onComparisonFiltersReset()
+      return
+    }
     onComparisonFiltersChange(cloneDefaultComparisonFilters())
+  }
+
+  const handleApplyComparison = () => {
+    onComparisonFiltersApply?.()
   }
 
   return (
@@ -106,11 +137,22 @@ function FiltersPanel({
           Uniodonto agora fazem parte das opções de comparação.
         </p>
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <Label className="text-xs uppercase text-muted-foreground">Comparar com</Label>
-            <Button size="sm" variant="outline" className="h-8" onClick={handleResetComparison}>
-              Todas operadoras
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline" className="h-8" onClick={handleResetComparison}>
+                Todas operadoras
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-8"
+                onClick={handleApplyComparison}
+                disabled={!hasPendingComparisonChanges}
+              >
+                Refazer Comparações
+              </Button>
+            </div>
           </div>
           <div className="space-y-3">
             <ComparisonFilterGroup

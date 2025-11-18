@@ -44,12 +44,30 @@ const classificationColors = {
   'SEM DADO': 'bg-muted text-muted-foreground',
 }
 
-function ScoreGauge({ value, min = 1, max = 4, steps = 8, className }) {
+function getGaugeStepColor(index, total, { active }) {
+  if (total <= 1) {
+    return active ? 'hsl(142, 70%, 45%)' : 'hsl(142, 30%, 75%)'
+  }
+  const ratio = index / (total - 1)
+  const hue = 2 + Math.round(136 * ratio) // 2 deg ~ red to ~138 deg green
+  const saturation = active ? 75 : 35
+  const lightness = active ? 45 : 78
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`
+}
+
+function ScoreGauge({ value, min = 1, max = 4, steps = 8, className, classification }) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return <span className="text-xs text-muted-foreground">—</span>
   }
   const ratio = Math.max(0, Math.min(1, (value - min) / (max - min)))
   const filled = Math.round(ratio * steps)
+  let baseColor = null
+  if (classification) {
+    if (classification.toUpperCase().includes('RUIM')) baseColor = '#dc2626'
+    else if (classification.toUpperCase().includes('REGULAR')) baseColor = '#f97316'
+    else if (classification.toUpperCase().includes('BOA')) baseColor = '#16a34a'
+    else if (classification.toUpperCase().includes('ÓTIMA')) baseColor = '#15803d'
+  }
   return (
     <div className={cn('flex items-center gap-1', className)}>
       <span className="text-[10px] text-muted-foreground">RUIM</span>
@@ -58,9 +76,15 @@ function ScoreGauge({ value, min = 1, max = 4, steps = 8, className }) {
           <span
             key={index}
             className={cn(
-              'h-2 w-3 rounded-sm',
-              index < filled ? 'bg-emerald-500/80 shadow-sm' : 'bg-muted-foreground/30',
+              'h-2 w-3 rounded-sm transition',
+              index < filled ? 'shadow-sm' : '',
             )}
+            style={{
+              backgroundColor: baseColor
+                ? baseColor
+                : getGaugeStepColor(index, steps, { active: index < filled }),
+              opacity: index < filled ? 1 : 0.35,
+            }}
           />
         ))}
       </div>
@@ -233,7 +257,10 @@ function KpiCards({
                     <ScoreBadge label={regulatoryLoading ? null : regulatoryData?.finalScore?.label} />
                   </div>
                 </div>
-                <ScoreGauge value={regulatoryLoading ? null : regulatoryData?.finalScore?.value ?? null} />
+                <ScoreGauge
+                  value={regulatoryLoading ? null : regulatoryData?.finalScore?.value ?? null}
+                  classification={regulatoryLoading ? null : regulatoryData?.finalScore?.label}
+                />
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
                 {regulatoryLoading
@@ -265,7 +292,11 @@ function KpiCards({
                   <p className="text-xs text-muted-foreground">
                     Média filtrada: {snapshot?.isLoading ? '...' : formatValue(peerValue, metric.format)}
                   </p>
-                  <ScoreGauge value={regulatoryLoading ? null : regMetric?.note ?? null} steps={6} />
+                  <ScoreGauge
+                    value={regulatoryLoading ? null : regMetric?.note ?? null}
+                    steps={6}
+                    classification={regulatoryLoading ? null : regMetric?.classification}
+                  />
                 </div>
               )
             })}

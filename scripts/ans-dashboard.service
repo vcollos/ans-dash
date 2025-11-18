@@ -1,0 +1,17 @@
+[Unit]
+Description=ANS Dashboard client (Vite) + API server
+After=network.target
+StartLimitIntervalSec=500
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/projetos/indicadores/ans-dashboard
+Environment=NODE_ENV=production
+Environment=SERVER_PORT=4000
+ExecStart=/usr/bin/env npm run dev
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

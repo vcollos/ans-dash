@@ -1,5 +1,5 @@
 import { useMemo, useId } from 'react'
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts'
+import { Line, LineChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '../ui/chart'
@@ -13,6 +13,9 @@ const metricOptions = metricFormulas
     label: metric.label,
     format: metric.format,
   }))
+
+const OPERATOR_COLOR = '#550039'
+const FILTER_AVERAGE_COLOR = '#e1ff7b'
 
 function formatMetricValue(value, format, { compact = false } = {}) {
   if (value === null || value === undefined || Number.isNaN(value)) {
@@ -36,7 +39,7 @@ function formatMetricValue(value, format, { compact = false } = {}) {
 function LegendItem({ label, color }) {
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+      <span className="h-3 w-3 rounded-full border border-border/40" style={{ backgroundColor: color }} />
       <span className="font-medium text-foreground">{label}</span>
     </div>
   )
@@ -71,11 +74,11 @@ function IndicatorTrendChart({
     () => ({
       primary: {
         label: primaryLabel ?? 'Operadora',
-        color: 'hsl(var(--chart-1))',
+        color: OPERATOR_COLOR,
       },
       comparison: {
         label: comparisonLabel ?? 'Comparação',
-        color: 'hsl(var(--chart-2))',
+        color: FILTER_AVERAGE_COLOR,
       },
     }),
     [primaryLabel, comparisonLabel],
@@ -104,8 +107,8 @@ function IndicatorTrendChart({
       <CardContent>
         <div className="space-y-4">
           <div className="flex flex-wrap gap-4">
-            <LegendItem label={chartConfig.primary.label} color="hsl(var(--chart-1))" />
-            {hasComparisonSeries ? <LegendItem label={chartConfig.comparison.label} color="hsl(var(--chart-2))" /> : null}
+            <LegendItem label={chartConfig.primary.label} color={OPERATOR_COLOR} />
+            {hasComparisonSeries ? <LegendItem label={chartConfig.comparison.label} color={FILTER_AVERAGE_COLOR} /> : null}
           </div>
           <div className="relative">
             {isLoading ? (
@@ -119,17 +122,7 @@ function IndicatorTrendChart({
                 className="h-[360px] w-full items-stretch justify-stretch rounded-lg border aspect-auto"
                 config={chartConfig}
               >
-                <AreaChart data={chartData} margin={{ left: 12, right: 12, top: 16, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id={`fill-primary-${chartId}`} x1="0" x2="0" y1="0" y2="1">
-                      <stop offset="5%" stopColor="var(--color-primary)" stopOpacity={0.9} />
-                      <stop offset="95%" stopColor="var(--color-primary)" stopOpacity={0.1} />
-                    </linearGradient>
-                    <linearGradient id={`fill-comparison-${chartId}`} x1="0" x2="0" y1="0" y2="1">
-                      <stop offset="5%" stopColor="var(--color-comparison)" stopOpacity={0.9} />
-                      <stop offset="95%" stopColor="var(--color-comparison)" stopOpacity={0.1} />
-                    </linearGradient>
-                  </defs>
+                <LineChart data={chartData} margin={{ left: 12, right: 12, top: 16, bottom: 0 }}>
                   <CartesianGrid vertical={false} strokeDasharray="4 4" className="stroke-muted" />
                   <XAxis dataKey="periodo" tickLine={false} axisLine={false} tickMargin={8} />
                   <YAxis
@@ -146,37 +139,33 @@ function IndicatorTrendChart({
                     cursor={false}
                     content={
                       <ChartTooltipContent
-                        formatter={(value) => (
-                          <span className="font-semibold text-foreground">
-                            {formatMetricValue(value, selectedMetric?.format)}
-                          </span>
-                        )}
+                        valueFormatter={(value) => formatMetricValue(value, selectedMetric?.format)}
                       />
                     }
                   />
-                  {hasComparisonSeries ? (
-                    <Area
-                      type="monotone"
-                      dataKey="comparison"
-                      stroke="var(--color-comparison)"
-                      strokeWidth={2}
-                      fill={`url(#fill-comparison-${chartId})`}
-                      dot={false}
-                      connectNulls
-                      name={chartConfig.comparison.label}
-                    />
-                  ) : null}
-                  <Area
+                  <Line
                     type="monotone"
                     dataKey="primary"
                     stroke="var(--color-primary)"
                     strokeWidth={2}
-                    fill={`url(#fill-primary-${chartId})`}
-                    dot={false}
+                    dot={{ fill: 'var(--color-primary)', r: 3, strokeWidth: 0 }}
+                    activeDot={{ r: 4 }}
                     connectNulls
                     name={chartConfig.primary.label}
                   />
-                </AreaChart>
+                  {hasComparisonSeries ? (
+                    <Line
+                      type="monotone"
+                      dataKey="comparison"
+                      stroke="var(--color-comparison)"
+                      strokeWidth={2}
+                      dot={{ fill: 'var(--color-comparison)', r: 3, strokeWidth: 0 }}
+                      activeDot={{ r: 4 }}
+                      connectNulls
+                      name={chartConfig.comparison.label}
+                    />
+                  ) : null}
+                </LineChart>
               </ChartContainer>
             ) : (
               <div className="flex h-[320px] items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">

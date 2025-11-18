@@ -81,9 +81,11 @@ function App() {
     operatorInsight,
     operatorPeriod,
     setOperatorPeriod,
-    operatorContext,
     comparisonFilters,
+    comparisonFiltersDraft,
     updateComparisonFilters,
+    commitComparisonFilters,
+    resetComparisonFiltersState,
     monetarySummary,
     regulatoryScore,
   } = useDashboardController()
@@ -140,8 +142,11 @@ function App() {
                   onReset={resetFilters}
                   onOperatorSelect={applyOperatorSelection}
                   className="border border-border/60 shadow-none"
-                  comparisonFilters={comparisonFilters}
+                  comparisonFilters={comparisonFiltersDraft}
+                  comparisonAppliedFilters={comparisonFilters}
                   onComparisonFiltersChange={updateComparisonFilters}
+                  onComparisonFiltersApply={commitComparisonFilters}
+                  onComparisonFiltersReset={resetComparisonFiltersState}
                 />
                 <div className="rounded-xl border border-border/60 bg-muted/30 p-4 shadow-sm">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Exportar dados</p>
@@ -170,8 +175,11 @@ function App() {
                 onChange={updateFilters}
                 onReset={resetFilters}
                 onOperatorSelect={applyOperatorSelection}
-                comparisonFilters={comparisonFilters}
+                comparisonFilters={comparisonFiltersDraft}
+                comparisonAppliedFilters={comparisonFilters}
                 onComparisonFiltersChange={updateComparisonFilters}
+                onComparisonFiltersApply={commitComparisonFilters}
+                onComparisonFiltersReset={resetComparisonFiltersState}
               />
               <div className="rounded-xl border border-border/60 bg-muted/30 p-4 shadow-sm">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Exportar dados</p>

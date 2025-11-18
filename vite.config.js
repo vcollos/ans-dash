@@ -56,11 +56,15 @@ function createUploadMiddleware() {
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: '0.0.0.0',
+    allowedHosts: ['dash.collos.com.br', 'backdash.collos.com.br'],
     proxy: {
       '/api': process.env.VITE_API_PROXY ?? 'http://localhost:4000',
     },
   },
   preview: {
+    host: '0.0.0.0',
+    allowedHosts: ['dash.collos.com.br', 'backdash.collos.com.br'],
     proxy: {
       '/api': process.env.VITE_API_PROXY ?? 'http://localhost:4000',
     },
