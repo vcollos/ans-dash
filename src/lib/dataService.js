@@ -5,6 +5,12 @@ import {
   monetaryIndicatorColumns,
   monetaryIndicatorPhysicalColumns,
 } from './monetaryIndicators'
+import {
+  REGULATORY_INDICATORS,
+  REGULATORY_PERCENTILE_KEYS,
+  REGULATORY_PERCENTILES,
+  getIndicatorSql,
+} from './regulatoryScore'
 
 export const DETAIL_TABLE_FIELDS = [
   'nome_operadora',
@@ -416,6 +422,73 @@ export async function fetchMonetarySummary(filters = {}) {
     values,
     previousValues,
     deltas,
+  }
+}
+
+export async function fetchRegulatoryReport(operatorFilters = {}, peerFilters = {}) {
+  if (!operatorFilters?.operatorName) return null
+  const indicatorSelects = REGULATORY_INDICATORS.map((indicator) => {
+    const expression = getIndicatorSql(indicator.id)
+    if (!expression) {
+      throw new Error(`Sem expressão SQL para indicador ${indicator.id}`)
+    }
+    return `${expression.trim()} AS ${indicator.id}`
+  })
+  const indicatorProjection = indicatorSelects.join(',\n        ')
+  const percentileFragments = []
+  REGULATORY_INDICATORS.forEach((indicator) => {
+    const column = `peer_base.${indicator.id}`
+    REGULATORY_PERCENTILE_KEYS.forEach((key) => {
+      const percentileValue = REGULATORY_PERCENTILES[key]
+      percentileFragments.push(
+        `percentile_cont(${percentileValue}) WITHIN GROUP (ORDER BY ${column}) FILTER (WHERE ${column} IS NOT NULL) AS ${indicator.id}_${key}`,
+      )
+    })
+  })
+  const { whereClause: operatorWhereClause } = buildFilterClauses(operatorFilters, { latestOnlyDefault: false })
+  if (!operatorWhereClause) {
+    return null
+  }
+  const { whereClause: peerWhereClause } = buildFilterClauses(peerFilters, { latestOnlyDefault: false })
+  const peerWhere = peerWhereClause ?? ''
+  const query = `
+    WITH operator_row AS (
+      SELECT
+        nome_operadora,
+        reg_ans,
+        ano,
+        trimestre,
+        periodo
+        ${indicatorProjection ? `,\n        ${indicatorProjection}` : ''}
+      FROM ${DEFAULT_VIEW}
+      ${operatorWhereClause}
+      ORDER BY ano DESC, trimestre DESC
+      LIMIT 1
+    ), peer_base AS (
+      SELECT
+        ${indicatorProjection}
+      FROM ${DEFAULT_VIEW}
+      ${peerWhere}
+    ), peer_stats AS (
+      SELECT
+        COUNT(*) AS peer_total
+        ${percentileFragments.length ? `,\n        ${percentileFragments.join(',\n        ')}` : ''}
+      FROM peer_base
+    )
+    SELECT
+      row_to_json(operator_row) AS operator,
+      row_to_json(peer_stats) AS peers
+    FROM operator_row
+    CROSS JOIN peer_stats
+  `
+  const rows = await runQuery(query)
+  const payload = rows[0]
+  if (!payload?.operator) {
+    return null
+  }
+  return {
+    operator: payload.operator,
+    peers: payload.peers,
   }
 }
 

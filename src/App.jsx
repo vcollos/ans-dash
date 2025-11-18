@@ -84,6 +84,7 @@ function App() {
     comparisonFilters,
     updateComparisonFilters,
     monetarySummary,
+    regulatoryScore,
   } = useDashboardController()
 
   const comparisonLabel = useMemo(() => describeComparisonFilters(comparisonFilters), [comparisonFilters])
@@ -173,6 +174,7 @@ function App() {
               period={operatorPeriod}
               peerLabel={comparisonLabel}
               fallbackPeriods={periodOptions}
+              regulatoryScore={regulatoryScore}
             />
             <div className="grid gap-6 lg:grid-cols-2 lg:items-stretch">
               <RankingChart

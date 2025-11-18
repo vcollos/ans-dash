@@ -11,9 +11,11 @@ import {
   fetchTableData,
   persistDatasetFile,
   fetchAvailablePeriods,
+  fetchRegulatoryReport,
 } from '../lib/dataService'
 import { DEFAULT_COMPARISON_FILTERS, comparisonFiltersToQuery, sanitizeComparisonFilters } from '../lib/comparisonModes'
 import { metricFormulas } from '../lib/metricFormulas'
+import { evaluateRegulatoryScore } from '../lib/regulatoryScore'
 
 const rankingCatalog = metricFormulas.filter((metric) => metric.showInCards)
 const DEFAULT_RANKING_METRIC = rankingCatalog[0]?.id ?? 'resultado_liquido'
@@ -79,6 +81,7 @@ export function useDashboardController() {
   const [isUploading, setIsUploading] = useState(false)
   const [uploadFeedback, setUploadFeedback] = useState(null)
   const [sourceInfo, setSourceInfo] = useState(null)
+  const [regulatoryScore, setRegulatoryScore] = useState({ data: null, isLoading: false, error: null })
 
   const [comparisonFilters, setComparisonFilters] = useState(() => sanitizeComparisonFilters(DEFAULT_COMPARISON_FILTERS))
   const [operatorContext, setOperatorContext] = useState(null)
@@ -272,6 +275,58 @@ export function useDashboardController() {
   }, [status, trendMetric, filters, operatorContext?.name, comparisonFilterQuery])
 
   useEffect(() => {
+    if (status !== 'ready') return
+    if (!operatorContext?.name || !operatorPeriod?.ano || !operatorPeriod?.trimestre) {
+      setRegulatoryScore({ data: null, isLoading: false, error: null })
+      return
+    }
+    let cancelled = false
+    setRegulatoryScore((prev) => ({ ...prev, isLoading: true, error: null }))
+    async function loadRegulatoryScore() {
+      try {
+        const operatorFilters = {
+          ...resolvedFilters,
+          anos: [operatorPeriod.ano],
+          trimestres: [operatorPeriod.trimestre],
+          operatorName: operatorContext.name,
+        }
+        if (operatorContext?.regAns) {
+          operatorFilters.regAns = [operatorContext.regAns]
+        }
+        const peerBaseFilters = {
+          ...(operatorContext?.name ? { ...resolvedFilters, search: '' } : resolvedFilters),
+          anos: [operatorPeriod.ano],
+          trimestres: [operatorPeriod.trimestre],
+        }
+        const peerFilters = applyComparisonFilters(peerBaseFilters)
+        const response = await fetchRegulatoryReport(operatorFilters, peerFilters)
+        if (cancelled) return
+        setRegulatoryScore({
+          data: evaluateRegulatoryScore(response),
+          isLoading: false,
+          error: null,
+        })
+      } catch (err) {
+        if (cancelled) return
+        console.error('[Dashboard] Falha ao carregar score regulatório', err)
+        setRegulatoryScore({ data: null, isLoading: false, error: err })
+      }
+    }
+    loadRegulatoryScore()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    status,
+    operatorContext?.name,
+    operatorContext?.regAns,
+    operatorPeriod?.ano,
+    operatorPeriod?.trimestre,
+    resolvedFilters,
+    applyComparisonFilters,
+  ])
+
+  useEffect(() => {
     if (!operatorContext?.name) {
       setOperatorSnapshot({ operator: null, peers: null, availablePeriods: [], selectedPeriod: null })
       return
@@ -437,5 +492,6 @@ export function useDashboardController() {
     comparisonFilters,
     updateComparisonFilters,
     monetarySummary,
+    regulatoryScore,
   }
 }

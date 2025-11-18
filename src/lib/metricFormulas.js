@@ -183,6 +183,40 @@ export const metricFormulas = [
     showInCards: true,
     trend: 'lower',
   },
+  {
+    id: 'cobertura_provisoes',
+    code: 'AG/PT',
+    label: 'Cobertura de Provisões Técnicas',
+    description: '31_vr_ativos_garantidores / |32_vr_provisoes_tecnicas|',
+    format: 'decimal',
+    sql: safeRatio('COALESCE(vr_ativos_garantidores, 0)', 'ABS(COALESCE(vr_provisoes_tecnicas, 0))'),
+    showInCatalog: false,
+    showInCards: false,
+    trend: 'higher',
+  },
+  {
+    id: 'resultado_operacional_margem_pct',
+    code: 'RO',
+    label: 'Resultado Operacional / Contraprestações',
+    description: '((311 - 32 - 41 + 33 - 43 - 46 - 44) + (35 - 45)) / 311 — margem operacional',
+    format: 'percent',
+    sql: safePercent(
+      `
+COALESCE(vr_contraprestacoes, 0)
+  - COALESCE(vr_provisoes_tecnicas, 0)
+  - COALESCE(vr_eventos_liquidos, 0)
+  + COALESCE(vr_outras_receitas_operacionais, 0)
+  - COALESCE(vr_desp_comerciais, 0)
+  - COALESCE(vr_desp_administrativas, 0)
+  - COALESCE(vr_outras_desp_oper, 0)
+  + (COALESCE(vr_receitas_fin, 0) - COALESCE(vr_despesas_fin, 0))
+      `,
+      'vr_contraprestacoes',
+    ),
+    showInCatalog: false,
+    showInCards: false,
+    trend: 'higher',
+  },
 ]
 
 export const metricSql = Object.fromEntries(metricFormulas.map((formula) => [formula.id, formula.sql]))
