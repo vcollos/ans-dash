@@ -1,6 +1,6 @@
 import './lib/charts'
-import { useState, useMemo } from 'react'
-import { AlertCircle, Download } from 'lucide-react'
+import { useState, useMemo, useRef } from 'react'
+import { AlertCircle } from 'lucide-react'
 import { useDashboardController } from './hooks/useDashboardController'
 import AppHeader from './components/layout/AppHeader'
 import FiltersPanel from './components/filters/FiltersPanel'
@@ -13,7 +13,6 @@ import { Skeleton } from './components/ui/skeleton'
 import { Card, CardContent } from './components/ui/card'
 import { Button } from './components/ui/button'
 import { describeComparisonFilters } from './lib/comparisonModes'
-import ExportMenu from './components/dashboard/ExportMenu'
 import DataLoadingIndicator from './components/dashboard/DataLoadingIndicator'
 
 function LoadingState() {
@@ -30,6 +29,38 @@ function LoadingState() {
         <Skeleton className="h-[360px] w-full" />
       </div>
       <Skeleton className="h-[360px] w-full" />
+    </div>
+  )
+}
+
+function DatasetUploadCard({ onUploadDataset, isUploading, uploadFeedback }) {
+  const fileInputRef = useRef(null)
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (event) => {
+    const file = event.target.files?.[0]
+    if (file && onUploadDataset) {
+      onUploadDataset(file)
+    }
+    event.target.value = ''
+  }
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-muted/30 p-4 shadow-sm">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Atualizar arquivo base</p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Substitua o dataset carregado enviando um novo CSV ou Parquet curado.
+      </p>
+      <input ref={fileInputRef} type="file" accept=".csv,.parquet" className="hidden" onChange={handleFileChange} />
+      <Button variant="outline" className="mt-3 w-full gap-2" onClick={handleUploadClick} disabled={isUploading}>
+        {isUploading ? 'Importando...' : 'Selecionar arquivo'}
+      </Button>
+      {uploadFeedback ? (
+        <p className="mt-2 text-xs text-muted-foreground">{uploadFeedback.message}</p>
+      ) : null}
     </div>
   )
 }
@@ -80,6 +111,7 @@ function App() {
     replaceDataset,
     sourceInfo,
     operatorInsight,
+    operatorContext,
     operatorPeriod,
     setOperatorPeriod,
     comparisonFilters,
@@ -94,6 +126,59 @@ function App() {
   const comparisonLabel = useMemo(() => describeComparisonFilters(comparisonFilters), [comparisonFilters])
   const trendPrimaryLabel = operatorInsight?.operatorName ?? 'Média dos filtros'
   const isRefreshingData = isQuerying || trendSeries.isLoading
+
+  const agentContext = useMemo(() => {
+    const tableRows = tableData?.rows ?? []
+    const beneficiaryTotal = tableRows.reduce((sum, row) => {
+      const value = Number(row?.qt_beneficiarios ?? 0)
+      return sum + (Number.isFinite(value) ? value : 0)
+    }, 0)
+    return {
+      status,
+      filters,
+      comparisonFilters,
+      operatorPeriod,
+      operatorContext,
+      operatorInsight,
+      periodOptions,
+      summary: kpis,
+      regulatoryScore,
+      ranking: {
+        metric: rankingMetric,
+        order: rankingOrder,
+        topRows: rankingData?.rows ?? [],
+        operatorRow: rankingData?.operatorRow ?? null,
+      },
+      monetarySummary,
+      trend: {
+        metric: trendMetric,
+        rows: trendSeries?.rows ?? [],
+      },
+      tableSummary: {
+        visibleRows: tableRows.length,
+        beneficiaryTotal,
+      },
+      sourceInfo,
+    }
+  }, [
+    status,
+    filters,
+    comparisonFilters,
+    operatorPeriod,
+    operatorContext,
+    operatorInsight,
+    periodOptions,
+    kpis,
+    regulatoryScore,
+    rankingMetric,
+    rankingOrder,
+    rankingData,
+    monetarySummary,
+    trendMetric,
+    trendSeries,
+    tableData,
+    sourceInfo,
+  ])
 
   if (status === 'loading') {
     return (
@@ -114,14 +199,7 @@ function App() {
   return (
     <div className="min-h-screen bg-muted/20">
       <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 pb-12 pt-4 sm:px-6 sm:pt-6">
-        <AppHeader
-          tableData={tableData}
-          sourceInfo={sourceInfo}
-          summary={kpis}
-          onUploadDataset={replaceDataset}
-          isUploading={isUploading}
-          uploadFeedback={uploadFeedback}
-        />
+        <AppHeader tableData={tableData} sourceInfo={sourceInfo} summary={kpis} />
         <DataLoadingIndicator
           isActive={isRefreshingData}
           className="hidden lg:block"
@@ -162,15 +240,11 @@ function App() {
                   onComparisonFiltersApply={commitComparisonFilters}
                   onComparisonFiltersReset={resetComparisonFiltersState}
                 />
-                <div className="rounded-xl border border-border/60 bg-muted/30 p-4 shadow-sm">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Exportar dados</p>
-                  <div className="mt-2">
-                    <ExportMenu tableData={tableData} />
-                  </div>
-                  <Button variant="outline" className="mt-3 w-full gap-2" onClick={() => window.print()}>
-                    <Download className="h-4 w-4" /> Exportar PDF
-                  </Button>
-                </div>
+                <DatasetUploadCard
+                  onUploadDataset={replaceDataset}
+                  isUploading={isUploading}
+                  uploadFeedback={uploadFeedback}
+                />
               </div>
               <div className="border-t p-4">
                 <Button className="w-full" onClick={() => setMobileFiltersOpen(false)}>
@@ -181,8 +255,8 @@ function App() {
           ) : null}
         </div>
         <div className="grid gap-6 lg:grid-cols-[320px,minmax(0,1fr)] lg:items-start lg:gap-8">
-          <div className="hidden min-w-0 lg:block">
-            <div className="sticky top-6 space-y-4">
+          <div className="hidden min-w-[320px] lg:block">
+            <div className="space-y-4 lg:sticky lg:top-6">
               <FiltersPanel
                 filters={filters}
                 options={options}
@@ -195,15 +269,11 @@ function App() {
                 onComparisonFiltersApply={commitComparisonFilters}
                 onComparisonFiltersReset={resetComparisonFiltersState}
               />
-              <div className="rounded-xl border border-border/60 bg-muted/30 p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Exportar dados</p>
-                <div className="mt-2">
-                  <ExportMenu tableData={tableData} />
-                </div>
-                <Button variant="outline" className="mt-3 w-full gap-2" onClick={() => window.print()}>
-                  <Download className="h-4 w-4" /> Exportar PDF
-                </Button>
-              </div>
+              <DatasetUploadCard
+                onUploadDataset={replaceDataset}
+                isUploading={isUploading}
+                uploadFeedback={uploadFeedback}
+              />
             </div>
           </div>
           <div className="space-y-6 min-w-0">

@@ -342,15 +342,16 @@ export function useDashboardController() {
             trimestres: [operatorPeriod.trimestre],
             operatorName: operatorContext.name,
           }
-        if (operatorContext?.regAns) {
-          operatorFilters.regAns = [operatorContext.regAns]
-        }
-        const peerFiltersForScore = {
-          ...(operatorPeerFilters ?? {}),
-          anos: [operatorPeriod.ano],
-          trimestres: [operatorPeriod.trimestre],
-        }
-        response = await fetchRegulatoryReport(operatorFilters, peerFiltersForScore)
+          if (operatorContext?.regAns) {
+            operatorFilters.regAns = [operatorContext.regAns]
+          }
+          const peerFiltersForScore = applyComparisonFilters({
+            ...resolvedFilters,
+            anos: [operatorPeriod.ano],
+            trimestres: [operatorPeriod.trimestre],
+            search: '',
+          })
+          response = await fetchRegulatoryReport(operatorFilters, peerFiltersForScore)
         } else {
           const baseFilters = applyComparisonFilters({
             anos: resolvedFilters.anos ?? [],

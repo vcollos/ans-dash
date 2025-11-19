@@ -702,10 +702,25 @@ async function fetchRegulatoryScoreTrend(filters, comparisonContext = null) {
       ORDER BY ano, trimestre
     `
     const peerRows = await runQuery(peersQuery)
-    const peerStats = await fetchRegulatoryPeerStats(comparisonFilters)
+    const peerStatsCache = new Map()
+    async function getPeerStats(ano, trimestre) {
+      const key = `${ano}-${trimestre}`
+      if (peerStatsCache.has(key)) {
+        return peerStatsCache.get(key)
+      }
+      const periodFilters = {
+        ...comparisonFilters,
+        anos: [ano],
+        trimestres: [trimestre],
+      }
+      const stats = await fetchRegulatoryPeerStats(periodFilters)
+      peerStatsCache.set(key, stats)
+      return stats
+    }
     const seriesMap = new Map()
-    operatorRows.forEach((row) => {
-      const evaluation = evaluateRegulatoryScore({ operator: row, peers: peerStats })
+    for (const row of operatorRows) {
+      const periodPeerStats = await getPeerStats(row.ano, row.trimestre)
+      const evaluation = evaluateRegulatoryScore({ operator: row, peers: periodPeerStats })
       const key = `${row.ano}-${row.trimestre}`
       const entry =
         seriesMap.get(key) ??
@@ -718,9 +733,10 @@ async function fetchRegulatoryScoreTrend(filters, comparisonContext = null) {
         }
       entry.operador_valor = evaluation?.finalScore?.value ?? null
       seriesMap.set(key, entry)
-    })
-    peerRows.forEach((row) => {
-      const evaluation = evaluateRegulatoryScore({ operator: row, peers: peerStats })
+    }
+    for (const row of peerRows) {
+      const periodPeerStats = await getPeerStats(row.ano, row.trimestre)
+      const evaluation = evaluateRegulatoryScore({ operator: row, peers: periodPeerStats })
       const key = `${row.ano}-${row.trimestre}`
       const entry =
         seriesMap.get(key) ??
@@ -736,7 +752,7 @@ async function fetchRegulatoryScoreTrend(filters, comparisonContext = null) {
         entry.periodo = row.periodo
       }
       seriesMap.set(key, entry)
-    })
+    }
     return Array.from(seriesMap.values()).sort((a, b) => {
       if (a.ano === b.ano) {
         return a.trimestre - b.trimestre

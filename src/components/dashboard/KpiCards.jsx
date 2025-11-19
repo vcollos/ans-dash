@@ -95,12 +95,20 @@ function ScoreGauge({ value, min = 1, max = 4, steps = 8, className, classificat
   )
 }
 
-function ScoreBadge({ label }) {
+function ScoreBadge({ label, className }) {
   if (!label) {
-    return <Badge variant="outline" className="text-muted-foreground">Sem dado</Badge>
+    return (
+      <Badge variant="outline" className={cn('text-muted-foreground', className)}>
+        Sem dado
+      </Badge>
+    )
   }
   const style = classificationColors[label] ?? 'bg-muted text-muted-foreground'
-  return <Badge className={cn('text-xs font-semibold', style)}>{label}</Badge>
+  return (
+    <Badge className={cn('text-xs font-semibold', style, className)}>
+      {label}
+    </Badge>
+  )
 }
 
 function getComparisonTrendClass(operatorValue, peerValue, direction = 'higher') {
@@ -337,11 +345,18 @@ function KpiCards({
                     <p className="text-xs text-muted-foreground">
                       Média filtrada: {snapshot?.isLoading ? '...' : formatValue(peerValue, metric.format)}
                     </p>
-                    <ScoreGauge
-                      value={regulatoryLoading ? null : regMetric?.note ?? null}
-                      steps={6}
-                      classification={regulatoryLoading ? null : regMetric?.classification}
-                    />
+                    <div className="flex items-center gap-2">
+                      <ScoreGauge
+                        value={regulatoryLoading ? null : regMetric?.note ?? null}
+                        steps={6}
+                        classification={regulatoryLoading ? null : regMetric?.classification}
+                        className="flex-1"
+                      />
+                      <ScoreBadge
+                        label={regulatoryLoading ? null : regMetric?.classification}
+                        className="whitespace-nowrap"
+                      />
+                    </div>
                   </div>
                 )
               })}

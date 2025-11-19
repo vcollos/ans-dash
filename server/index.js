@@ -3,6 +3,7 @@ import { Pool } from 'pg'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { runAgent } from './agentRunner.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -36,7 +37,7 @@ function buildCsv(result) {
 }
 
 const app = express()
-app.use(express.json({ limit: '1mb' }))
+app.use(express.json({ limit: '5mb' }))
 
 app.get('/api/health', async (req, res) => {
   try {
@@ -85,6 +86,20 @@ app.post('/api/query', async (req, res) => {
     res.status(500).json({ error: 'Falha ao executar consulta' })
   } finally {
     client.release()
+  }
+})
+
+app.post('/api/agent', async (req, res) => {
+  const { question, context } = req.body ?? {}
+  if (!question || typeof question !== 'string') {
+    return res.status(400).json({ error: 'Pergunta obrigatória.' })
+  }
+  try {
+    const result = await runAgent(question, context)
+    res.json({ answer: result.output_text })
+  } catch (err) {
+    console.error('[server] erro ao executar agente', err)
+    res.status(500).json({ error: 'Falha ao consultar agente OpenAI.' })
   }
 })
 

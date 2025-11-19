@@ -109,7 +109,7 @@ function FiltersPanel({
   }
 
   return (
-    <Card className={cn('lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto', className)}>
+    <Card className={cn('w-full', className)}>
       <CardHeader className="pb-4">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base">Filtros</CardTitle>

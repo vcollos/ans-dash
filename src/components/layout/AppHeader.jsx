@@ -1,6 +1,3 @@
-import { useRef } from 'react'
-import { Button } from '../ui/button'
-import { Download } from 'lucide-react'
 import { formatInteger } from '../../lib/utils'
 
 function SummaryBadge({ label, value }) {
@@ -12,22 +9,9 @@ function SummaryBadge({ label, value }) {
   )
 }
 
-function AppHeader({ tableData, sourceInfo, summary, onUploadDataset, isUploading, uploadFeedback }) {
+function AppHeader({ tableData, sourceInfo, summary }) {
   const operadorasValue = formatInteger(summary?.operadoras)
   const beneficiariosValue = formatInteger(summary?.beneficiarios)
-  const fileInputRef = useRef(null)
-
-  const handleUploadClick = () => {
-    fileInputRef.current?.click()
-  }
-
-  const handleFileChange = (event) => {
-    const file = event.target.files?.[0]
-    if (file && onUploadDataset) {
-      onUploadDataset(file)
-    }
-    event.target.value = ''
-  }
 
   return (
     <header className="flex flex-col gap-5 rounded-2xl border bg-card p-5 shadow-sm sm:p-6 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
@@ -45,20 +29,9 @@ function AppHeader({ tableData, sourceInfo, summary, onUploadDataset, isUploadin
       </div>
       <div className="flex flex-1 flex-col gap-3 lg:items-end">
         <div className="flex flex-wrap justify-start gap-2 sm:justify-end">
-          <input ref={fileInputRef} type="file" accept=".csv,.parquet" className="hidden" onChange={handleFileChange} />
-          <Button variant="outline" size="sm" className="gap-2" onClick={handleUploadClick} disabled={isUploading}>
-            <Download className={`h-4 w-4 rotate-180 ${isUploading ? 'animate-spin' : ''}`} /> {isUploading ? 'Importando...' : 'Atualizar arquivo'}
-          </Button>
-        </div>
-        <div className="flex flex-wrap justify-start gap-2 sm:justify-end">
           <SummaryBadge label="Operadoras selecionadas" value={operadorasValue} />
           <SummaryBadge label="Beneficiários (último período)" value={beneficiariosValue} />
         </div>
-        {isUploading || uploadFeedback ? (
-          <p className="text-xs text-muted-foreground">
-            {isUploading ? 'Processando arquivo, aguarde alguns segundos…' : uploadFeedback?.message}
-          </p>
-        ) : null}
       </div>
     </header>
   )

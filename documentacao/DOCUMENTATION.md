@@ -39,6 +39,11 @@ Fluxo resumido:
 | `VITE_DATASET_CURATED_URL`    | Fonte CSV curada legacy (não usada no modo Postgres).                                                   | `/data/indicadores.csv`                       |
 | `VITE_DATASET_PARQUET_URL`    | Fonte Parquet legacy (não usada no modo Postgres).                                                      | `/data/20251213_contas_ans.parquet`           |
 | `VITE_DATASET_URL`            | Fallback para `/api/indicadores.csv`.                                                                    | `/api/indicadores.csv`                        |
+| `OPENAI_API_KEY`              | Chave usada pelo agente regulatório (ChatGPT).                                                           | —                                             |
+| `OPENAI_VECTOR_STORE_ID`      | Vector Store com os PDFs normativos.                                                                     | `vs_691d04557eac8191a3dbed8d80a90e4a`         |
+| `OPENAI_WORKFLOW_ID`          | Workflow/ChatKit ID para rastreio.                                                                       | `wf_691cf24519088190be4a330d067c011605a94df9a2f95438` |
+| `OPENAI_WORKFLOW_VERSION`     | Versão usada nos metadados de trace.                                                                     | `draft`                                       |
+| `OPENAI_AGENT_MODEL`          | Modelo base do agente.                                                                                   | `gpt-4.1-mini-2025-04-14`                     |
 
 Para ambientes locais, use `.env.local` na raiz:
 
@@ -221,6 +226,57 @@ Todas as fórmulas são strings SQL convertidas em `metricSql`. Helpers:
 - **Resultado líquido** é calculado tanto diretamente (`vr_receitas - vr_despesas`) quanto em variantes (`resultado_liquido_final_ans`, `resultado_liquido_informado`).
 - **Deltas e `trimestre_rank`** permitem análises temporais (sinistralidade trimestral, séries de tendência).
 - **Export SQL** mantém nomes amigáveis (`31_vr_ativos_garantidores`) para cruzamentos externos.
+
+## 13. Execução contínua com systemd
+
+O repositório inclui `scripts/ans-dashboard.service`, que sobe o Vite (frontend) e a API Express usando `scripts/start-dashboard.sh`. Fluxo sugerido para hosts Ubuntu:
+
+1. Ajuste o arquivo de serviço conforme o ambiente:
+   - `User=`: conta que possui acesso ao repositório e ao Postgres.
+   - `WorkingDirectory=`: raiz do projeto.
+   - `Environment=`: exporte `DATABASE_URL`, `SERVER_PORT`, `VITE_API_PROXY` etc. se necessário.
+2. Copie para o systemd e habilite:
+
+   ```bash
+   sudo cp scripts/ans-dashboard.service /etc/systemd/system/ans-dashboard.service
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now ans-dashboard
+   ```
+
+3. Acompanhe logs com `journalctl -u ans-dashboard -f`.
+
+O script `start-dashboard.sh` inicia `npm run dev:server` e `npm run dev:client` em paralelo. Caso prefira servir o build estático, substitua o trecho por `npm run dev:server` + `npm run preview` (assegurando que `npm run build` seja executado antes de iniciar o serviço).
+
+### Diretrizes adicionais
+
+- Garanta que o usuário possua permissão de escrita em `public/data` (uploads) e no diretório raiz (node_modules).
+- Se o host usar um proxy interno para Postgres, configure `Environment="HTTP_PROXY=..."`/`HTTPS_PROXY`.
+- Para atualizar o código em produção, pare o serviço (`systemctl stop ans-dashboard`), faça o deploy (git pull + npm install + npm run build) e reinicie.
+
+## 14. Resolução de problemas comuns
+
+| Sintoma | Causa provável | Ação recomendada |
+|--------|----------------|------------------|
+| `Invalid hook call. Hooks can only be called...` no console do navegador. | Duas cópias do React ao rodar via serviço ou link local. `vite.config.js` agora inclui `resolve.dedupe = ['react','react-dom']`, mas o erro pode permanecer após caches antigos. | Pare o serviço, delete `node_modules/` e `package-lock.json`, rode `npm install` e reinicie `npm run dev`/`systemctl start ans-dashboard`. |
+| Porta 5173 ocupada ao iniciar. | Serviço Vite já rodando ou outra aplicação. | Pare o processo (`lsof -i :5173`), ajuste `VITE_PORT` ou edite `scripts/start-dashboard.sh` para usar `--host 0.0.0.0 --port XXXX`. |
+| API inacessível (`ECONNREFUSED` da UI). | `server/index.js` não iniciou ou `DATABASE_URL` inválida. | Verifique `journalctl -u ans-dashboard`, valide `DATABASE_URL` e teste `curl http://localhost:4000/api/health`. |
+| Upload para `/api/upload-dataset` retorna 500. | Falha de permissão ao gravar em `public/data` ou payload Base64 inválido. | Cheque permissões e logs `[upload-dataset]`. Ajuste `encoding` enviado pelo frontend. |
+
+## 15. Assistente regulatório (ChatGPT)
+
+- O botão **Falar com ChatGPT** (sidebar/versão mobile) monta um snapshot com filtros aplicados, período selecionado, KPIs (incluindo score regulatório), ranking (top/bottom 10), série histórica filtrada, valores monetários e contagem de operadoras/beneficiários exibidos. Esse snapshot é enviado para `POST /api/agent`.
+- O endpoint chama `runDashboardAgent` (`server/agentRunner.js`), que instancia o agente “Marinho” com `@openai/agents`, `renderFormula` e `fileSearchTool`. O agente consulta apenas os documentos presentes no vector store `OPENAI_VECTOR_STORE_ID` (RN 518/528/574/630, PPCNG, Indicadores etc.) antes de responder.
+- Variáveis necessárias: `OPENAI_API_KEY` (obrigatória), `OPENAI_VECTOR_STORE_ID`, `OPENAI_WORKFLOW_ID`, `OPENAI_WORKFLOW_VERSION`, `OPENAI_AGENT_MODEL`. Defaults estão descritos na tabela da Seção 3.
+- Como o agente recebe o contexto pronto, nenhuma consulta SQL adicional é executada; o custo da API limita-se às mensagens enviadas. Ideal para tirar dúvidas sobre o estado atual do painel sem sobrecarregar o banco.
+- Teste via curl:
+
+```bash
+curl -X POST http://localhost:4000/api/agent \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Explique a sinistralidade filtrada", "context":{"filters":{"modalidades":["Odontológico"]}}}'
+```
+
+O JSON de resposta contém `answer`. Quando houver fórmulas, o agente encerra a resposta com `{ "tool": "renderFormula", "latex": "..." }`, interpretado pelo frontend via KaTeX.
 
 ---
 
