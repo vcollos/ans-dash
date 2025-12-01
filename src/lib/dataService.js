@@ -868,13 +868,21 @@ export async function fetchOperatorLatestSnapshot(nomeOperadora) {
   return rows[0] ?? null
 }
 
-export async function fetchRanking(metric, filters, limit = 10, order = 'DESC', options = {}) {
+const rankingMetrics = metricFormulas.filter((metric) => metric.showInCards)
+
+export async function fetchRanking(metric, filters, limit = null, order = 'DESC', options = {}) {
   const sqlMetric = metricSql[metric] ?? metricSql.sinistralidade_pct
+  const metricSelectList = rankingMetrics
+    .map((item) => `${metricSql[item.id].trim()} AS ${item.id}`)
+    .join(',\n      ')
   const { whereClause } = buildFilterClauses(filters)
   const operatorName = options.operatorName ? sanitizeSql(options.operatorName) : null
+  const limitClause = Number.isFinite(limit) && limit > 0 ? `LIMIT ${limit}` : ''
   const query = `
     WITH base AS (
-      SELECT nome_operadora, reg_ans, porte, modalidade, qt_beneficiarios, ${sqlMetric} AS valor
+      SELECT nome_operadora, reg_ans, porte, modalidade, qt_beneficiarios, ${sqlMetric} AS valor${
+        metricSelectList ? `,\n      ${metricSelectList}` : ''
+      }
       FROM ${DEFAULT_VIEW}
       ${whereClause}
     ), ranked AS (
@@ -886,7 +894,7 @@ export async function fetchRanking(metric, filters, limit = 10, order = 'DESC', 
     SELECT *
     FROM ranked
     ORDER BY rank
-    LIMIT ${limit}
+    ${limitClause}
   `
   const rows = await runQuery(query)
   let operatorRow = null
@@ -904,7 +912,10 @@ export async function fetchRanking(metric, filters, limit = 10, order = 'DESC', 
   return { rows, operatorRow }
 }
 
-export async function fetchRegulatoryScoreRanking(filters, limit = 10, order = 'DESC', options = {}) {
+export async function fetchRegulatoryScoreRanking(filters, limit = null, order = 'DESC', options = {}) {
+  const metricSelectList = rankingMetrics
+    .map((item) => `${metricSql[item.id].trim()} AS ${item.id}`)
+    .join(',\n      ')
   const indicatorProjection = buildRegulatoryIndicatorProjection().join(',\n      ')
   const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
   const query = `
@@ -916,7 +927,9 @@ export async function fetchRegulatoryScoreRanking(filters, limit = 10, order = '
       qt_beneficiarios,
       ano,
       trimestre,
-      periodo
+      periodo${
+        metricSelectList ? `,\n      ${metricSelectList}` : ''
+      }
       ${indicatorProjection ? `,\n      ${indicatorProjection}` : ''}
     FROM ${DEFAULT_VIEW}
     ${whereClause ?? ''}
@@ -952,7 +965,7 @@ export async function fetchRegulatoryScoreRanking(filters, limit = 10, order = '
   const operatorName = options.operatorName ?? null
   const operatorRow = operatorName ? scoredRows.find((row) => row.nome_operadora === operatorName) ?? null : null
   return {
-    rows: scoredRows.slice(0, limit),
+    rows: Number.isFinite(limit) && limit > 0 ? scoredRows.slice(0, limit) : scoredRows,
     operatorRow,
   }
 }

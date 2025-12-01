@@ -85,7 +85,7 @@ function ErrorState({ error, onRetry }) {
 }
 
 function App() {
-  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
+  const [filtersSidebarOpen, setFiltersSidebarOpen] = useState(false)
   const {
     status,
     error,
@@ -212,21 +212,29 @@ function App() {
             description="Aplicando filtros e atualizando os indicadores."
           />
         </div>
-        <div className="lg:hidden">
-          <div className="sticky top-2 z-20 -mx-4 mb-3 px-4 sm:px-0">
-          <Button className="w-full" variant="secondary" onClick={() => setMobileFiltersOpen(true)}>
-              Ajustar filtros
-            </Button>
-          </div>
-          {mobileFiltersOpen ? (
-            <div className="fixed inset-0 z-40 flex flex-col bg-background/95 backdrop-blur">
+        <div className="sticky top-2 z-20 -mx-4 mb-2 flex items-center justify-between gap-3 px-4 sm:px-0">
+          <div className="text-sm text-muted-foreground">Sidebar de filtros retrátil para liberar espaço.</div>
+          <Button className="w-auto" variant="secondary" onClick={() => setFiltersSidebarOpen(true)}>
+            Abrir filtros
+          </Button>
+        </div>
+        {filtersSidebarOpen ? (
+          <>
+            <div
+              className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm transition-opacity"
+              onClick={() => setFiltersSidebarOpen(false)}
+            />
+            <div className="fixed inset-y-0 left-0 z-50 w-full max-w-[380px] overflow-y-auto border-r border-border/70 bg-background shadow-2xl transition-transform animate-in slide-in-from-left">
               <div className="flex items-center justify-between border-b px-4 py-3">
-                <p className="text-sm font-semibold">Filtros</p>
-                <Button variant="ghost" size="sm" onClick={() => setMobileFiltersOpen(false)}>
+                <div>
+                  <p className="text-sm font-semibold">Filtros</p>
+                  <p className="text-xs text-muted-foreground">Escolha recortes, depois feche para ganhar tela.</p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setFiltersSidebarOpen(false)}>
                   Fechar
                 </Button>
               </div>
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+              <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
                 <FiltersPanel
                   filters={filters}
                   options={options}
@@ -247,36 +255,14 @@ function App() {
                 />
               </div>
               <div className="border-t p-4">
-                <Button className="w-full" onClick={() => setMobileFiltersOpen(false)}>
+                <Button className="w-full" onClick={() => setFiltersSidebarOpen(false)}>
                   Aplicar filtros
                 </Button>
               </div>
             </div>
-          ) : null}
-        </div>
-        <div className="grid gap-6 lg:grid-cols-[320px,minmax(0,1fr)] lg:items-start lg:gap-8">
-          <div className="hidden min-w-[320px] lg:block">
-            <div className="space-y-4 lg:sticky lg:top-6">
-              <FiltersPanel
-                filters={filters}
-                options={options}
-                onChange={updateFilters}
-                onReset={resetFilters}
-                onOperatorSelect={applyOperatorSelection}
-                comparisonFilters={comparisonFiltersDraft}
-                comparisonAppliedFilters={comparisonFilters}
-                onComparisonFiltersChange={updateComparisonFilters}
-                onComparisonFiltersApply={commitComparisonFilters}
-                onComparisonFiltersReset={resetComparisonFiltersState}
-              />
-              <DatasetUploadCard
-                onUploadDataset={replaceDataset}
-                isUploading={isUploading}
-                uploadFeedback={uploadFeedback}
-              />
-            </div>
-          </div>
-          <div className="space-y-6 min-w-0">
+          </>
+        ) : null}
+        <div className="space-y-6 min-w-0">
             <KpiCards
               snapshot={operatorInsight}
               fallbackSummary={kpis}
@@ -286,19 +272,14 @@ function App() {
               fallbackPeriods={periodOptions}
               regulatoryScore={regulatoryScore}
             />
-            <div className="grid gap-6 lg:grid-cols-2 lg:items-stretch">
-              <RankingChart
-                data={rankingData.rows}
-                operatorRow={rankingData.operatorRow}
-                metric={rankingMetric}
-                onMetricChange={setRankingMetric}
-                order={rankingOrder}
-                onOrderChange={setRankingOrder}
-                operatorName={operatorInsight?.operatorName}
-                comparisonLabel={comparisonLabel}
-              />
-              <MonetarySummary summary={monetarySummary} isLoading={isQuerying} className="h-full" />
-            </div>
+            <RankingChart
+              data={rankingData.rows}
+              operatorRow={rankingData.operatorRow}
+              operatorName={operatorInsight?.operatorName}
+              comparisonLabel={comparisonLabel}
+              onOperatorClick={(row) => applyOperatorSelection(row.nome_operadora)}
+            />
+            <MonetarySummary summary={monetarySummary} isLoading={isQuerying} className="h-full" />
             <IndicatorTrendChart
               data={trendSeries.rows}
               metric={trendMetric}
@@ -307,9 +288,13 @@ function App() {
               primaryLabel={trendPrimaryLabel}
               comparisonLabel={comparisonLabel}
             />
-            <DataTable rows={tableData.rows ?? []} columns={tableData.columns ?? []} isLoading={isQuerying} />
+            <DataTable
+              rows={tableData.rows ?? []}
+              columns={tableData.columns ?? []}
+              isLoading={isQuerying}
+              maxHeightClass="max-h-[620px]"
+            />
           </div>
-        </div>
       </main>
     </div>
   )

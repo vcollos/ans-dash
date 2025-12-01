@@ -201,7 +201,7 @@ function SortButton({ header }) {
   )
 }
 
-function DataTable({ rows, columns = [], isLoading }) {
+function DataTable({ rows, columns = [], isLoading, className = '', maxHeightClass = 'max-h-[480px]' }) {
   const [sorting, setSorting] = useState([])
 
   const effectiveFields = useMemo(() => {
@@ -233,8 +233,10 @@ function DataTable({ rows, columns = [], isLoading }) {
   const tableRows = table.getRowModel().rows
   const hasRows = tableRows.length > 0
 
+  const scrollHeightClass = maxHeightClass || 'max-h-[480px]'
+
   return (
-    <Card>
+    <Card className={className}>
       <CardContent className="space-y-4 pt-6">
         {isLoading ? (
           <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
@@ -287,7 +289,7 @@ function DataTable({ rows, columns = [], isLoading }) {
             <div className="hidden xl:block">
               <div className="rounded-md border">
                 <div className="w-full overflow-x-auto">
-                  <div className="max-h-[480px] overflow-y-auto">
+                  <div className={`${scrollHeightClass} overflow-y-auto`}>
                     <table className="min-w-[960px] caption-bottom text-sm">
                       <thead className="sticky top-0 z-10 bg-background">
                         {table.getHeaderGroups().map((headerGroup) => (

@@ -269,8 +269,10 @@ export function useDashboardController() {
           : {}
         const rankingPromise =
           rankingMetricState === 'regulatory_score'
-            ? fetchRegulatoryScoreRanking(rankingFilters, 10, rankingOrder, { operatorName: operatorContext?.name ?? null })
-            : fetchRanking(rankingMetricState, rankingFilters, 10, rankingOrder, {
+            ? fetchRegulatoryScoreRanking(rankingFilters, null, rankingOrder, {
+                operatorName: operatorContext?.name ?? null,
+              })
+            : fetchRanking(rankingMetricState, rankingFilters, null, rankingOrder, {
                 operatorName: operatorContext?.name ?? null,
               })
         const [summary, ranking, table, monetary] = await Promise.all([
