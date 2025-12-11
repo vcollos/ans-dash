@@ -84,8 +84,8 @@ export function useDashboardController() {
   const [rankingMetricState, setRankingMetricState] = useState(DEFAULT_RANKING_METRIC)
   const [rankingData, setRankingData] = useState({ rows: [], operatorRow: null })
   const [rankingOrder, setRankingOrder] = useState(() => getMetricOrder(DEFAULT_RANKING_METRIC))
-  const [trendMetric, setTrendMetric] = useState(DEFAULT_RANKING_METRIC)
-  const [trendSeries, setTrendSeries] = useState({ rows: [], isLoading: false })
+  const [trendSeriesByMetric, setTrendSeriesByMetric] = useState({})
+  const [isTrendLoading, setIsTrendLoading] = useState(false)
   const [tableData, setTableData] = useState({ rows: [], columns: [] })
   const [isQuerying, setIsQuerying] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
@@ -106,6 +106,10 @@ export function useDashboardController() {
   const operatorSelectionRef = useRef(0)
 
   const comparisonFilterQuery = useMemo(() => comparisonFiltersToQuery(comparisonFilters), [comparisonFilters])
+  const trendMetricList = useMemo(
+    () => ['regulatory_score', ...rankingCatalog.map((metric) => metric.id)],
+    [],
+  )
 
   const resolvedFilters = useMemo(() => {
     let nextFilters = { ...filters }
@@ -305,8 +309,8 @@ export function useDashboardController() {
   useEffect(() => {
     if (status !== 'ready') return
     let cancelled = false
-    setTrendSeries((prev) => ({ ...prev, isLoading: true }))
-    async function loadTrend() {
+    setIsTrendLoading(true)
+    async function loadAllTrends() {
       try {
         const trendComparison = operatorContext?.name
           ? {
@@ -314,21 +318,27 @@ export function useDashboardController() {
               filters: comparisonFilterQuery,
             }
           : null
-        const series = await fetchTrendSeries(trendMetric, trendFilters, trendComparison)
+        const results = await Promise.all(
+          trendMetricList.map(async (metricId) => {
+            const series = await fetchTrendSeries(metricId, trendFilters, trendComparison)
+            return [metricId, series ?? []]
+          }),
+        )
         if (cancelled) return
-        setTrendSeries({ rows: series ?? [], isLoading: false })
+        const map = Object.fromEntries(results)
+        setTrendSeriesByMetric(map)
       } catch (err) {
-        if (!cancelled) console.error('[Dashboard] Falha ao carregar série histórica', err)
-        if (!cancelled) {
-          setTrendSeries({ rows: [], isLoading: false })
-        }
+        if (!cancelled) console.error('[Dashboard] Falha ao carregar séries históricas', err)
+        if (!cancelled) setTrendSeriesByMetric({})
+      } finally {
+        if (!cancelled) setIsTrendLoading(false)
       }
     }
-    loadTrend()
+    loadAllTrends()
     return () => {
       cancelled = true
     }
-  }, [status, trendMetric, trendFilters, operatorContext?.name, comparisonFilterQuery])
+  }, [status, trendFilters, operatorContext?.name, comparisonFilterQuery, trendMetricList])
 
   useEffect(() => {
     if (status !== 'ready') return
@@ -548,9 +558,8 @@ export function useDashboardController() {
     rankingData,
     rankingOrder,
     setRankingOrder,
-    trendMetric,
-    setTrendMetric,
-    trendSeries,
+    trendSeriesByMetric,
+    isTrendLoading,
     tableData,
     isQuerying,
     isUploading,

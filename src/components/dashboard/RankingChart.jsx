@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { cn, formatNumber, formatPercent, toNumber } from '../../lib/utils'
 import { metricFormulas } from '../../lib/metricFormulas'
 
@@ -11,6 +12,11 @@ const rankingMetrics = metricFormulas
     format: metric.format === 'percent' ? 'percent' : metric.format === 'decimal' ? 'number' : metric.format,
     trend: metric.trend ?? 'higher',
   }))
+
+const rankingMetricOptions = [
+  { id: 'regulatory_score', label: 'Score regulatório (RN 518)', format: 'score', trend: 'higher' },
+  ...rankingMetrics,
+]
 
 function formatValue(value, format) {
   if (value === null || value === undefined) return '—'
@@ -37,8 +43,11 @@ function RankingChart({
   operatorName,
   comparisonLabel,
   onOperatorClick = null,
+  metric = 'regulatory_score',
+  onMetricChange,
 }) {
   const [sortConfig, setSortConfig] = useState({ column: 'rank', direction: 'asc' })
+  const selectedMetric = rankingMetricOptions.find((item) => item.id === metric) ?? rankingMetricOptions[0]
 
   const sortedRows = useMemo(() => {
     const rows = [...data]
@@ -111,10 +120,29 @@ function RankingChart({
   return (
     <Card className="flex h-full flex-col">
       <CardHeader className="space-y-2">
-        <CardTitle className="text-lg">Ranking de Operadoras</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          11 indicadores lado a lado. {infoText}
-        </p>
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <CardTitle className="text-lg">Ranking de Operadoras</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              11 indicadores lado a lado. {infoText}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Ordenar por</p>
+            <Select value={selectedMetric?.id} onValueChange={(value) => onMetricChange?.(value)}>
+              <SelectTrigger className="w-[260px]">
+                <SelectValue placeholder="Métrica do ranking" />
+              </SelectTrigger>
+              <SelectContent>
+                {rankingMetricOptions.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col space-y-3">
         <div className="flex-1 overflow-auto rounded-md border">

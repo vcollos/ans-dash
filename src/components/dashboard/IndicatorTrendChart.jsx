@@ -1,7 +1,6 @@
 import { useMemo, useId } from 'react'
 import { Line, LineChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '../ui/chart'
 import { metricFormulas } from '../../lib/metricFormulas'
 import { formatNumber, formatPercent, toNumber } from '../../lib/utils'
@@ -55,31 +54,8 @@ function LegendItem({ label, color }) {
   )
 }
 
-function IndicatorTrendChart({
-  data = [],
-  metric,
-  onMetricChange,
-  isLoading = false,
-  primaryLabel,
-  comparisonLabel,
-}) {
-  const selectedMetric = metricOptions.find((item) => item.id === metric) ?? metricOptions[0]
+function IndicatorTrendChart({ dataByMetric = {}, isLoading = false, primaryLabel, comparisonLabel }) {
   const chartId = useId().replace(/:/g, '')
-
-  const chartData = useMemo(() => {
-    return (data ?? []).map((row) => {
-      const primary = toNumber(row?.operador_valor ?? row?.valor, null)
-      const comparison = toNumber(row?.pares_valor, null)
-      return {
-        periodo: row?.periodo ?? (row?.ano && row?.trimestre ? `${row.ano}T${row.trimestre}` : '—'),
-        primary: primary === null ? null : Number(primary),
-        comparison: comparison === null ? null : Number(comparison),
-      }
-    })
-  }, [data])
-
-  const hasData = chartData.some((item) => item.primary !== null || item.comparison !== null)
-  const hasComparisonSeries = chartData.some((item) => item.comparison !== null)
   const chartConfig = useMemo(
     () => ({
       primary: {
@@ -96,93 +72,93 @@ function IndicatorTrendChart({
 
   return (
     <Card className="min-w-0">
-      <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <CardTitle className="text-lg">Evolução dos indicadores</CardTitle>
-          <CardDescription>Compare o histórico do indicador selecionado entre a linha principal e o grupo de comparação.</CardDescription>
-        </div>
-        <Select value={selectedMetric?.id} onValueChange={onMetricChange}>
-          <SelectTrigger className="w-[240px]">
-            <SelectValue placeholder="Escolha o indicador" />
-          </SelectTrigger>
-          <SelectContent>
-            {metricOptions.map((item) => (
-              <SelectItem key={item.id} value={item.id}>
-                {item.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <CardHeader>
+        <CardTitle className="text-lg">Evolução dos indicadores</CardTitle>
+        <CardDescription>Visualize todas as séries (2 por linha) sem trocar de indicador.</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
-          <div className="flex flex-wrap gap-4">
-            <LegendItem label={chartConfig.primary.label} color={OPERATOR_COLOR} />
-            {hasComparisonSeries ? <LegendItem label={chartConfig.comparison.label} color={FILTER_AVERAGE_COLOR} /> : null}
-          </div>
-          <div className="relative">
-            {isLoading ? (
-              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-md bg-background/70 text-sm text-muted-foreground">
-                Carregando série histórica...
-              </div>
-            ) : null}
-            {hasData ? (
-              <ChartContainer
-                id={`trend-${chartId}`}
-                className="h-[360px] w-full items-stretch justify-stretch rounded-lg border aspect-auto"
-                config={chartConfig}
-              >
-                <LineChart data={chartData} margin={{ left: 12, right: 12, top: 16, bottom: 0 }}>
-                  <CartesianGrid vertical={false} strokeDasharray="4 4" className="stroke-muted" />
-                  <XAxis dataKey="periodo" tickLine={false} axisLine={false} tickMargin={8} />
-                  <YAxis
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(value) => {
-                      if (value === null || value === undefined || Number.isNaN(value)) return ''
-                      const formatted = formatMetricValue(value, selectedMetric?.format, { compact: true })
-                      return formatted === '—' ? '' : formatted
-                    }}
-                    width={80}
-                  />
-                  <ChartTooltip
-                    cursor={false}
-                    content={
-                      <ChartTooltipContent
-                        valueFormatter={(value) => formatMetricValue(value, selectedMetric?.format)}
+        <div className="flex flex-wrap gap-4">
+          <LegendItem label={chartConfig.primary.label} color={OPERATOR_COLOR} />
+          <LegendItem label={chartConfig.comparison.label} color={FILTER_AVERAGE_COLOR} />
+        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          {metricOptions.map((metric) => {
+            const rawData = dataByMetric?.[metric.id] ?? []
+            const chartData = (rawData ?? []).map((row) => {
+              const primary = toNumber(row?.operador_valor ?? row?.valor, null)
+              const comparison = toNumber(row?.pares_valor, null)
+              return {
+                periodo: row?.periodo ?? (row?.ano && row?.trimestre ? `${row.ano}T${row.trimestre}` : '—'),
+                primary: primary === null ? null : Number(primary),
+                comparison: comparison === null ? null : Number(comparison),
+              }
+            })
+            const hasData = chartData.some((item) => item.primary !== null || item.comparison !== null)
+            const hasComparisonSeries = chartData.some((item) => item.comparison !== null)
+
+            return (
+              <div key={metric.id} className="relative rounded-lg border p-3">
+                {isLoading ? (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center rounded-md bg-background/70 text-xs text-muted-foreground">
+                    Carregando séries...
+                  </div>
+                ) : null}
+                <p className="mb-2 text-sm font-semibold">{metric.label}</p>
+                {hasData ? (
+                  <ChartContainer
+                    id={`trend-${chartId}-${metric.id}`}
+                    className="h-[260px] w-full items-stretch justify-stretch rounded-lg border aspect-auto"
+                    config={chartConfig}
+                  >
+                    <LineChart data={chartData} margin={{ left: 12, right: 12, top: 8, bottom: 0 }}>
+                      <CartesianGrid vertical={false} strokeDasharray="4 4" className="stroke-muted" />
+                      <XAxis dataKey="periodo" tickLine={false} axisLine={false} tickMargin={8} />
+                      <YAxis
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={(value) => {
+                          if (value === null || value === undefined || Number.isNaN(value)) return ''
+                          const formatted = formatMetricValue(value, metric.format, { compact: true })
+                          return formatted === '—' ? '' : formatted
+                        }}
+                        width={70}
                       />
-                    }
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="primary"
-                    stroke="var(--color-primary)"
-                    strokeWidth={2}
-                    dot={{ fill: 'var(--color-primary)', r: 3, strokeWidth: 0 }}
-                    activeDot={{ r: 4 }}
-                    connectNulls
-                    name={chartConfig.primary.label}
-                  />
-                  {hasComparisonSeries ? (
-                    <Line
-                      type="monotone"
-                      dataKey="comparison"
-                      stroke="var(--color-comparison)"
-                      strokeWidth={2}
-                      dot={{ fill: 'var(--color-comparison)', r: 3, strokeWidth: 0 }}
-                      activeDot={{ r: 4 }}
-                      connectNulls
-                      name={chartConfig.comparison.label}
-                    />
-                  ) : null}
-                </LineChart>
-              </ChartContainer>
-            ) : (
-              <div className="flex h-[320px] items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
-                Nenhum dado disponível para o indicador selecionado.
+                      <ChartTooltip
+                        cursor={false}
+                        content={<ChartTooltipContent valueFormatter={(value) => formatMetricValue(value, metric.format)} />}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="primary"
+                        stroke="var(--color-primary)"
+                        strokeWidth={2}
+                        dot={{ fill: 'var(--color-primary)', r: 2.5, strokeWidth: 0 }}
+                        activeDot={{ r: 4 }}
+                        connectNulls
+                        name={chartConfig.primary.label}
+                      />
+                      {hasComparisonSeries ? (
+                        <Line
+                          type="monotone"
+                          dataKey="comparison"
+                          stroke="var(--color-comparison)"
+                          strokeWidth={2}
+                          dot={{ fill: 'var(--color-comparison)', r: 2.5, strokeWidth: 0 }}
+                          activeDot={{ r: 4 }}
+                          connectNulls
+                          name={chartConfig.comparison.label}
+                        />
+                      ) : null}
+                    </LineChart>
+                  </ChartContainer>
+                ) : (
+                  <div className="flex h-[240px] items-center justify-center rounded-md border border-dashed text-xs text-muted-foreground">
+                    Sem dados para este indicador nos filtros atuais.
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            )
+          })}
         </div>
       </CardContent>
     </Card>

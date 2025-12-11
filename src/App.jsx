@@ -98,9 +98,8 @@ function App() {
     rankingData,
     rankingOrder,
     setRankingOrder,
-    trendMetric,
-    setTrendMetric,
-    trendSeries,
+    trendSeriesByMetric,
+    isTrendLoading,
     tableData,
     isQuerying,
     isUploading,
@@ -125,7 +124,7 @@ function App() {
 
   const comparisonLabel = useMemo(() => describeComparisonFilters(comparisonFilters), [comparisonFilters])
   const trendPrimaryLabel = operatorInsight?.operatorName ?? 'Média dos filtros'
-  const isRefreshingData = isQuerying || trendSeries.isLoading
+  const isRefreshingData = isQuerying || isTrendLoading
 
   const agentContext = useMemo(() => {
     const tableRows = tableData?.rows ?? []
@@ -151,8 +150,7 @@ function App() {
       },
       monetarySummary,
       trend: {
-        metric: trendMetric,
-        rows: trendSeries?.rows ?? [],
+        metrics: trendSeriesByMetric,
       },
       tableSummary: {
         visibleRows: tableRows.length,
@@ -174,8 +172,7 @@ function App() {
     rankingOrder,
     rankingData,
     monetarySummary,
-    trendMetric,
-    trendSeries,
+    trendSeriesByMetric,
     tableData,
     sourceInfo,
   ])
@@ -277,14 +274,14 @@ function App() {
               operatorRow={rankingData.operatorRow}
               operatorName={operatorInsight?.operatorName}
               comparisonLabel={comparisonLabel}
+              metric={rankingMetric}
+              onMetricChange={setRankingMetric}
               onOperatorClick={(row) => applyOperatorSelection(row.nome_operadora)}
             />
             <MonetarySummary summary={monetarySummary} isLoading={isQuerying} className="h-full" />
             <IndicatorTrendChart
-              data={trendSeries.rows}
-              metric={trendMetric}
-              onMetricChange={setTrendMetric}
-              isLoading={trendSeries.isLoading || isQuerying}
+              dataByMetric={trendSeriesByMetric}
+              isLoading={isTrendLoading || isQuerying}
               primaryLabel={trendPrimaryLabel}
               comparisonLabel={comparisonLabel}
             />
