@@ -196,7 +196,7 @@ function App() {
   return (
     <div className="min-h-screen bg-muted/20">
       <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 pb-12 pt-4 sm:px-6 sm:pt-6">
-        <AppHeader tableData={tableData} sourceInfo={sourceInfo} summary={kpis} />
+        <AppHeader tableData={tableData} sourceInfo={sourceInfo} summary={kpis} onOpenFilters={() => setFiltersSidebarOpen(true)} />
         <DataLoadingIndicator
           isActive={isRefreshingData}
           className="hidden lg:block"
@@ -208,12 +208,6 @@ function App() {
             className="mb-2"
             description="Aplicando filtros e atualizando os indicadores."
           />
-        </div>
-        <div className="sticky top-2 z-20 -mx-4 mb-2 flex items-center justify-between gap-3 px-4 sm:px-0">
-          <div className="text-sm text-muted-foreground">Sidebar de filtros retrátil para liberar espaço.</div>
-          <Button className="w-auto" variant="secondary" onClick={() => setFiltersSidebarOpen(true)}>
-            Abrir filtros
-          </Button>
         </div>
         {filtersSidebarOpen ? (
           <>

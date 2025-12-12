@@ -4,19 +4,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { cn, formatNumber, formatPercent, toNumber } from '../../lib/utils'
 import { metricFormulas } from '../../lib/metricFormulas'
 
-const rankingMetrics = metricFormulas
-  .filter((metric) => metric.showInCards)
-  .map((metric) => ({
-    id: metric.id,
-    label: metric.label,
-    format: metric.format === 'percent' ? 'percent' : metric.format === 'decimal' ? 'number' : metric.format,
-    trend: metric.trend ?? 'higher',
-  }))
-
-const rankingMetricOptions = [
+const rankingMetrics = [
   { id: 'regulatory_score', label: 'Score regulatório (RN 518)', format: 'score', trend: 'higher' },
-  ...rankingMetrics,
+  ...metricFormulas
+    .filter((metric) => metric.showInCards)
+    .map((metric) => ({
+      id: metric.id,
+      label: metric.label,
+      format: metric.format === 'percent' ? 'percent' : metric.format === 'decimal' ? 'number' : metric.format,
+      trend: metric.trend ?? 'higher',
+    })),
 ]
+
+const rankingMetricOptions = [...rankingMetrics]
 
 function formatValue(value, format) {
   if (value === null || value === undefined) return '—'
@@ -82,24 +82,43 @@ function RankingChart({
   }
 
   const metricStats = useMemo(() => {
+    const percentile = (sorted, p) => {
+      if (!sorted.length) return null
+      const idx = (sorted.length - 1) * p
+      const lo = Math.floor(idx)
+      const hi = Math.ceil(idx)
+      if (lo === hi) return sorted[lo]
+      const weight = idx - lo
+      return sorted[lo] * (1 - weight) + sorted[hi] * weight
+    }
     const stats = {}
     rankingMetrics.forEach((metric) => {
       const values = data
         .map((row) => toNumber(row[metric.id], null))
         .filter((value) => value !== null && Number.isFinite(value))
-      const min = values.length ? Math.min(...values) : null
-      const max = values.length ? Math.max(...values) : null
-      stats[metric.id] = { min, max }
+      if (!values.length) {
+        stats[metric.id] = { min: null, max: null, p10: null, p90: null }
+        return
+      }
+      const sorted = [...values].sort((a, b) => a - b)
+      const min = sorted[0]
+      const max = sorted[sorted.length - 1]
+      const p10 = percentile(sorted, 0.1)
+      const p90 = percentile(sorted, 0.9)
+      stats[metric.id] = { min, max, p10, p90 }
     })
     return stats
   }, [data])
 
   const getHeatStyle = (metricId, value) => {
     const stats = metricStats[metricId]
-    if (!stats || stats.min === null || stats.max === null || !Number.isFinite(value)) return {}
-    const span = stats.max - stats.min
+    if (!stats || stats.p10 === null || stats.p90 === null || !Number.isFinite(value)) return {}
+    const baseMin = stats.p10
+    const baseMax = stats.p90
+    const span = baseMax - baseMin
     if (span === 0) return {}
-    const rawT = (value - stats.min) / span
+    const clamped = Math.min(Math.max(value, baseMin), baseMax)
+    const rawT = (clamped - baseMin) / span
     const meta = rankingMetrics.find((item) => item.id === metricId)
     const t = meta?.trend === 'lower' ? 1 - rawT : rawT
     const hue = 120 * t // red to green
@@ -145,9 +164,9 @@ function RankingChart({
         </div>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col space-y-3">
-        <div className="flex-1 overflow-auto rounded-md border">
+        <div className="relative flex-1 overflow-auto rounded-md border">
           <table className="min-w-[1200px] text-sm">
-            <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+            <thead className="sticky top-0 z-20 bg-card/95 text-xs uppercase text-muted-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/80">
               <tr>
                 <th className="px-3 py-2 text-left">
                   <button

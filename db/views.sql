@@ -43,14 +43,14 @@ WITH base AS (
 ), lagged AS (
   SELECT
     base.*,
-    LAG(vr_eventos_liquidos) OVER (PARTITION BY reg_ans, ano ORDER BY trimestre) AS prev_vr_eventos_liquidos,
-    LAG(vr_corresponsabilidade_cedida) OVER (PARTITION BY reg_ans, ano ORDER BY trimestre) AS prev_vr_corresponsabilidade_cedida,
-    LAG(vr_contraprestacoes) OVER (PARTITION BY reg_ans, ano ORDER BY trimestre) AS prev_vr_contraprestacoes,
-    LAG(vr_provisoes_tecnicas) OVER (PARTITION BY reg_ans, ano ORDER BY trimestre) AS prev_vr_provisoes_tecnicas,
-    COALESCE(vr_eventos_liquidos, 0) - COALESCE(LAG(vr_eventos_liquidos) OVER (PARTITION BY reg_ans, ano ORDER BY trimestre), 0) AS delta_vr_eventos_liquidos,
-    COALESCE(vr_corresponsabilidade_cedida, 0) - COALESCE(LAG(vr_corresponsabilidade_cedida) OVER (PARTITION BY reg_ans, ano ORDER BY trimestre), 0) AS delta_vr_corresponsabilidade_cedida,
-    COALESCE(vr_contraprestacoes, 0) - COALESCE(LAG(vr_contraprestacoes) OVER (PARTITION BY reg_ans, ano ORDER BY trimestre), 0) AS delta_vr_contraprestacoes,
-    COALESCE(vr_provisoes_tecnicas, 0) - COALESCE(LAG(vr_provisoes_tecnicas) OVER (PARTITION BY reg_ans, ano ORDER BY trimestre), 0) AS delta_vr_provisoes_tecnicas
+    LAG(vr_eventos_liquidos) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre) AS prev_vr_eventos_liquidos,
+    LAG(vr_corresponsabilidade_cedida) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre) AS prev_vr_corresponsabilidade_cedida,
+    LAG(vr_contraprestacoes) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre) AS prev_vr_contraprestacoes,
+    LAG(vr_provisoes_tecnicas) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre) AS prev_vr_provisoes_tecnicas,
+    COALESCE(vr_eventos_liquidos, 0) - COALESCE(LAG(vr_eventos_liquidos) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre), 0) AS delta_vr_eventos_liquidos,
+    COALESCE(vr_corresponsabilidade_cedida, 0) - COALESCE(LAG(vr_corresponsabilidade_cedida) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre), 0) AS delta_vr_corresponsabilidade_cedida,
+    COALESCE(vr_contraprestacoes, 0) - COALESCE(LAG(vr_contraprestacoes) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre), 0) AS delta_vr_contraprestacoes,
+    COALESCE(vr_provisoes_tecnicas, 0) - COALESCE(LAG(vr_provisoes_tecnicas) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre), 0) AS delta_vr_provisoes_tecnicas
   FROM base
 )
 SELECT

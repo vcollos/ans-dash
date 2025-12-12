@@ -946,6 +946,8 @@ export async function fetchRegulatoryScoreRanking(filters, limit = null, order =
         ...row,
         valor: evaluation?.finalScore?.value ?? null,
         score_label: evaluation?.finalScore?.label ?? 'SEM DADO',
+        regulatory_score: evaluation?.finalScore?.value ?? null,
+        regulatory_score_label: evaluation?.finalScore?.label ?? 'SEM DADO',
       }
     })
     .filter((row) => row.valor !== null)

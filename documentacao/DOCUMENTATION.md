@@ -278,6 +278,34 @@ curl -X POST http://localhost:4000/api/agent \
 
 O JSON de resposta contém `answer`. Quando houver fórmulas, o agente encerra a resposta com `{ "tool": "renderFormula", "latex": "..." }`, interpretado pelo frontend via KaTeX.
 
+## 16. Operação com PM2 e materialização
+
+- Recriar métricas após ajustes em `metricFormulas.js` ou nas views:
+
+```bash
+node scripts/materialize_metrics.js
+# [materialize] Conectando em postgresql://ansdashboard:ansdashboard@localhost:5432/ans_dashboard
+# [materialize] Criando materialized view indicadores_metricas a partir de indicadores_curados...
+# [materialize] Criando índices...
+# [materialize] Finalizado com sucesso.
+```
+
+- Processos PM2 em produção:
+  - `dash-api` (API Express `server/index.js`)
+  - `dash-client` (frontend Vite dev/preview)
+
+- Comandos úteis:
+
+```bash
+pm2 list
+# id  name         status   uptime ...
+# 1   dash-api     online
+# 0   dash-client  online
+
+pm2 restart dash-api
+pm2 restart dash-client
+```
+
 ---
 
 Esta documentação serve como referência completa para desenvolvedores e analistas que mantêm ou expandem o painel ANS/RN 518. Ao atualizar componentes, mantenha este arquivo sincronizado com a implementação real.***

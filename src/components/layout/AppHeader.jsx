@@ -9,28 +9,34 @@ function SummaryBadge({ label, value }) {
   )
 }
 
-function AppHeader({ tableData, sourceInfo, summary }) {
+function AppHeader({ summary, onOpenFilters, tableData: _tableData, sourceInfo: _sourceInfo }) {
   const operadorasValue = formatInteger(summary?.operadoras)
   const beneficiariosValue = formatInteger(summary?.beneficiarios)
 
   return (
-    <header className="flex flex-col gap-5 rounded-2xl border bg-card p-5 shadow-sm sm:p-6 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
+    <header className="sticky top-2 z-30 flex flex-col gap-5 rounded-2xl border bg-card/95 p-5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/80 sm:p-6 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
       <div className="space-y-4 lg:max-w-[520px]">
         <div className="flex items-center gap-4">
           <img src="https://collos.com.br/wp-content/uploads/2024/12/logo_contag.png" alt="Contag" className="h-14 w-auto" />
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold leading-tight">Painel Regulatório RN 518</h1>
             <p className="text-sm font-medium text-muted-foreground">DIOPS Financeiro</p>
-            <p className="text-sm text-muted-foreground">
-              Monitore solvência, liquidez e desempenho econômico com dados oficiais da ANS (DIOPS).
-            </p>
           </div>
         </div>
       </div>
       <div className="flex flex-1 flex-col gap-3 lg:items-end">
-        <div className="flex flex-wrap justify-start gap-2 sm:justify-end">
+        <div className="flex flex-wrap items-center gap-3 sm:justify-end">
           <SummaryBadge label="Operadoras selecionadas" value={operadorasValue} />
           <SummaryBadge label="Beneficiários (último período)" value={beneficiariosValue} />
+          {onOpenFilters ? (
+            <button
+              type="button"
+              onClick={onOpenFilters}
+              className="rounded-md border border-border bg-secondary px-3 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:bg-secondary/80"
+            >
+              Abrir filtros
+            </button>
+          ) : null}
         </div>
       </div>
     </header>

@@ -27,6 +27,16 @@ const ansSinistroDeltaDenominator =
   '(COALESCE(delta_vr_contraprestacoes, 0) - COALESCE(delta_vr_provisoes_tecnicas, 0)) + ABS(COALESCE(delta_vr_corresponsabilidade_cedida, 0))'
 const ansDopNumerator = `${ansSinistroNumerator} + COALESCE(vr_desp_comerciais, 0) + COALESCE(vr_desp_administrativas, 0) + COALESCE(vr_outras_desp_oper, 0)`
 const ansDopDenominator = `(${ansSinistroDenominator}) + COALESCE(vr_outras_receitas_operacionais, 0)`
+const ansSinistroFlowNumerator = ansSinistroDeltaNumerator
+const ansSinistroFlowDenominator = ansSinistroDeltaDenominator
+const ansSinistroAccumulatedNumerator = `
+SUM(${ansSinistroFlowNumerator})
+  OVER (PARTITION BY reg_ans, ano ORDER BY trimestre ROWS UNBOUNDED PRECEDING)
+`
+const ansSinistroAccumulatedDenominator = `
+SUM(${ansSinistroFlowDenominator})
+  OVER (PARTITION BY reg_ans, ano ORDER BY trimestre ROWS UNBOUNDED PRECEDING)
+`
 
 export const metricFormulas = [
   {
@@ -46,29 +56,40 @@ export const metricFormulas = [
     label: 'Retorno sobre PL (ROE)',
     description: 'resultado_liquido / 25_vr_patrimonio_liquido',
     format: 'percent',
-    sql: safePercent('resultado_liquido', 'vr_patrimonio_liquido'),
+    sql: `
+CASE
+  WHEN vr_patrimonio_liquido IS NULL OR vr_patrimonio_liquido = 0 THEN NULL
+  WHEN vr_patrimonio_liquido < 0 THEN (-ABS(resultado_liquido) / ABS(vr_patrimonio_liquido)) * 100
+  ELSE (resultado_liquido / vr_patrimonio_liquido) * 100
+END
+    `,
     showInCatalog: true,
     showInCards: true,
     trend: 'higher',
   },
-{
-  id: 'sinistralidade_pct',
-  code: 'DM',
-  label: 'Sinistralidade (DM)',
-  description: '(41 + ABS(3117)) / (31 - 321 + ABS(3117)) — Fórmula oficial ANS (RN 518)',
-  format: 'percent',
-  sql: safePercent(ansSinistroNumerator, ansSinistroDenominator),
-  showInCatalog: true,
-  showInCards: true,
-  trend: 'lower',
-},
+  {
+    id: 'sinistralidade_pct',
+    code: 'DM',
+    label: 'Sinistralidade (DM)',
+    description: '(41 + ABS(3117)) / (31 - 321 + ABS(3117)) — Fórmula oficial ANS (RN 518)',
+    format: 'percent',
+    sql: safePercent(ansSinistroNumerator, ansSinistroDenominator),
+    showInCatalog: true,
+    showInCards: true,
+    trend: 'lower',
+  },
   {
     id: 'sinistralidade_acumulada_pct',
     code: 'DM_ACUM',
     label: 'Sinistralidade acumulada (DM_ACUM)',
-    description: 'Cálculo acumulado no ano conforme metodologia ANS (RN 518).',
+    description: 'Cálculo acumulado no ano (fluxo trimestral de 41/311/32/3117) conforme notas metodológicas ANS.',
     format: 'percent',
-    sql: safePercent(ansSinistroNumerator, ansSinistroDenominator),
+    sql: `
+CASE
+  WHEN (${ansSinistroAccumulatedDenominator}) IS NULL OR (${ansSinistroAccumulatedDenominator}) = 0 THEN NULL
+  ELSE ((${ansSinistroAccumulatedNumerator}) / (${ansSinistroAccumulatedDenominator})) * 100
+END
+    `,
     showInCatalog: true,
     showInCards: false,
     trend: 'lower',
@@ -79,7 +100,7 @@ export const metricFormulas = [
     label: 'Sinistralidade do trimestre (DM_TRIM)',
     description: 'Fluxo trimestral obtido pelas variações das contas 41, 311, 32 e 3117.',
     format: 'percent',
-    sql: safePercent(ansSinistroDeltaNumerator, ansSinistroDeltaDenominator),
+    sql: safePercent(ansSinistroFlowNumerator, ansSinistroFlowDenominator),
     showInCatalog: true,
     showInCards: false,
     trend: 'lower',
@@ -114,6 +135,30 @@ export const metricFormulas = [
       '(41 + |3117| + 43 + 46 + 44) / [(31 - 32 + |3117|) + 33] — fórmula ANS (RN 518)',
     format: 'percent',
     sql: safePercent(ansDopNumerator, ansDopDenominator),
+    showInCatalog: true,
+    showInCards: true,
+    trend: 'lower',
+  },
+  {
+    id: 'combined_ratio_pct',
+    code: 'COMB',
+    label: 'Margem combinada (COMB)',
+    description:
+      '(41 + |3117| + DC + DA + Tributos + Outras Desp - Outras Rec Oper) / (311 - 32 + |3117|); referência DIOPS.',
+    format: 'percent',
+    sql: safePercent(
+      `
+COALESCE(vr_eventos_liquidos, 0)
+  + ABS(COALESCE(vr_corresponsabilidade_cedida, 0))
+  + COALESCE(vr_desp_comerciais, 0)
+  + COALESCE(vr_desp_comerciais_promocoes, 0)
+  + COALESCE(vr_desp_administrativas, 0)
+  + COALESCE(vr_desp_tributos, 0)
+  + COALESCE(vr_outras_desp_oper, 0)
+  - COALESCE(vr_outras_receitas_operacionais, 0)
+      `,
+      ansSinistroDenominator,
+    ),
     showInCatalog: true,
     showInCards: true,
     trend: 'lower',
@@ -156,7 +201,13 @@ export const metricFormulas = [
     label: 'Capital de Terceiros / PL (CT/CP)',
     description: '(21_vr_passivo_circulante + 23_vr_passivo_nao_circulante) / 25_vr_patrimonio_liquido',
     format: 'decimal',
-    sql: safeRatio('COALESCE(vr_passivo_circulante, 0) + COALESCE(vr_passivo_nao_circulante, 0)', 'vr_patrimonio_liquido'),
+    sql: `
+CASE
+  WHEN vr_patrimonio_liquido IS NULL OR vr_patrimonio_liquido = 0 THEN NULL
+  WHEN vr_patrimonio_liquido < 0 THEN NULL
+  ELSE (COALESCE(vr_passivo_circulante, 0) + COALESCE(vr_passivo_nao_circulante, 0)) / vr_patrimonio_liquido
+END
+    `,
     showInCatalog: true,
     showInCards: true,
     trend: 'lower',
