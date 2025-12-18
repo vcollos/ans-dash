@@ -103,6 +103,12 @@ export function toNumber(value, fallback = 0) {
     }
     return Number(value)
   }
+  if (typeof value === 'object') {
+    if (Object.prototype.hasOwnProperty.call(value, 'value')) {
+      return toNumber(value.value, fallback)
+    }
+    return fallback
+  }
   const parsed = Number(value)
   return Number.isNaN(parsed) ? fallback : parsed
 }

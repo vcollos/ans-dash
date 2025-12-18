@@ -6,6 +6,13 @@ import psycopg
 import pyarrow.dataset as ds
 
 
+def get_column_values(batch, *names, default=None):
+  for name in names:
+    if name in batch.schema.names:
+      return batch.column(name).to_pylist()
+  return [default] * batch.num_rows
+
+
 def parse_int(value):
   if value is None:
     return None
@@ -32,27 +39,28 @@ def parse_bool(value):
 
 
 def stream_rows(dataset, copy, batch_size):
-  columns = [
-    'reg_ans',
-    'ano',
-    'trimestre',
-    'cd_conta_contabil',
-    'descricao',
-    'valor',
-    'operadora',
-    'modalidade',
-    'uniodonto',
-    'ativa',
-    'beneficiarios',
-    'porte',
-    'classe',
-    'grupo',
-    'subgrupo',
-    'classe_normativa',
-    'categoria_rn518',
-  ]
   for batch in dataset.to_batches(batch_size=batch_size):
-    col_values = {name: batch.column(name).to_pylist() for name in columns}
+    col_values = {
+      'reg_ans': get_column_values(batch, 'reg_ans'),
+      'ano': get_column_values(batch, 'ano'),
+      'trimestre': get_column_values(batch, 'trimestre'),
+      'cd_conta_contabil': get_column_values(batch, 'cd_conta_contabil'),
+      'descricao': get_column_values(batch, 'descricao'),
+      'vl_saldo_inicial': get_column_values(batch, 'vl_saldo_inicial'),
+      'vl_saldo_final': get_column_values(batch, 'vl_saldo_final', 'valor'),
+      'operadora': get_column_values(batch, 'Operadora', 'operadora'),
+      'modalidade': get_column_values(batch, 'modalidade'),
+      'uniodonto': get_column_values(batch, 'Uniodonto', 'uniodonto'),
+      'ativa': get_column_values(batch, 'ATIVA', 'ativa'),
+      'beneficiarios': get_column_values(batch, 'Beneficiarios', 'beneficiarios'),
+      'prestadores': get_column_values(batch, 'Prestadores', 'prestadores'),
+      'porte': get_column_values(batch, 'porte'),
+      'classe': get_column_values(batch, 'classe'),
+      'grupo': get_column_values(batch, 'grupo'),
+      'subgrupo': get_column_values(batch, 'subgrupo'),
+      'classe_normativa': get_column_values(batch, 'classe_normativa'),
+      'categoria_rn518': get_column_values(batch, 'categoria_rn518'),
+    }
     total = batch.num_rows
     for idx in range(total):
       copy.write_row(
@@ -61,14 +69,15 @@ def stream_rows(dataset, copy, batch_size):
           parse_int(col_values['reg_ans'][idx]),
           col_values['cd_conta_contabil'][idx],
           col_values['descricao'][idx],
-          None,  # vl_saldo_inicial
-          parse_decimal(col_values['valor'][idx]),
+          parse_decimal(col_values['vl_saldo_inicial'][idx]),
+          parse_decimal(col_values['vl_saldo_final'][idx]),
           parse_int(col_values['ano'][idx]),
           parse_int(col_values['trimestre'][idx]),
           None,  # arquivo origem
           col_values['operadora'][idx],
           None,  # periodo
           parse_int(col_values['beneficiarios'][idx]),
+          parse_int(col_values['prestadores'][idx]),
           parse_bool(col_values['uniodonto'][idx]),
           parse_bool(col_values['ativa'][idx]),
           col_values['modalidade'][idx],
@@ -125,6 +134,7 @@ def main():
           operadora,
           periodo,
           beneficiarios,
+          prestadores,
           uniodonto,
           ativa,
           modalidade,

@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS public.demonstracoes_contabeis_staging (
   beneficiarios TEXT,
   uniodonto TEXT,
   ativa TEXT,
-  modalidade TEXT
+  modalidade TEXT,
+  prestadores TEXT
 );
 
 CREATE TABLE IF NOT EXISTS public.demonstracoes_contabeis (
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS public.demonstracoes_contabeis (
   uniodonto BOOLEAN,
   ativa BOOLEAN,
   modalidade TEXT,
+  prestadores INTEGER,
   porte TEXT,
   classe TEXT,
   grupo TEXT,

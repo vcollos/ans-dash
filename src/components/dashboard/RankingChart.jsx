@@ -2,9 +2,9 @@ import { useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { cn, formatNumber, formatPercent, toNumber } from '../../lib/utils'
-import { metricFormulas } from '../../lib/metricFormulas'
+import { metricFormulas } from '../../lib/metricFormulas.js'
 
-const rankingMetrics = [
+const defaultRankingMetrics = [
   { id: 'regulatory_score', label: 'Score regulatório (RN 518)', format: 'score', trend: 'higher' },
   ...metricFormulas
     .filter((metric) => metric.showInCards)
@@ -15,8 +15,6 @@ const rankingMetrics = [
       trend: metric.trend ?? 'higher',
     })),
 ]
-
-const rankingMetricOptions = [...rankingMetrics]
 
 function formatValue(value, format) {
   if (value === null || value === undefined) return '—'
@@ -45,8 +43,13 @@ function RankingChart({
   onOperatorClick = null,
   metric = 'regulatory_score',
   onMetricChange,
+  metrics = null,
+  title = 'Ranking de Operadoras',
+  subtitle = null,
 }) {
   const [sortConfig, setSortConfig] = useState({ column: 'rank', direction: 'asc' })
+  const activeMetrics = metrics?.length ? metrics : defaultRankingMetrics
+  const rankingMetricOptions = useMemo(() => [...activeMetrics], [activeMetrics])
   const selectedMetric = rankingMetricOptions.find((item) => item.id === metric) ?? rankingMetricOptions[0]
 
   const sortedRows = useMemo(() => {
@@ -56,7 +59,7 @@ function RankingChart({
     rows.sort((a, b) => {
       const aRank = a.rank_position ?? a.rank ?? 0
       const bRank = b.rank_position ?? b.rank ?? 0
-      if (column === 'valor' || rankingMetrics.find((m) => m.id === column)) {
+      if (column === 'valor' || activeMetrics.find((m) => m.id === column)) {
         const aVal = toNumber(a[column] ?? a.valor, Number.NEGATIVE_INFINITY)
         const bVal = toNumber(b[column] ?? b.valor, Number.NEGATIVE_INFINITY)
         return (aVal > bVal ? 1 : -1) * dir
@@ -92,7 +95,7 @@ function RankingChart({
       return sorted[lo] * (1 - weight) + sorted[hi] * weight
     }
     const stats = {}
-    rankingMetrics.forEach((metric) => {
+    activeMetrics.forEach((metric) => {
       const values = data
         .map((row) => toNumber(row[metric.id], null))
         .filter((value) => value !== null && Number.isFinite(value))
@@ -108,7 +111,7 @@ function RankingChart({
       stats[metric.id] = { min, max, p10, p90 }
     })
     return stats
-  }, [data])
+  }, [data, activeMetrics])
 
   const getHeatStyle = (metricId, value) => {
     const stats = metricStats[metricId]
@@ -119,12 +122,19 @@ function RankingChart({
     if (span === 0) return {}
     const clamped = Math.min(Math.max(value, baseMin), baseMax)
     const rawT = (clamped - baseMin) / span
-    const meta = rankingMetrics.find((item) => item.id === metricId)
+    const meta = activeMetrics.find((item) => item.id === metricId)
     const t = meta?.trend === 'lower' ? 1 - rawT : rawT
-    const hue = 120 * t // red to green
+    const palette = [
+      { bg: 'rgb(220 38 38 / 0.32)', fg: 'rgb(127 29 29)' }, // vermelho forte
+      { bg: 'rgb(249 115 22 / 0.30)', fg: 'rgb(124 45 18)' }, // laranja
+      { bg: 'rgb(234 179 8 / 0.28)', fg: 'rgb(113 63 18)' }, // amarelo
+      { bg: 'rgb(34 197 94 / 0.24)', fg: 'rgb(20 83 45)' }, // verde claro
+      { bg: 'rgb(22 163 74 / 0.30)', fg: 'rgb(20 83 45)' }, // verde forte
+    ]
+    const idx = t <= 0.1 ? 0 : t <= 0.3 ? 1 : t <= 0.7 ? 2 : t <= 0.9 ? 3 : 4
     return {
-      backgroundColor: `hsl(${hue}deg 70% 92%)`,
-      color: `hsl(${hue}deg 35% 28%)`,
+      backgroundColor: palette[idx].bg,
+      color: palette[idx].fg,
     }
   }
 
@@ -133,7 +143,7 @@ function RankingChart({
     return <span className="text-[11px] uppercase text-muted-foreground">{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
   }
 
-  const infoText = `Clique nos cabeçalhos para ordenar. Comparação feita com ${comparisonLabel?.toLowerCase?.() ?? 'a média definida'}.`
+    const infoText = `Clique nos cabeçalhos para ordenar. Comparação feita com ${comparisonLabel?.toLowerCase?.() ?? 'a média definida'}.`
   const operatorInTop = data.some((row) => row.nome_operadora === operatorName)
 
   return (
@@ -141,10 +151,8 @@ function RankingChart({
       <CardHeader className="space-y-2">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <CardTitle className="text-lg">Ranking de Operadoras</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              11 indicadores lado a lado. {infoText}
-            </p>
+            <CardTitle className="text-lg">{title}</CardTitle>
+            <p className="text-sm text-muted-foreground">{subtitle ?? infoText}</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Ordenar por</p>
@@ -198,7 +206,7 @@ function RankingChart({
                     {headerSortIcon('reg_ans')}
                   </button>
                 </th>
-                {rankingMetrics.map((metric) => (
+                {activeMetrics.map((metric) => (
                   <th key={metric.id} className="px-3 py-2 text-right">
                     <button
                       type="button"
@@ -228,7 +236,7 @@ function RankingChart({
                     <td className="px-3 py-2 text-left text-xs text-muted-foreground">{rank ? `${rank}º` : '—'}</td>
                     <td className="px-3 py-2 text-left font-medium">{row.nome_operadora}</td>
                     <td className="px-3 py-2 text-left text-xs text-muted-foreground">{row.reg_ans ?? '—'}</td>
-                    {rankingMetrics.map((metric) => {
+                    {activeMetrics.map((metric) => {
                       const value = toNumber(row[metric.id], null)
                       const display = formatValue(value, metric.format)
                       return (
@@ -246,7 +254,7 @@ function RankingChart({
               })}
               {!data.length ? (
                 <tr>
-                  <td colSpan={rankingMetrics.length + 3} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  <td colSpan={activeMetrics.length + 3} className="px-3 py-6 text-center text-sm text-muted-foreground">
                     Nenhum dado disponível para os filtros selecionados.
                   </td>
                 </tr>
@@ -259,7 +267,7 @@ function RankingChart({
             <p className="font-semibold text-foreground">{operatorRow.nome_operadora}</p>
             {(() => {
               const activeMetric =
-                rankingMetrics.find((metric) => metric.id === sortConfig.column) ?? rankingMetrics[0] ?? null
+                activeMetrics.find((metric) => metric.id === sortConfig.column) ?? activeMetrics[0] ?? null
               const value = activeMetric ? operatorRow[activeMetric.id] ?? operatorRow.valor : operatorRow.valor
               const formatted = activeMetric ? formatValue(value, activeMetric.format) : formatValue(value, 'number')
               return (

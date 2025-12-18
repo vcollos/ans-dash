@@ -1,4 +1,4 @@
-import { metricSql } from './metricFormulas'
+import { metricSql } from './metricFormulas.js'
 
 export const NOTE_LABELS = {
   1: 'RUIM',
@@ -25,12 +25,36 @@ export const REGULATORY_PERCENTILES = {
 
 export const REGULATORY_INDICATORS = [
   {
+    id: 'sinistro_per_capta',
+    label: 'Sinistro mensal per capta (R$)',
+    format: 'currency',
+    unit: 'R$',
+    trend: 'lower',
+    weight: 0.15,
+  },
+  {
+    id: 'ticket_medio_relativo_sinistro',
+    label: 'Ticket médio ajustado pelo sinistro',
+    format: 'decimal',
+    unit: 'x',
+    trend: 'higher',
+    weight: 0.15,
+  },
+  {
     id: 'liquidez_corrente',
     label: 'Liquidez Corrente',
     format: 'ratio',
     unit: 'x',
     trend: 'higher',
     weight: 0.2,
+  },
+  {
+    id: 'emprestimos_parcelamentos',
+    label: 'Empréstimos e parcelamentos',
+    format: 'decimal',
+    unit: 'x',
+    trend: 'lower',
+    weight: 0.05,
   },
   {
     id: 'cobertura_provisoes',
@@ -135,7 +159,7 @@ export const REGULATORY_SOLVENCY_BLOCK = {
 }
 
 export const REGULATORY_BASE_TEXT =
-  'Classificação baseada na metodologia ANS – RN 518/2022 (DM, DA, DC, PMPE, PMCR, IRF) e diretrizes prudenciais da RN 630/2025.'
+  'Classificação baseada na metodologia ANS – RN 518/2022 (DM, DA, DC, PMPE, PMCR, IRF) e diretrizes prudenciais da RN 630/2025, incluindo sinistro per capta mensal.'
 
 const INDICATOR_MAP = Object.fromEntries(REGULATORY_INDICATORS.map((indicator) => [indicator.id, indicator]))
 
@@ -227,7 +251,10 @@ export function evaluateRegulatoryScore(payload) {
   const solvencyNote = solvencyScore ? clamp(Math.round(solvencyScore), 1, 4) : null
 
   const overallScore = computeWeightedAverage([
+    { note: byId.sinistro_per_capta?.note, weight: 0.15 },
+    { note: byId.ticket_medio_relativo_sinistro?.note, weight: 0.15 },
     { note: byId.liquidez_corrente?.note, weight: 0.2 },
+    { note: byId.emprestimos_parcelamentos?.note, weight: 0.05 },
     { note: solvencyScore, weight: REGULATORY_SOLVENCY_BLOCK.weight },
     { note: byId.margem_lucro_pct?.note, weight: 0.15 },
     { note: byId.sinistralidade_pct?.note, weight: 0.15 },

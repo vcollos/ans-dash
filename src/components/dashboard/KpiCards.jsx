@@ -1,7 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { cn, formatNumber, formatPercent } from '../../lib/utils'
-import { metricFormulas } from '../../lib/metricFormulas'
+import { metricFormulas } from '../../lib/metricFormulas.js'
 import { Badge } from '../ui/badge'
 import { REGULATORY_BASE_TEXT } from '../../lib/regulatoryScore'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
@@ -23,6 +23,9 @@ function formatValue(value, format) {
   }
   if (format === 'percent') {
     return formatPercent(value, 2)
+  }
+  if (format === 'currency') {
+    return formatNumber(value, { style: 'currency', minimumFractionDigits: 0, maximumFractionDigits: 0 })
   }
   if (format === 'decimal') {
     return formatNumber(value, { minimumFractionDigits: 2, maximumFractionDigits: 2 })

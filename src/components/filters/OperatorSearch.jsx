@@ -53,6 +53,18 @@ function OperatorSearch({
   }
 
   const handleBlur = () => {
+    const normalized = (query ?? '').toLowerCase().trim()
+    if (normalized) {
+      const exactMatch = options.find((option) => option?.toLowerCase() === normalized)
+      if (exactMatch) {
+        handleSelect(exactMatch)
+        return
+      }
+      if (normalized.length >= 4 && filteredOptions.length === 1) {
+        handleSelect(filteredOptions[0])
+        return
+      }
+    }
     closeTimeoutRef.current = setTimeout(() => setOpen(false), 120)
   }
 
@@ -66,14 +78,22 @@ function OperatorSearch({
             const nextValue = event.target.value
             setQuery(nextValue)
             onChange(nextValue)
-            if (onSelect) {
-              const normalized = nextValue?.toLowerCase().trim()
-              const exactMatch = options.find((option) => option?.toLowerCase() === normalized)
-              if (exactMatch) {
-                onSelect(exactMatch)
-              }
-            }
             setOpen(true)
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') return
+            const normalized = (query ?? '').toLowerCase().trim()
+            if (!normalized) return
+            const exactMatch = options.find((option) => option?.toLowerCase() === normalized)
+            if (exactMatch) {
+              event.preventDefault()
+              handleSelect(exactMatch)
+              return
+            }
+            if (filteredOptions.length === 1) {
+              event.preventDefault()
+              handleSelect(filteredOptions[0])
+            }
           }}
           onFocus={handleFocus}
           onBlur={handleBlur}

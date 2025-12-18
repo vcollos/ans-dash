@@ -7,6 +7,7 @@ WITH base AS (
     bool_or(uniodonto) AS uniodonto,
     bool_or(ativa) AS ativa,
     MAX(beneficiarios) AS qt_beneficiarios,
+    MAX(prestadores) AS qt_prestadores,
     ano,
     trimestre,
     MAX(periodo) AS periodo_data,
@@ -107,6 +108,7 @@ SELECT
   lagged.delta_vr_eventos_liquidos,
   lagged.delta_vr_corresponsabilidade_cedida,
   lagged.delta_vr_contraprestacoes,
-  lagged.delta_vr_provisoes_tecnicas
+  lagged.delta_vr_provisoes_tecnicas,
+  lagged.qt_prestadores
 FROM lagged
 LEFT JOIN public.operadoras_metadata meta ON meta.reg_ans = lagged.reg_ans;

@@ -40,6 +40,67 @@ SUM(${ansSinistroFlowDenominator})
 
 export const metricFormulas = [
   {
+    id: 'sinistro_per_capta',
+    code: 'SPC',
+    label: 'Sinistro mensal per capta (R$)',
+    description: '41_vr_eventos_liquidos / qt_beneficiarios / meses do ano (T1=3, T2=6, T3=9, T4=12)',
+    format: 'currency',
+    sql: `
+CASE
+  WHEN qt_beneficiarios IS NULL OR qt_beneficiarios = 0 THEN NULL
+  WHEN trimestre IS NULL OR trimestre = 0 THEN NULL
+  ELSE (COALESCE(vr_eventos_liquidos, 0) / qt_beneficiarios) / (CAST(trimestre AS FLOAT64) * 3)
+END
+    `,
+    showInCatalog: true,
+    showInCards: true,
+    trend: 'lower',
+  },
+  {
+    id: 'ticket_medio',
+    code: 'TM',
+    label: 'Ticket médio mensal (R$)',
+    description: '311_vr_contraprestacoes / qt_beneficiarios / meses do ano (T1=3, T2=6, T3=9, T4=12)',
+    format: 'currency',
+    sql: `
+CASE
+  WHEN qt_beneficiarios IS NULL OR qt_beneficiarios = 0 THEN NULL
+  WHEN trimestre IS NULL OR trimestre = 0 THEN NULL
+  ELSE (COALESCE(vr_contraprestacoes, 0) / qt_beneficiarios) / (CAST(trimestre AS FLOAT64) * 3)
+END
+    `,
+    showInCatalog: true,
+    showInCards: true,
+    trend: 'higher',
+  },
+  {
+    id: 'ticket_medio_relativo_sinistro',
+    code: 'TM/SM',
+    label: 'Ticket médio vs Sinistro',
+    description: 'Relação entre ticket médio e sinistro per capta (equivale a 311/41; quanto maior melhor).',
+    format: 'decimal',
+    sql: safeRatio('ABS(COALESCE(vr_contraprestacoes, 0))', 'ABS(COALESCE(vr_eventos_liquidos, 0))'),
+    showInCatalog: false,
+    showInCards: false,
+    trend: 'higher',
+  },
+  {
+    id: 'emprestimos_parcelamentos',
+    code: 'EP/AG',
+    label: 'Empréstimos e parcelamentos',
+    description: '(237 + 271) / 31 — razão sobre ativos garantidores',
+    format: 'decimal',
+    sql: `
+CASE
+  WHEN vr_ativos_garantidores IS NULL OR vr_ativos_garantidores = 0 THEN NULL
+  ELSE (ABS(COALESCE(vr_conta_271, 0)) + ABS(COALESCE(vr_conta_237, 0))) / ABS(vr_ativos_garantidores)
+END
+    `,
+    showInCatalog: true,
+    showInCards: true,
+    trend: 'lower',
+  },
+  {
     id: 'margem_lucro_pct',
     code: 'MLL',
     label: 'Margem de Lucro Líquida (MLL)',

@@ -7,6 +7,7 @@ import {
   fetchKpiSummary,
   fetchMonetarySummary,
   fetchRanking,
+  fetchMonetaryRanking,
   fetchRegulatoryScoreRanking,
   fetchTrendSeries,
   fetchTableData,
@@ -14,19 +15,41 @@ import {
   fetchAvailablePeriods,
   fetchRegulatoryReport,
   fetchRegulatoryScoreForFilters,
+  VIRTUAL_OPERATOR_UNIODONTO,
 } from '../lib/dataService'
 import { DEFAULT_COMPARISON_FILTERS, comparisonFiltersToQuery, sanitizeComparisonFilters } from '../lib/comparisonModes'
-import { metricFormulas } from '../lib/metricFormulas'
+import { metricFormulas } from '../lib/metricFormulas.js'
 import { evaluateRegulatoryScore } from '../lib/regulatoryScore'
 
 const rankingCatalog = metricFormulas.filter((metric) => metric.showInCards)
 const DEFAULT_RANKING_METRIC = 'regulatory_score'
+const DEFAULT_MONETARY_RANKING_METRIC = 'resultado_liquido_final_ans'
 
 const getMetricTrend = (metricId) => {
   if (metricId === 'regulatory_score') return 'higher'
   return rankingCatalog.find((metric) => metric.id === metricId)?.trend ?? 'higher'
 }
 const getMetricOrder = (metricId) => (getMetricTrend(metricId) === 'lower' ? 'ASC' : 'DESC')
+const getMonetaryMetricTrend = (metricId) => {
+  const lowerMetrics = new Set([
+    'vr_despesas',
+    'vr_eventos_liquidos',
+    'vr_eventos_a_liquidar',
+    'vr_corresponsabilidade_cedida',
+    'vr_desp_comerciais',
+    'vr_desp_comerciais_promocoes',
+    'vr_desp_administrativas',
+    'vr_outras_desp_oper',
+    'vr_desp_tributos',
+    'vr_despesas_fin',
+    'vr_passivo_circulante',
+    'vr_passivo_nao_circulante',
+    'vr_provisoes_tecnicas',
+    'vr_conta_61',
+  ])
+  return lowerMetrics.has(metricId) ? 'lower' : 'higher'
+}
+const getMonetaryMetricOrder = (metricId) => (getMonetaryMetricTrend(metricId) === 'lower' ? 'ASC' : 'DESC')
 
 const defaultFilters = {
   modalidades: [],
@@ -57,6 +80,14 @@ const PARQUET_EXTENSION = /\.parquet$/i
 
 const isParquetFile = (name) => PARQUET_EXTENSION.test(name ?? '')
 
+function computePorteFromBeneficiarios(value) {
+  const beneficiarios = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(beneficiarios)) return null
+  if (beneficiarios <= 19999) return 'Pequeno Porte'
+  if (beneficiarios <= 99999) return 'Médio Porte'
+  return 'Grande Porte'
+}
+
 function readFileAsBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -84,6 +115,11 @@ export function useDashboardController() {
   const [rankingMetricState, setRankingMetricState] = useState(DEFAULT_RANKING_METRIC)
   const [rankingData, setRankingData] = useState({ rows: [], operatorRow: null })
   const [rankingOrder, setRankingOrder] = useState(() => getMetricOrder(DEFAULT_RANKING_METRIC))
+  const [monetaryRankingMetric, setMonetaryRankingMetric] = useState(DEFAULT_MONETARY_RANKING_METRIC)
+  const [monetaryRankingOrder, setMonetaryRankingOrder] = useState(() =>
+    getMonetaryMetricOrder(DEFAULT_MONETARY_RANKING_METRIC),
+  )
+  const [monetaryRankingData, setMonetaryRankingData] = useState({ rows: [], operatorRow: null })
   const [trendSeriesByMetric, setTrendSeriesByMetric] = useState({})
   const [isTrendLoading, setIsTrendLoading] = useState(false)
   const [tableData, setTableData] = useState({ rows: [], columns: [] })
@@ -262,7 +298,7 @@ export function useDashboardController() {
               regAns: operatorContext?.regAns ? [operatorContext.regAns] : resolvedFilters.regAns,
             }
           : applyComparisonFilters(comparisonPeriodFilters)
-        const baseRankingFilters = operatorContext?.name ? { ...resolvedFilters, search: '' } : resolvedFilters
+        const baseRankingFilters = { ...resolvedFilters, search: '' }
         const rankingFilters = applyComparisonFilters(baseRankingFilters)
         const tableOptions = operatorContext?.name
           ? {
@@ -279,15 +315,29 @@ export function useDashboardController() {
             : fetchRanking(rankingMetricState, rankingFilters, null, rankingOrder, {
                 operatorName: operatorContext?.name ?? null,
               })
-        const [summary, ranking, table, monetary] = await Promise.all([
+        const monetaryRankingPromise = fetchMonetaryRanking(
+          monetaryRankingMetric,
+          rankingFilters,
+          null,
+          monetaryRankingOrder,
+          {
+            operatorName: operatorContext?.name ?? null,
+          },
+        ).catch((err) => {
+          console.warn('[Dashboard] Falha ao carregar ranking monetário', err)
+          return { rows: [], operatorRow: null }
+        })
+        const [summary, ranking, table, monetary, monetaryRanking] = await Promise.all([
           fetchKpiSummary(summaryFilters),
           rankingPromise,
           fetchTableData(resolvedFilters, tableOptions),
           fetchMonetarySummary(summaryFilters),
+          monetaryRankingPromise,
         ])
         if (cancelled) return
         setKpis(summary)
         setRankingData(ranking)
+        setMonetaryRankingData(monetaryRanking)
         setTableData(table)
         setMonetarySummary(monetary)
       } catch (err) {
@@ -304,7 +354,16 @@ export function useDashboardController() {
     return () => {
       cancelled = true
     }
-  }, [status, resolvedFilters, rankingMetricState, rankingOrder, applyComparisonFilters, operatorContext?.name])
+  }, [
+    status,
+    resolvedFilters,
+    rankingMetricState,
+    rankingOrder,
+    monetaryRankingMetric,
+    monetaryRankingOrder,
+    applyComparisonFilters,
+    operatorContext?.name,
+  ])
 
   useEffect(() => {
     if (status !== 'ready') return
@@ -438,22 +497,28 @@ export function useDashboardController() {
         setOperatorContext(null)
         return
       }
+      const resolvedPorte = latest.porte ?? computePorteFromBeneficiarios(latest.qt_beneficiarios)
       setFilters((prev) => ({
         ...prev,
         search: operatorName,
       }))
-      const nextComparison = {
-        modalidades: latest.modalidade ? [latest.modalidade] : undefined,
-        portes: latest.porte ? [latest.porte] : undefined,
-        uniodonto: typeof latest.uniodonto === 'boolean' ? [latest.uniodonto] : undefined,
-        ativa: typeof latest.ativa === 'boolean' ? [latest.ativa] : undefined,
-      }
+      const isVirtualUniodonto = operatorName === VIRTUAL_OPERATOR_UNIODONTO
+      const nextComparison = isVirtualUniodonto
+        ? {
+            uniodonto: [false],
+          }
+        : {
+            modalidades: latest.modalidade ? [latest.modalidade] : undefined,
+            portes: resolvedPorte ? [resolvedPorte] : undefined,
+            uniodonto: typeof latest.uniodonto === 'boolean' ? [latest.uniodonto] : undefined,
+            ativa: typeof latest.ativa === 'boolean' ? [latest.ativa] : undefined,
+          }
       syncComparisonFilters(nextComparison)
       setOperatorContext({
         name: operatorName,
         modalidade: latest.modalidade ?? null,
-        porte: latest.porte ?? null,
-        uniodonto: typeof latest.uniodonto === 'boolean' ? latest.uniodonto : null,
+        porte: resolvedPorte ?? null,
+        uniodonto: isVirtualUniodonto ? true : typeof latest.uniodonto === 'boolean' ? latest.uniodonto : null,
         ativa: typeof latest.ativa === 'boolean' ? latest.ativa : null,
         regAns: latest.reg_ans ?? null,
       })
@@ -520,6 +585,11 @@ export function useDashboardController() {
     setRankingOrder(getMetricOrder(nextMetric))
   }, [])
 
+  const setMonetaryRankingMetricState = useCallback((nextMetric) => {
+    setMonetaryRankingMetric(nextMetric)
+    setMonetaryRankingOrder(getMonetaryMetricOrder(nextMetric))
+  }, [])
+
   function updateFilters(partial) {
     setFilters((prev) => ({
       ...prev,
@@ -558,6 +628,10 @@ export function useDashboardController() {
     rankingData,
     rankingOrder,
     setRankingOrder,
+    monetaryRankingMetric,
+    setMonetaryRankingMetric: setMonetaryRankingMetricState,
+    setMonetaryRankingOrder,
+    monetaryRankingData,
     trendSeriesByMetric,
     isTrendLoading,
     tableData,

@@ -2,7 +2,7 @@ import { useMemo, useId } from 'react'
 import { Line, LineChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '../ui/chart'
-import { metricFormulas } from '../../lib/metricFormulas'
+import { metricFormulas } from '../../lib/metricFormulas.js'
 import { formatNumber, formatPercent, toNumber } from '../../lib/utils'
 
 const metricOptions = [

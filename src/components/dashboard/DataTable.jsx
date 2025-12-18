@@ -156,7 +156,21 @@ function formatField(field, value) {
   }
   const numeric = toNumber(value, null)
   if (numeric === null) {
-    return typeof value === 'string' && value.trim() === '' ? '—' : value
+    if (typeof value === 'string') {
+      return value.trim() === '' ? '—' : value
+    }
+    if (typeof value === 'object') {
+      if (Object.prototype.hasOwnProperty.call(value, 'value')) {
+        const inner = value.value
+        return inner === null || inner === undefined ? '—' : String(inner)
+      }
+      try {
+        return JSON.stringify(value)
+      } catch {
+        return String(value)
+      }
+    }
+    return value
   }
   if (percentFields.has(field)) {
     return formatPercent(numeric, 2)

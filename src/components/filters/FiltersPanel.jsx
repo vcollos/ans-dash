@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
 import { Label } from '../ui/label'
 import { Button } from '../ui/button'
@@ -69,11 +70,14 @@ function FiltersPanel({
   onComparisonFiltersApply,
   onComparisonFiltersReset,
 }) {
+  const [operatorQuery, setOperatorQuery] = useState(filters?.search ?? '')
+
+  useEffect(() => {
+    setOperatorQuery(filters?.search ?? '')
+  }, [filters?.search])
+
   const safeComparisonFilters = sanitizeComparisonFilters(comparisonFilters)
   const safeAppliedFilters = comparisonAppliedFilters ? sanitizeComparisonFilters(comparisonAppliedFilters) : null
-  const hasPendingComparisonChanges = safeAppliedFilters
-    ? !comparisonSelectionsEqual(safeComparisonFilters, safeAppliedFilters)
-    : false
 
   const handleComparisonToggle = (key, value, shouldEnable) => {
     const currentValues = safeComparisonFilters[key] ?? []
@@ -122,14 +126,19 @@ function FiltersPanel({
       <CardContent className="space-y-4">
         <OperatorSearch
           label="Buscar operadora"
-          value={filters.search}
+          value={operatorQuery}
           onChange={(value) => {
-            onChange({ search: value })
+            setOperatorQuery(value)
             if (!value) {
+              onChange({ search: '' })
               onOperatorSelect(null)
             }
           }}
-          onSelect={onOperatorSelect}
+          onSelect={(value) => {
+            setOperatorQuery(value ?? '')
+            onChange({ search: value ?? '' })
+            onOperatorSelect(value)
+          }}
           options={options.operadoras}
         />
         <p className="text-xs text-muted-foreground">
@@ -142,15 +151,6 @@ function FiltersPanel({
             <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="outline" className="h-8" onClick={handleResetComparison}>
                 Todas operadoras
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                className="h-8"
-                onClick={handleApplyComparison}
-                disabled={!hasPendingComparisonChanges}
-              >
-                Refazer Comparações
               </Button>
             </div>
           </div>

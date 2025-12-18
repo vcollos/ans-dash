@@ -5,7 +5,7 @@ import { useDashboardController } from './hooks/useDashboardController'
 import AppHeader from './components/layout/AppHeader'
 import FiltersPanel from './components/filters/FiltersPanel'
 import KpiCards from './components/dashboard/KpiCards'
-import RankingChart from './components/dashboard/RankingChart'
+import RankingPanel from './components/dashboard/RankingPanel'
 import IndicatorTrendChart from './components/dashboard/IndicatorTrendChart'
 import DataTable from './components/dashboard/DataTable'
 import MonetarySummary from './components/dashboard/MonetarySummary'
@@ -98,6 +98,9 @@ function App() {
     rankingData,
     rankingOrder,
     setRankingOrder,
+    monetaryRankingMetric,
+    setMonetaryRankingMetric,
+    monetaryRankingData,
     trendSeriesByMetric,
     isTrendLoading,
     tableData,
@@ -246,7 +249,13 @@ function App() {
                 />
               </div>
               <div className="border-t p-4">
-                <Button className="w-full" onClick={() => setFiltersSidebarOpen(false)}>
+                <Button
+                  className="w-full"
+                  onClick={() => {
+                    commitComparisonFilters()
+                    setFiltersSidebarOpen(false)
+                  }}
+                >
                   Aplicar filtros
                 </Button>
               </div>
@@ -263,16 +272,20 @@ function App() {
               fallbackPeriods={periodOptions}
               regulatoryScore={regulatoryScore}
             />
-            <RankingChart
-              data={rankingData.rows}
+            <MonetarySummary summary={monetarySummary} isLoading={isQuerying} className="h-full" />
+            <RankingPanel
+              indicatorRanking={rankingData.rows}
               operatorRow={rankingData.operatorRow}
               operatorName={operatorInsight?.operatorName}
               comparisonLabel={comparisonLabel}
-              metric={rankingMetric}
-              onMetricChange={setRankingMetric}
+              indicatorMetric={rankingMetric}
+              onIndicatorMetricChange={setRankingMetric}
+              monetaryRanking={monetaryRankingData.rows}
+              monetaryOperatorRow={monetaryRankingData.operatorRow}
+              monetaryMetric={monetaryRankingMetric}
+              onMonetaryMetricChange={setMonetaryRankingMetric}
               onOperatorClick={(row) => applyOperatorSelection(row.nome_operadora)}
             />
-            <MonetarySummary summary={monetarySummary} isLoading={isQuerying} className="h-full" />
             <IndicatorTrendChart
               dataByMetric={trendSeriesByMetric}
               isLoading={isTrendLoading || isQuerying}

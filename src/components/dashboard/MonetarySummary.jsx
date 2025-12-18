@@ -108,11 +108,10 @@ function MonetarySummary({ summary, isLoading, className }) {
 
 function HierarchyAccordion({ nodes, level = 0, values, previousValues, deltas, isLoading }) {
   if (!nodes?.length) return null
-  const defaultOpen = level === 0 ? ['group_resultado'] : []
+  const defaultOpen = []
   return (
     <Accordion
       type="multiple"
-      collapsible
       defaultValue={defaultOpen}
       className={level === 0 ? 'divide-y divide-border/60' : 'pl-4'}
     >
