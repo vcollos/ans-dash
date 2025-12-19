@@ -182,7 +182,7 @@ function App() {
 
   if (status === 'loading') {
     return (
-      <main className="mx-auto min-h-screen w-full max-w-[1600px] p-6">
+      <main className="min-h-screen w-full px-[3vw] py-[3vh]">
         <LoadingState />
       </main>
     )
@@ -190,7 +190,7 @@ function App() {
 
   if (status === 'error') {
     return (
-      <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col justify-center p-6">
+      <main className="flex min-h-screen w-full flex-col justify-center px-[3vw] py-[3vh]">
         <ErrorState error={error} onRetry={() => window.location.reload()} />
       </main>
     )
@@ -198,7 +198,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-muted/20">
-      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 pb-12 pt-4 sm:px-6 sm:pt-6">
+      <main className="flex min-h-screen w-full flex-col gap-6 px-[3vw] py-[3vh]">
         <AppHeader tableData={tableData} sourceInfo={sourceInfo} summary={kpis} onOpenFilters={() => setFiltersSidebarOpen(true)} />
         <DataLoadingIndicator
           isActive={isRefreshingData}

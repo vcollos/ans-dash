@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../ui/select'
 import { cn, formatNumber, formatPercent, toNumber } from '../../lib/utils'
 import { metricFormulas } from '../../lib/metricFormulas.js'
 
@@ -44,11 +44,37 @@ function RankingChart({
   metric = 'regulatory_score',
   onMetricChange,
   metrics = null,
+  metricGroups = null,
   title = 'Ranking de Operadoras',
   subtitle = null,
 }) {
   const [sortConfig, setSortConfig] = useState({ column: 'rank', direction: 'asc' })
-  const activeMetrics = metrics?.length ? metrics : defaultRankingMetrics
+  const activeMetrics = useMemo(() => {
+    if (metricGroups?.length) {
+      const seen = new Set()
+      const flat = []
+      metricGroups.forEach((group) => {
+        group.items?.forEach((item) => {
+          if (item?.id && !seen.has(item.id)) {
+            flat.push(item)
+            seen.add(item.id)
+          }
+        })
+      })
+      return flat
+    }
+    return metrics?.length ? metrics : defaultRankingMetrics
+  }, [metricGroups, metrics])
+
+  const groupedOptions = useMemo(() => {
+    if (!metricGroups?.length) return null
+    const ids = new Set(activeMetrics.map((item) => item.id))
+    return metricGroups.map((group) => ({
+      label: group.label,
+      items: (group.items ?? []).filter((item) => ids.has(item.id)),
+    }))
+  }, [metricGroups, activeMetrics])
+
   const rankingMetricOptions = useMemo(() => [...activeMetrics], [activeMetrics])
   const selectedMetric = rankingMetricOptions.find((item) => item.id === metric) ?? rankingMetricOptions[0]
 
@@ -143,7 +169,7 @@ function RankingChart({
     return <span className="text-[11px] uppercase text-muted-foreground">{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
   }
 
-    const infoText = `Clique nos cabeçalhos para ordenar. Comparação feita com ${comparisonLabel?.toLowerCase?.() ?? 'a média definida'}.`
+  const infoText = `Clique nos cabeçalhos para ordenar. Comparação feita com ${comparisonLabel?.toLowerCase?.() ?? 'a média definida'}.`
   const operatorInTop = data.some((row) => row.nome_operadora === operatorName)
 
   return (
@@ -161,11 +187,26 @@ function RankingChart({
                 <SelectValue placeholder="Métrica do ranking" />
               </SelectTrigger>
               <SelectContent>
-                {rankingMetricOptions.map((option) => (
-                  <SelectItem key={option.id} value={option.id}>
-                    {option.label}
-                  </SelectItem>
-                ))}
+                {groupedOptions
+                  ? groupedOptions.map((group) => (
+                      <SelectGroup key={group.label}>
+                        <SelectLabel>{group.label}</SelectLabel>
+                        {group.items.map((option) => (
+                          <SelectItem
+                            key={option.id}
+                            value={option.id}
+                            style={option.indent ? { paddingLeft: `${8 + option.indent * 12}px` } : undefined}
+                          >
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))
+                  : rankingMetricOptions.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
               </SelectContent>
             </Select>
           </div>

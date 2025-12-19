@@ -293,6 +293,7 @@ node scripts/materialize_metrics.js
 - Processos PM2 em produção:
   - `dash-api` (API Express `server/index.js`)
   - `dash-client` (frontend Vite dev/preview)
+- Arquivo de configuração: `pm2.config.cjs` (aponta para `npm run dev:server` e `npm run dev:client`). Suba tudo com `pm2 start pm2.config.cjs` ou só um app via `--only`.
 
 - Comandos úteis:
 
