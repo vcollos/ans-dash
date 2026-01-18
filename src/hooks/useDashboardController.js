@@ -9,6 +9,8 @@ import {
   fetchRanking,
   fetchMonetaryRanking,
   fetchRegulatoryScoreRanking,
+  fetchUniodontoPeerSummary,
+  fetchUniodontoRanking,
   fetchTrendSeries,
   fetchTableData,
   persistDatasetFile,
@@ -20,8 +22,11 @@ import {
 import { DEFAULT_COMPARISON_FILTERS, comparisonFiltersToQuery, sanitizeComparisonFilters } from '../lib/comparisonModes'
 import { metricFormulas } from '../lib/metricFormulas.js'
 import { evaluateRegulatoryScore } from '../lib/regulatoryScore'
+import { DEFAULT_UNIODONTO_RANKING_METRIC, UNIODONTO_INDICATORS, UNIODONTO_RANKING_METRICS } from '../lib/uniodontoMetrics'
 
 const rankingCatalog = metricFormulas.filter((metric) => metric.showInCards)
+const uniodontoRankingCatalog = UNIODONTO_RANKING_METRICS
+const uniodontoIndicatorCatalog = UNIODONTO_INDICATORS
 const DEFAULT_RANKING_METRIC = 'regulatory_score'
 const DEFAULT_MONETARY_RANKING_METRIC = 'resultado_liquido_final_ans'
 
@@ -30,6 +35,9 @@ const getMetricTrend = (metricId) => {
   return rankingCatalog.find((metric) => metric.id === metricId)?.trend ?? 'higher'
 }
 const getMetricOrder = (metricId) => (getMetricTrend(metricId) === 'lower' ? 'ASC' : 'DESC')
+const getUniodontoMetricTrend = (metricId) =>
+  uniodontoRankingCatalog.find((metric) => metric.id === metricId)?.trend ?? 'higher'
+const getUniodontoMetricOrder = (metricId) => (getUniodontoMetricTrend(metricId) === 'lower' ? 'ASC' : 'DESC')
 const getMonetaryMetricTrend = (metricId) => {
   const lowerMetrics = new Set([
     'vr_despesas',
@@ -115,11 +123,17 @@ export function useDashboardController() {
   const [rankingMetricState, setRankingMetricState] = useState(DEFAULT_RANKING_METRIC)
   const [rankingData, setRankingData] = useState({ rows: [], operatorRow: null })
   const [rankingOrder, setRankingOrder] = useState(() => getMetricOrder(DEFAULT_RANKING_METRIC))
+  const [uniodontoMode, setUniodontoMode] = useState(false)
+  const [uniodontoRankingMetric, setUniodontoRankingMetric] = useState(DEFAULT_UNIODONTO_RANKING_METRIC)
+  const [uniodontoRankingOrder, setUniodontoRankingOrder] = useState(() =>
+    getUniodontoMetricOrder(DEFAULT_UNIODONTO_RANKING_METRIC),
+  )
   const [monetaryRankingMetric, setMonetaryRankingMetric] = useState(DEFAULT_MONETARY_RANKING_METRIC)
   const [monetaryRankingOrder, setMonetaryRankingOrder] = useState(() =>
     getMonetaryMetricOrder(DEFAULT_MONETARY_RANKING_METRIC),
   )
   const [monetaryRankingData, setMonetaryRankingData] = useState({ rows: [], operatorRow: null })
+  const [uniodontoPeerSummary, setUniodontoPeerSummary] = useState(null)
   const [trendSeriesByMetric, setTrendSeriesByMetric] = useState({})
   const [isTrendLoading, setIsTrendLoading] = useState(false)
   const [tableData, setTableData] = useState({ rows: [], columns: [] })
@@ -142,10 +156,12 @@ export function useDashboardController() {
   const operatorSelectionRef = useRef(0)
 
   const comparisonFilterQuery = useMemo(() => comparisonFiltersToQuery(comparisonFilters), [comparisonFilters])
-  const trendMetricList = useMemo(
-    () => ['regulatory_score', ...rankingCatalog.map((metric) => metric.id)],
-    [],
-  )
+  const trendMetricList = useMemo(() => {
+    if (uniodontoMode) {
+      return uniodontoIndicatorCatalog.map((metric) => metric.id)
+    }
+    return ['regulatory_score', ...rankingCatalog.map((metric) => metric.id)]
+  }, [uniodontoMode])
 
   const resolvedFilters = useMemo(() => {
     let nextFilters = { ...filters }
@@ -171,8 +187,14 @@ export function useDashboardController() {
         trimestres: [operatorPeriod.trimestre],
       }
     }
+    if (uniodontoMode) {
+      nextFilters = {
+        ...nextFilters,
+        uniodonto: true,
+      }
+    }
     return nextFilters
-  }, [filters, operatorPeriod?.trimestre, operatorContext?.name])
+  }, [filters, operatorPeriod?.trimestre, operatorContext?.name, uniodontoMode])
 
   const operatorPeerFilters = useMemo(() => {
     if (!operatorContext?.name) return null
@@ -222,6 +244,17 @@ export function useDashboardController() {
       return nextFilters
     },
     [comparisonFilterQuery],
+  )
+
+  const applyUniodontoModeFilters = useCallback(
+    (baseFilters) => {
+      if (!uniodontoMode) return baseFilters
+      return {
+        ...baseFilters,
+        uniodonto: true,
+      }
+    },
+    [uniodontoMode],
   )
 
   useEffect(() => {
@@ -292,14 +325,14 @@ export function useDashboardController() {
           trimestres: resolvedFilters.trimestres ?? [],
         }
         const summaryFilters = operatorContext?.name
-          ? {
+          ? applyUniodontoModeFilters({
               ...resolvedFilters,
               operatorName: operatorContext.name,
               regAns: operatorContext?.regAns ? [operatorContext.regAns] : resolvedFilters.regAns,
-            }
-          : applyComparisonFilters(comparisonPeriodFilters)
+            })
+          : applyUniodontoModeFilters(applyComparisonFilters(comparisonPeriodFilters))
         const baseRankingFilters = { ...resolvedFilters, search: '' }
-        const rankingFilters = applyComparisonFilters(baseRankingFilters)
+        const rankingFilters = applyUniodontoModeFilters(applyComparisonFilters(baseRankingFilters))
         const tableOptions = operatorContext?.name
           ? {
               includeAllColumns: true,
@@ -307,8 +340,11 @@ export function useDashboardController() {
               operatorName: operatorContext.name,
             }
           : {}
-        const rankingPromise =
-          rankingMetricState === 'regulatory_score'
+        const rankingPromise = uniodontoMode
+          ? fetchUniodontoRanking(uniodontoRankingMetric, rankingFilters, null, uniodontoRankingOrder, {
+              operatorName: operatorContext?.name ?? null,
+            })
+          : rankingMetricState === 'regulatory_score'
             ? fetchRegulatoryScoreRanking(rankingFilters, null, rankingOrder, {
                 operatorName: operatorContext?.name ?? null,
               })
@@ -330,7 +366,7 @@ export function useDashboardController() {
         const [summary, ranking, table, monetary, monetaryRanking] = await Promise.all([
           fetchKpiSummary(summaryFilters),
           rankingPromise,
-          fetchTableData(resolvedFilters, tableOptions),
+          fetchTableData(applyUniodontoModeFilters(resolvedFilters), tableOptions),
           fetchMonetarySummary(summaryFilters),
           monetaryRankingPromise,
         ])
@@ -359,10 +395,15 @@ export function useDashboardController() {
     resolvedFilters,
     rankingMetricState,
     rankingOrder,
+    uniodontoMode,
+    uniodontoRankingMetric,
+    uniodontoRankingOrder,
     monetaryRankingMetric,
     monetaryRankingOrder,
     applyComparisonFilters,
+    applyUniodontoModeFilters,
     operatorContext?.name,
+    operatorContext?.regAns,
   ])
 
   useEffect(() => {
@@ -374,7 +415,7 @@ export function useDashboardController() {
         const trendComparison = operatorContext?.name
           ? {
               operatorName: operatorContext.name,
-              filters: comparisonFilterQuery,
+              filters: applyUniodontoModeFilters(comparisonFilterQuery),
             }
           : null
         const results = await Promise.all(
@@ -397,10 +438,14 @@ export function useDashboardController() {
     return () => {
       cancelled = true
     }
-  }, [status, trendFilters, operatorContext?.name, comparisonFilterQuery, trendMetricList])
+  }, [status, trendFilters, operatorContext?.name, comparisonFilterQuery, trendMetricList, applyUniodontoModeFilters])
 
   useEffect(() => {
     if (status !== 'ready') return
+    if (uniodontoMode) {
+      setRegulatoryScore({ data: null, isLoading: false, error: null })
+      return
+    }
     let cancelled = false
     setRegulatoryScore((prev) => ({ ...prev, isLoading: true, error: null }))
     async function loadRegulatoryScore() {
@@ -448,6 +493,7 @@ export function useDashboardController() {
     }
   }, [
     status,
+    uniodontoMode,
     operatorContext?.name,
     operatorContext?.regAns,
     operatorPeriod?.ano,
@@ -460,6 +506,7 @@ export function useDashboardController() {
   useEffect(() => {
     if (!operatorContext?.name) {
       setOperatorSnapshot({ operator: null, peers: null, availablePeriods: [], selectedPeriod: null })
+      setUniodontoPeerSummary(null)
       return
     }
     let cancelled = false
@@ -471,6 +518,28 @@ export function useDashboardController() {
         if (snapshot?.selectedPeriod) {
           setOperatorPeriod(snapshot.selectedPeriod)
         }
+        if (uniodontoMode) {
+          const resolvedPeriod = snapshot?.selectedPeriod ?? operatorPeriod
+          if (resolvedPeriod?.ano && resolvedPeriod?.trimestre) {
+            const baseFilters = applyUniodontoModeFilters(
+              applyComparisonFilters({
+                anos: [resolvedPeriod.ano],
+                trimestres: [resolvedPeriod.trimestre],
+                search: '',
+              }),
+            )
+            const excludeOperatorName =
+              operatorContext.name === VIRTUAL_OPERATOR_UNIODONTO ? null : operatorContext.name
+            const peerSummary = await fetchUniodontoPeerSummary(baseFilters, { excludeOperatorName })
+            if (!cancelled) {
+              setUniodontoPeerSummary(peerSummary)
+            }
+          } else {
+            setUniodontoPeerSummary(null)
+          }
+        } else {
+          setUniodontoPeerSummary(null)
+        }
       } catch (err) {
         if (!cancelled) console.error('[Dashboard] Falha ao carregar operadora', err)
       }
@@ -479,7 +548,16 @@ export function useDashboardController() {
     return () => {
       cancelled = true
     }
-  }, [operatorContext?.name, operatorPeriod?.ano, operatorPeriod?.trimestre, comparisonFilterQuery])
+  }, [
+    operatorContext?.name,
+    operatorPeriod?.ano,
+    operatorPeriod?.trimestre,
+    operatorPeriod,
+    comparisonFilterQuery,
+    uniodontoMode,
+    applyComparisonFilters,
+    applyUniodontoModeFilters,
+  ])
 
   async function applyOperatorSelection(operatorName) {
     operatorSelectionRef.current += 1
@@ -585,6 +663,11 @@ export function useDashboardController() {
     setRankingOrder(getMetricOrder(nextMetric))
   }, [])
 
+  const setUniodontoRankingMetricState = useCallback((nextMetric) => {
+    setUniodontoRankingMetric(nextMetric)
+    setUniodontoRankingOrder(getUniodontoMetricOrder(nextMetric))
+  }, [])
+
   const setMonetaryRankingMetricState = useCallback((nextMetric) => {
     setMonetaryRankingMetric(nextMetric)
     setMonetaryRankingOrder(getMonetaryMetricOrder(nextMetric))
@@ -628,6 +711,12 @@ export function useDashboardController() {
     rankingData,
     rankingOrder,
     setRankingOrder,
+    uniodontoMode,
+    setUniodontoMode,
+    uniodontoRankingMetric,
+    setUniodontoRankingMetric: setUniodontoRankingMetricState,
+    uniodontoRankingOrder,
+    uniodontoPeerSummary,
     monetaryRankingMetric,
     setMonetaryRankingMetric: setMonetaryRankingMetricState,
     setMonetaryRankingOrder,

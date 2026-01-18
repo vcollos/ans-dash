@@ -13,6 +13,7 @@ const fieldLabels = {
   ano: 'Ano',
   trimestre: 'Trimestre',
   qt_beneficiarios: 'Beneficiários',
+  qt_prestadores: 'Prestadores (origem própria)',
   reg_ans: 'Registro ANS',
   ativa: 'Situação cadastral',
   uniodonto: 'Operadora Uniodonto',
@@ -29,6 +30,7 @@ const fieldLabels = {
   resultado_liquido: 'Resultado Líquido (R$)',
   resultado_financeiro: 'Resultado Financeiro (R$)',
   liquidez_corrente: 'Liquidez Corrente',
+  liquidez_imediata: 'Liquidez imediata',
   liquidez_seca: 'Liquidez Seca',
   endividamento_pct: 'Endividamento (%)',
   imobilizacao_pl_pct: 'Imobilização do PL (%)',
@@ -36,8 +38,8 @@ const fieldLabels = {
   capital_terceiros_sobre_pl: 'Capital de Terceiros / PL',
   cobertura_provisoes: 'Cobertura de Provisões',
   margem_solvencia: 'Margem de Solvência',
-  pmcr: 'PMCR',
-  pmpe: 'PMPE',
+  pmcr: 'PMRC',
+  pmpe: 'PMPG',
   vr_contraprestacoes: 'Receitas de Contraprestações',
   vr_contraprestacoes_efetivas: 'Contraprestações Efetivas (3111)',
   vr_corresponsabilidade_cedida: 'Corresponsabilidade Cedida (3117)',
@@ -57,12 +59,19 @@ const fieldLabels = {
   vr_despesas_fin: 'Despesas Financeiras',
   vr_outras_receitas_operacionais: 'Outras Receitas Operacionais',
   vr_ativo_circulante: 'Ativo Circulante',
+  vr_conta_1213: 'Conta 1213',
+  vr_conta_1214: 'Conta 1214',
+  vr_conta_122: 'Conta 122',
   vr_ativo_permanente: 'Ativo Permanente',
   vr_passivo_circulante: 'Passivo Circulante',
   vr_passivo_nao_circulante: 'Passivo Não Circulante',
   vr_patrimonio_liquido: 'Patrimônio Líquido',
   vr_ativos_garantidores: 'Ativos Garantidores',
   vr_provisoes_tecnicas: 'Provisões Técnicas',
+  vr_conta_216: 'Conta 216',
+  vr_conta_236: 'Conta 236',
+  vr_conta_237: 'Conta 237',
+  vr_conta_271: 'Conta 271',
   vr_pl_ajustado: 'PL Ajustado',
   vr_margem_solvencia_exigida: 'Margem de Solvência Exigida',
 }
@@ -102,18 +111,34 @@ const currencyFields = new Set([
   'vr_despesas_fin',
   'vr_outras_receitas_operacionais',
   'vr_ativo_circulante',
+  'vr_conta_1213',
+  'vr_conta_1214',
+  'vr_conta_122',
   'vr_ativo_permanente',
   'vr_passivo_circulante',
   'vr_passivo_nao_circulante',
   'vr_patrimonio_liquido',
   'vr_ativos_garantidores',
   'vr_provisoes_tecnicas',
+  'vr_conta_216',
+  'vr_conta_236',
+  'vr_conta_237',
+  'vr_conta_271',
   'vr_pl_ajustado',
   'vr_margem_solvencia_exigida',
 ])
 
-const integerFields = new Set(['ano', 'trimestre', 'qt_beneficiarios', 'reg_ans', 'periodo_id', 'trimestre_rank'])
-const decimalFields = new Set(['liquidez_corrente', 'liquidez_seca', 'cobertura_provisoes', 'margem_solvencia', 'pmcr', 'pmpe', 'capital_terceiros_sobre_pl'])
+const integerFields = new Set(['ano', 'trimestre', 'qt_beneficiarios', 'qt_prestadores', 'reg_ans', 'periodo_id', 'trimestre_rank'])
+const decimalFields = new Set([
+  'liquidez_corrente',
+  'liquidez_imediata',
+  'liquidez_seca',
+  'cobertura_provisoes',
+  'margem_solvencia',
+  'pmcr',
+  'pmpe',
+  'capital_terceiros_sobre_pl',
+])
 const booleanFields = new Set(['ativa', 'uniodonto'])
 
 const fallbackFieldOrder = DETAIL_TABLE_FIELDS

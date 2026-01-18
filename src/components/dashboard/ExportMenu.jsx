@@ -6,11 +6,11 @@ import { downloadCsv, downloadJson } from '../../lib/export'
 
 function ExportMenu({ tableData }) {
   const handleCsv = useCallback(() => {
-    downloadCsv(tableData)
+    downloadCsv(tableData, 'relatorio_diops.csv', { includePrestadoresTotal: true })
   }, [tableData])
 
   const handleTableJson = useCallback(() => {
-    downloadJson(tableData.rows, 'dados_tabela.json')
+    downloadJson(tableData.rows, 'dados_tabela.json', { includePrestadoresTotal: true })
   }, [tableData])
 
   return (

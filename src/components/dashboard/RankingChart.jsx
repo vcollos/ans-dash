@@ -99,7 +99,7 @@ function RankingChart({
       return (aRank > bRank ? 1 : -1) * dir
     })
     return rows
-  }, [data, sortConfig])
+  }, [data, sortConfig, activeMetrics])
 
   const handleSort = (column) => {
     setSortConfig((prev) => {

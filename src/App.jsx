@@ -1,10 +1,12 @@
 import './lib/charts'
-import { useState, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle } from 'lucide-react'
 import { useDashboardController } from './hooks/useDashboardController'
 import AppHeader from './components/layout/AppHeader'
+import LoginScreen from './components/auth/LoginScreen'
 import FiltersPanel from './components/filters/FiltersPanel'
 import KpiCards from './components/dashboard/KpiCards'
+import UniodontoKpiCards from './components/dashboard/UniodontoKpiCards'
 import RankingPanel from './components/dashboard/RankingPanel'
 import IndicatorTrendChart from './components/dashboard/IndicatorTrendChart'
 import DataTable from './components/dashboard/DataTable'
@@ -14,6 +16,8 @@ import { Card, CardContent } from './components/ui/card'
 import { Button } from './components/ui/button'
 import { describeComparisonFilters } from './lib/comparisonModes'
 import DataLoadingIndicator from './components/dashboard/DataLoadingIndicator'
+import { fetchWithAuth, getAuthToken, login, logout, setAuthToken as persistAuthToken } from './lib/auth'
+import { UNIODONTO_INDICATORS } from './lib/uniodontoMetrics'
 
 function LoadingState() {
   return (
@@ -84,7 +88,7 @@ function ErrorState({ error, onRetry }) {
   )
 }
 
-function App() {
+function DashboardApp({ onLogout }) {
   const [filtersSidebarOpen, setFiltersSidebarOpen] = useState(false)
   const {
     status,
@@ -96,8 +100,11 @@ function App() {
     rankingMetric,
     setRankingMetric,
     rankingData,
-    rankingOrder,
-    setRankingOrder,
+    uniodontoMode,
+    setUniodontoMode,
+    uniodontoRankingMetric,
+    setUniodontoRankingMetric,
+    uniodontoPeerSummary,
     monetaryRankingMetric,
     setMonetaryRankingMetric,
     monetaryRankingData,
@@ -111,9 +118,7 @@ function App() {
     resetFilters,
     applyOperatorSelection,
     replaceDataset,
-    sourceInfo,
     operatorInsight,
-    operatorContext,
     operatorPeriod,
     setOperatorPeriod,
     comparisonFilters,
@@ -128,57 +133,6 @@ function App() {
   const comparisonLabel = useMemo(() => describeComparisonFilters(comparisonFilters), [comparisonFilters])
   const trendPrimaryLabel = operatorInsight?.operatorName ?? 'Média dos filtros'
   const isRefreshingData = isQuerying || isTrendLoading
-
-  const agentContext = useMemo(() => {
-    const tableRows = tableData?.rows ?? []
-    const beneficiaryTotal = tableRows.reduce((sum, row) => {
-      const value = Number(row?.qt_beneficiarios ?? 0)
-      return sum + (Number.isFinite(value) ? value : 0)
-    }, 0)
-    return {
-      status,
-      filters,
-      comparisonFilters,
-      operatorPeriod,
-      operatorContext,
-      operatorInsight,
-      periodOptions,
-      summary: kpis,
-      regulatoryScore,
-      ranking: {
-        metric: rankingMetric,
-        order: rankingOrder,
-        topRows: rankingData?.rows ?? [],
-        operatorRow: rankingData?.operatorRow ?? null,
-      },
-      monetarySummary,
-      trend: {
-        metrics: trendSeriesByMetric,
-      },
-      tableSummary: {
-        visibleRows: tableRows.length,
-        beneficiaryTotal,
-      },
-      sourceInfo,
-    }
-  }, [
-    status,
-    filters,
-    comparisonFilters,
-    operatorPeriod,
-    operatorContext,
-    operatorInsight,
-    periodOptions,
-    kpis,
-    regulatoryScore,
-    rankingMetric,
-    rankingOrder,
-    rankingData,
-    monetarySummary,
-    trendSeriesByMetric,
-    tableData,
-    sourceInfo,
-  ])
 
   if (status === 'loading') {
     return (
@@ -199,7 +153,13 @@ function App() {
   return (
     <div className="min-h-screen bg-muted/20">
       <main className="flex min-h-screen w-full flex-col gap-6 px-[3vw] py-[3vh]">
-        <AppHeader tableData={tableData} sourceInfo={sourceInfo} summary={kpis} onOpenFilters={() => setFiltersSidebarOpen(true)} />
+        <AppHeader
+          summary={kpis}
+          onOpenFilters={() => setFiltersSidebarOpen(true)}
+          onLogout={onLogout}
+          uniodontoMode={uniodontoMode}
+          onUniodontoModeChange={setUniodontoMode}
+        />
         <DataLoadingIndicator
           isActive={isRefreshingData}
           className="hidden lg:block"
@@ -237,9 +197,7 @@ function App() {
                   onOperatorSelect={applyOperatorSelection}
                   className="border border-border/60 shadow-none"
                   comparisonFilters={comparisonFiltersDraft}
-                  comparisonAppliedFilters={comparisonFilters}
                   onComparisonFiltersChange={updateComparisonFilters}
-                  onComparisonFiltersApply={commitComparisonFilters}
                   onComparisonFiltersReset={resetComparisonFiltersState}
                 />
                 <DatasetUploadCard
@@ -263,15 +221,27 @@ function App() {
           </>
         ) : null}
         <div className="space-y-6 min-w-0">
-            <KpiCards
-              snapshot={operatorInsight}
-              fallbackSummary={kpis}
-              onPeriodChange={setOperatorPeriod}
-              period={operatorPeriod}
-              peerLabel={comparisonLabel}
-              fallbackPeriods={periodOptions}
-              regulatoryScore={regulatoryScore}
-            />
+            {uniodontoMode ? (
+              <UniodontoKpiCards
+                snapshot={operatorInsight}
+                fallbackSummary={kpis}
+                peerSummary={uniodontoPeerSummary}
+                onPeriodChange={setOperatorPeriod}
+                period={operatorPeriod}
+                peerLabel={comparisonLabel}
+                fallbackPeriods={periodOptions}
+              />
+            ) : (
+              <KpiCards
+                snapshot={operatorInsight}
+                fallbackSummary={kpis}
+                onPeriodChange={setOperatorPeriod}
+                period={operatorPeriod}
+                peerLabel={comparisonLabel}
+                fallbackPeriods={periodOptions}
+                regulatoryScore={regulatoryScore}
+              />
+            )}
             <MonetarySummary summary={monetarySummary} isLoading={isQuerying} className="h-full" />
             <RankingPanel
               indicatorRanking={rankingData.rows}
@@ -280,6 +250,9 @@ function App() {
               comparisonLabel={comparisonLabel}
               indicatorMetric={rankingMetric}
               onIndicatorMetricChange={setRankingMetric}
+              isUniodontoMode={uniodontoMode}
+              uniodontoMetric={uniodontoRankingMetric}
+              onUniodontoMetricChange={setUniodontoRankingMetric}
               monetaryRanking={monetaryRankingData.rows}
               monetaryOperatorRow={monetaryRankingData.operatorRow}
               monetaryMetric={monetaryRankingMetric}
@@ -291,6 +264,13 @@ function App() {
               isLoading={isTrendLoading || isQuerying}
               primaryLabel={trendPrimaryLabel}
               comparisonLabel={comparisonLabel}
+              metrics={uniodontoMode ? UNIODONTO_INDICATORS : null}
+              title={uniodontoMode ? 'Evolução dos indicadores Uniodonto' : undefined}
+              description={
+                uniodontoMode
+                  ? 'Séries históricas dos indicadores exclusivos do sistema Uniodonto.'
+                  : undefined
+              }
             />
             <DataTable
               rows={tableData.rows ?? []}
@@ -302,6 +282,148 @@ function App() {
       </main>
     </div>
   )
+}
+
+function App() {
+  const [authToken, setAuthTokenState] = useState(() => getAuthToken())
+  const [authError, setAuthError] = useState(null)
+  const [authRequired, setAuthRequired] = useState(true)
+  const [authChecked, setAuthChecked] = useState(false)
+  const [authVerified, setAuthVerified] = useState(false)
+  const [isAuthVerifying, setIsAuthVerifying] = useState(false)
+  const [isAuthLoading, setIsAuthLoading] = useState(false)
+  const verifiedTokenRef = useRef(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function checkAuth() {
+      try {
+        const response = await fetch('/api/auth/status', { cache: 'no-store' })
+        if (!response.ok) {
+          throw new Error('Falha ao validar autenticacao')
+        }
+        const payload = await response.json()
+        if (!cancelled) {
+          setAuthRequired(payload?.enabled !== false)
+        }
+      } catch {
+        if (!cancelled) {
+          setAuthRequired(true)
+        }
+      } finally {
+        if (!cancelled) {
+          setAuthChecked(true)
+        }
+      }
+    }
+    checkAuth()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    function handleExpired() {
+      setAuthTokenState(null)
+      setAuthError('Sessao expirada. Faca login novamente.')
+      setAuthVerified(false)
+      verifiedTokenRef.current = null
+    }
+    window.addEventListener('auth:expired', handleExpired)
+    return () => {
+      window.removeEventListener('auth:expired', handleExpired)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!authChecked) return
+    if (!authRequired) {
+      setAuthVerified(true)
+      verifiedTokenRef.current = null
+      return
+    }
+    if (!authToken) {
+      setAuthVerified(false)
+      verifiedTokenRef.current = null
+      return
+    }
+    if (verifiedTokenRef.current === authToken) {
+      setAuthVerified(true)
+      return
+    }
+    let cancelled = false
+    async function verify() {
+      setIsAuthVerifying(true)
+      setAuthVerified(false)
+      try {
+        const response = await fetchWithAuth('/api/auth/verify', { cache: 'no-store' })
+        if (!response.ok) {
+          throw new Error('Autenticacao necessaria.')
+        }
+        if (!cancelled) {
+          verifiedTokenRef.current = authToken
+          setAuthVerified(true)
+        }
+      } catch {
+        if (!cancelled) {
+          setAuthTokenState(null)
+          setAuthVerified(false)
+          verifiedTokenRef.current = null
+        }
+      } finally {
+        if (!cancelled) {
+          setIsAuthVerifying(false)
+        }
+      }
+    }
+    verify()
+    return () => {
+      cancelled = true
+    }
+  }, [authChecked, authRequired, authToken])
+
+  async function handleLogin({ username, password }) {
+    setIsAuthLoading(true)
+    setAuthError(null)
+    try {
+      const payload = await login({ username, password })
+      persistAuthToken(payload.token)
+      setAuthTokenState(payload.token)
+      verifiedTokenRef.current = payload.token
+      setAuthVerified(true)
+    } catch (err) {
+      setAuthError(err?.message ?? 'Falha ao autenticar.')
+    } finally {
+      setIsAuthLoading(false)
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await logout()
+    } finally {
+      setAuthTokenState(null)
+      setAuthError(null)
+      setAuthVerified(false)
+      verifiedTokenRef.current = null
+    }
+  }
+
+  if (!authChecked || (authRequired && authToken && (!authVerified || isAuthVerifying))) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-muted/20 px-4 py-12 text-sm text-muted-foreground">
+        Verificando autenticacao...
+      </main>
+    )
+  }
+
+  const isAuthenticated = !authRequired || (Boolean(authToken) && authVerified)
+
+  if (!isAuthenticated) {
+    return <LoginScreen onLogin={handleLogin} isLoading={isAuthLoading} errorMessage={authError} />
+  }
+
+  return <DashboardApp onLogout={authRequired ? handleLogout : null} />
 }
 
 export default App

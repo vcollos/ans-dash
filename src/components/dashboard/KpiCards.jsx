@@ -192,7 +192,7 @@ function KpiCards({
   }
 
   const periodSelect = periodOptions.length ? (
-    <Select value={periodValue || undefined} onValueChange={handlePeriodChange}>
+    <Select value={periodValue} onValueChange={handlePeriodChange}>
       <SelectTrigger className="w-[220px]">
         <SelectValue placeholder="Período" />
       </SelectTrigger>

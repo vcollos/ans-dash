@@ -29,6 +29,27 @@ export const monetaryIndicators = [
     indent: 1,
   },
   {
+    id: '1213',
+    label: '1213 – Conta 1213',
+    column: '1213_vr_conta_1213',
+    sources: ['1213_vr_conta_1213', 'vr_conta_1213'],
+    indent: 2,
+  },
+  {
+    id: '1214',
+    label: '1214 – Conta 1214',
+    column: '1214_vr_conta_1214',
+    sources: ['1214_vr_conta_1214', 'vr_conta_1214'],
+    indent: 2,
+  },
+  {
+    id: '122',
+    label: '122 – Conta 122',
+    column: '122_vr_conta_122',
+    sources: ['122_vr_conta_122', 'vr_conta_122'],
+    indent: 2,
+  },
+  {
     id: '13',
     label: '13 – Ativo não circulante',
     column: '13_vr_ativo_nao_circulante',
@@ -166,6 +187,48 @@ export const monetaryIndicators = [
     indent: 0,
   },
   {
+    id: '43',
+    label: '43 – Despesas comerciais',
+    column: '43_vr_desp_comerciais',
+    sources: ['43_vr_desp_comerciais', 'vr_desp_comerciais'],
+    indent: 1,
+  },
+  {
+    id: '464119113',
+    label: '464119113 – Promoções',
+    column: '464119113_vr_desp_comerciais_promocoes',
+    sources: ['464119113_vr_desp_comerciais_promocoes', 'vr_desp_comerciais_promocoes'],
+    indent: 2,
+  },
+  {
+    id: '46',
+    label: '46 – Despesas administrativas',
+    column: '46_vr_desp_administrativas',
+    sources: ['46_vr_desp_administrativas', 'vr_desp_administrativas'],
+    indent: 1,
+  },
+  {
+    id: '44',
+    label: '44 – Outras despesas operacionais',
+    column: '44_vr_outras_desp_oper',
+    sources: ['44_vr_outras_desp_oper', 'vr_outras_desp_oper'],
+    indent: 1,
+  },
+  {
+    id: '45',
+    label: '45 – Despesas financeiras',
+    column: '45_vr_despesas_financeiras',
+    sources: ['45_vr_despesas_financeiras', 'vr_despesas_fin'],
+    indent: 1,
+  },
+  {
+    id: '47',
+    label: '47 – Despesas tributárias',
+    column: '47_vr_desp_tributos',
+    sources: ['47_vr_desp_tributos', 'vr_desp_tributos'],
+    indent: 1,
+  },
+  {
     id: 'categoria_resultado',
     label: 'Resultado das operações com planos de assistência à saúde',
     column: 'resultado_operacoes_assistencia_saude',
@@ -283,7 +346,15 @@ export const monetaryIndicatorTree = [
     column: 'categoria_ativo_total',
     label: '1 – Ativo',
     children: [
-      { id: '12', column: '12_vr_ativo_circulante' },
+      {
+        id: '12',
+        column: '12_vr_ativo_circulante',
+        children: [
+          { id: '1213', column: '1213_vr_conta_1213' },
+          { id: '1214', column: '1214_vr_conta_1214' },
+          { id: '122', column: '122_vr_conta_122' },
+        ],
+      },
       { id: '13', column: '13_vr_ativo_nao_circulante' },
     ],
   },
@@ -329,7 +400,13 @@ export const monetaryIndicatorTree = [
     column: '4_vr_despesas',
     label: '4 – Despesas Totais',
     children: [
-      { id: '43', column: '43_vr_desp_comerciais' },
+      {
+        id: '43',
+        column: '43_vr_desp_comerciais',
+        children: [
+          { id: '464119113', column: '464119113_vr_desp_comerciais_promocoes' },
+        ],
+      },
       { id: '46', column: '46_vr_desp_administrativas' },
       { id: '44', column: '44_vr_outras_desp_oper' },
       { id: '45', column: '45_vr_despesas_financeiras' },

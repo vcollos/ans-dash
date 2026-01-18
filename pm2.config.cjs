@@ -9,6 +9,8 @@ module.exports = {
         NODE_ENV: 'development',
         PORT: process.env.SERVER_PORT || process.env.PORT || 4000,
         SERVER_PORT: process.env.SERVER_PORT || process.env.PORT || 4000,
+        DASHBOARD_USER: 'vcollos',
+        DASHBOARD_PASSWORD: 'soeusei22',
       },
     },
     {

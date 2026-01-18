@@ -31,22 +31,6 @@ function ComparisonFilterGroup({ title, options, values = [], onToggle }) {
   )
 }
 
-function arraysEqual(a = [], b = []) {
-  if (a.length !== b.length) return false
-  const setB = new Set(b)
-  return a.every((value) => setB.has(value))
-}
-
-function comparisonSelectionsEqual(a, b) {
-  if (!a || !b) return false
-  return (
-    arraysEqual(a.modalidades, b.modalidades) &&
-    arraysEqual(a.portes, b.portes) &&
-    arraysEqual(a.uniodonto, b.uniodonto) &&
-    arraysEqual(a.ativa, b.ativa)
-  )
-}
-
 function cloneDefaultComparisonFilters() {
   const sanitized = sanitizeComparisonFilters(DEFAULT_COMPARISON_FILTERS)
   return {
@@ -65,9 +49,7 @@ function FiltersPanel({
   onOperatorSelect,
   className,
   comparisonFilters,
-  comparisonAppliedFilters,
   onComparisonFiltersChange,
-  onComparisonFiltersApply,
   onComparisonFiltersReset,
 }) {
   const [operatorQuery, setOperatorQuery] = useState(filters?.search ?? '')
@@ -77,7 +59,6 @@ function FiltersPanel({
   }, [filters?.search])
 
   const safeComparisonFilters = sanitizeComparisonFilters(comparisonFilters)
-  const safeAppliedFilters = comparisonAppliedFilters ? sanitizeComparisonFilters(comparisonAppliedFilters) : null
 
   const handleComparisonToggle = (key, value, shouldEnable) => {
     const currentValues = safeComparisonFilters[key] ?? []
@@ -106,10 +87,6 @@ function FiltersPanel({
       return
     }
     onComparisonFiltersChange(cloneDefaultComparisonFilters())
-  }
-
-  const handleApplyComparison = () => {
-    onComparisonFiltersApply?.()
   }
 
   return (

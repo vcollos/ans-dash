@@ -5,7 +5,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from '../ui/chart'
 import { metricFormulas } from '../../lib/metricFormulas.js'
 import { formatNumber, formatPercent, toNumber } from '../../lib/utils'
 
-const metricOptions = [
+const defaultMetricOptions = [
   {
     id: 'regulatory_score',
     label: 'Score regulatório ponderado',
@@ -54,8 +54,17 @@ function LegendItem({ label, color }) {
   )
 }
 
-function IndicatorTrendChart({ dataByMetric = {}, isLoading = false, primaryLabel, comparisonLabel }) {
+function IndicatorTrendChart({
+  dataByMetric = {},
+  isLoading = false,
+  primaryLabel,
+  comparisonLabel,
+  metrics = null,
+  title = 'Evolução dos indicadores',
+  description = 'Visualize todas as séries (2 por linha) sem trocar de indicador.',
+}) {
   const chartId = useId().replace(/:/g, '')
+  const activeMetrics = metrics?.length ? metrics : defaultMetricOptions
   const chartConfig = useMemo(
     () => ({
       primary: {
@@ -73,8 +82,8 @@ function IndicatorTrendChart({ dataByMetric = {}, isLoading = false, primaryLabe
   return (
     <Card className="min-w-0">
       <CardHeader>
-        <CardTitle className="text-lg">Evolução dos indicadores</CardTitle>
-        <CardDescription>Visualize todas as séries (2 por linha) sem trocar de indicador.</CardDescription>
+        <CardTitle className="text-lg">{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="flex flex-wrap gap-4">
@@ -82,7 +91,7 @@ function IndicatorTrendChart({ dataByMetric = {}, isLoading = false, primaryLabe
           <LegendItem label={chartConfig.comparison.label} color={FILTER_AVERAGE_COLOR} />
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
-          {metricOptions.map((metric) => {
+          {activeMetrics.map((metric) => {
             const rawData = dataByMetric?.[metric.id] ?? []
             const chartData = (rawData ?? []).map((row) => {
               const primary = toNumber(row?.operador_valor ?? row?.valor, null)

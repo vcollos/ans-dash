@@ -30,12 +30,19 @@ WITH base AS (
     SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '45') AS vr_despesas_fin,
     SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '33') AS vr_outras_receitas_operacionais,
     SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '12') AS vr_ativo_circulante,
+    SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '1213') AS vr_conta_1213,
+    SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '1214') AS vr_conta_1214,
+    SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '122') AS vr_conta_122,
     SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '13') AS vr_ativo_permanente,
     SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '21') AS vr_passivo_circulante,
     SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '23') AS vr_passivo_nao_circulante,
     SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '25') AS vr_patrimonio_liquido,
     SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '31') AS vr_ativos_garantidores,
     SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '32') AS vr_provisoes_tecnicas,
+    SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '216') AS vr_conta_216,
+    SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '236') AS vr_conta_236,
+    SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '237') AS vr_conta_237,
+    SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '271') AS vr_conta_271,
     SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '2521') AS vr_pl_ajustado,
     SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '2522') AS vr_margem_solvencia_exigida,
     SUM(COALESCE(vl_saldo_final, 0)) FILTER (WHERE cd_conta_contabil = '61') AS vr_conta_61
@@ -48,10 +55,12 @@ WITH base AS (
     LAG(vr_corresponsabilidade_cedida) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre) AS prev_vr_corresponsabilidade_cedida,
     LAG(vr_contraprestacoes) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre) AS prev_vr_contraprestacoes,
     LAG(vr_provisoes_tecnicas) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre) AS prev_vr_provisoes_tecnicas,
+    LAG(qt_beneficiarios) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre) AS prev_qt_beneficiarios,
     COALESCE(vr_eventos_liquidos, 0) - COALESCE(LAG(vr_eventos_liquidos) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre), 0) AS delta_vr_eventos_liquidos,
     COALESCE(vr_corresponsabilidade_cedida, 0) - COALESCE(LAG(vr_corresponsabilidade_cedida) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre), 0) AS delta_vr_corresponsabilidade_cedida,
     COALESCE(vr_contraprestacoes, 0) - COALESCE(LAG(vr_contraprestacoes) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre), 0) AS delta_vr_contraprestacoes,
-    COALESCE(vr_provisoes_tecnicas, 0) - COALESCE(LAG(vr_provisoes_tecnicas) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre), 0) AS delta_vr_provisoes_tecnicas
+    COALESCE(vr_provisoes_tecnicas, 0) - COALESCE(LAG(vr_provisoes_tecnicas) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre), 0) AS delta_vr_provisoes_tecnicas,
+    COALESCE(qt_beneficiarios, 0) - COALESCE(LAG(qt_beneficiarios) OVER (PARTITION BY reg_ans ORDER BY ano, trimestre), 0) AS delta_qt_beneficiarios
   FROM base
 )
 SELECT
@@ -87,12 +96,19 @@ SELECT
   lagged.vr_despesas_fin,
   lagged.vr_outras_receitas_operacionais,
   lagged.vr_ativo_circulante,
+  lagged.vr_conta_1213,
+  lagged.vr_conta_1214,
+  lagged.vr_conta_122,
   lagged.vr_ativo_permanente,
   lagged.vr_passivo_circulante,
   lagged.vr_passivo_nao_circulante,
   lagged.vr_patrimonio_liquido,
   lagged.vr_ativos_garantidores,
   lagged.vr_provisoes_tecnicas,
+  lagged.vr_conta_216,
+  lagged.vr_conta_236,
+  lagged.vr_conta_237,
+  lagged.vr_conta_271,
   lagged.vr_pl_ajustado,
   lagged.vr_margem_solvencia_exigida,
   lagged.vr_conta_61,
@@ -109,6 +125,8 @@ SELECT
   lagged.delta_vr_corresponsabilidade_cedida,
   lagged.delta_vr_contraprestacoes,
   lagged.delta_vr_provisoes_tecnicas,
+  lagged.prev_qt_beneficiarios,
+  lagged.delta_qt_beneficiarios,
   lagged.qt_prestadores
 FROM lagged
 LEFT JOIN public.operadoras_metadata meta ON meta.reg_ans = lagged.reg_ans;

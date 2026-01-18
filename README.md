@@ -30,6 +30,22 @@ npm run dev:server   # apenas a API Express
 
 Independentemente da forma escolhida, garanta que a variável `DATABASE_URL` aponte para o PostgreSQL com as tabelas/visões definidas em `db/schema.sql` e `db/views.sql`.
 
+## Autenticação
+
+Para proteger o dashboard com usuário e senha:
+
+- `DASHBOARD_USER` e `DASHBOARD_PASSWORD`: credenciais simples (usuário e senha).
+- ou `DASHBOARD_USERS`: múltiplos usuários no formato `usuario:senha,usuario2:senha2`.
+- `DASHBOARD_SESSION_TTL_MS`: tempo de expiração da sessão em ms (padrão 12h).
+
+Quando configurado, o frontend exibe a tela de login e a API exige o token nos endpoints `/api`.
+
+## Modo Uniodonto
+
+O dashboard possui um modo exclusivo com indicadores operacionais da Uniodonto.
+As formulas e pesos ficam em `src/lib/uniodontoMetrics.js` e a documentacao completa esta em
+`documentacao/indicadores-uniodonto.md`.
+
 ### Otimizando consultas com materialized view
 
 Quando o volume de filtros e comparações aumenta, é recomendável materializar os indicadores com os cálculos mais usados. O script abaixo gera/atualiza a `MATERIALIZED VIEW` `indicadores_metricas` (que inclui as colunas derivadas de `src/lib/metricFormulas.js`):

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import RankingChart from './RankingChart'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs'
+import { UNIODONTO_RANKING_METRICS } from '../../lib/uniodontoMetrics.js'
 
 const monetaryRankingMetricGroups = [
   {
@@ -42,6 +43,9 @@ const monetaryRankingMetricGroups = [
     label: 'Balanço e solvência',
     items: [
       { id: 'vr_ativo_circulante', label: '12 – Ativo circulante', format: 'currency', trend: 'higher' },
+      { id: 'vr_conta_1213', label: '1213 – Conta 1213', format: 'currency', trend: 'higher', indent: 1 },
+      { id: 'vr_conta_1214', label: '1214 – Conta 1214', format: 'currency', trend: 'higher', indent: 1 },
+      { id: 'vr_conta_122', label: '122 – Conta 122', format: 'currency', trend: 'higher', indent: 1 },
       { id: 'vr_creditos_operacoes_saude', label: '1231 – Créditos (op. saúde)', format: 'currency', trend: 'higher', indent: 1 },
       { id: 'vr_ativo_permanente', label: '13 – Ativo não circulante', format: 'currency', trend: 'higher' },
       { id: 'vr_passivo_circulante', label: '21 – Passivo circulante', format: 'currency', trend: 'lower' },
@@ -70,6 +74,9 @@ function RankingPanel({
   monetaryMetric,
   onMonetaryMetricChange,
   monetaryOperatorRow,
+  isUniodontoMode = false,
+  uniodontoMetric,
+  onUniodontoMetricChange,
 }) {
   const [tab, setTab] = useState('indicadores')
 
@@ -77,8 +84,16 @@ function RankingPanel({
     if (tab === 'monetarios') {
       return 'Contas base usadas na formação dos indicadores (valores absolutos).'
     }
+    if (isUniodontoMode) {
+      return 'Indicadores exclusivos do sistema Uniodonto, sem relação com RN 518.'
+    }
     return 'Indicadores (percentuais/razões) lado a lado.'
-  }, [tab])
+  }, [tab, isUniodontoMode])
+
+  const indicatorMetrics = isUniodontoMode ? UNIODONTO_RANKING_METRICS : null
+  const activeIndicatorMetric = isUniodontoMode ? uniodontoMetric : indicatorMetric
+  const handleIndicatorMetricChange = isUniodontoMode ? onUniodontoMetricChange : onIndicatorMetricChange
+  const indicatorTitle = isUniodontoMode ? 'Ranking Uniodonto' : 'Ranking de Operadoras'
 
   return (
     <div className="space-y-3">
@@ -99,8 +114,10 @@ function RankingPanel({
             operatorRow={operatorRow}
             operatorName={operatorName}
             comparisonLabel={comparisonLabel}
-            metric={indicatorMetric}
-            onMetricChange={onIndicatorMetricChange}
+            metric={activeIndicatorMetric}
+            onMetricChange={handleIndicatorMetricChange}
+            metrics={indicatorMetrics}
+            title={indicatorTitle}
             onOperatorClick={onOperatorClick}
           />
         </TabsContent>

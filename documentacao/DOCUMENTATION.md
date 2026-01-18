@@ -156,6 +156,12 @@ Principais funções:
 - **`components/filters`**: `FiltersPanel` renderiza seletores (modalidade, porte, período, Uniodonto, ativa, etc.).
 - **UI**: ShadCN adaptado em `components/ui/`, `lucide-react` para ícones, `react-chartjs-2` para gráficos.
 
+### 6.4 Modo Uniodonto
+
+O dashboard possui um modo exclusivo para indicadores operacionais da Uniodonto, ativado pelo toggle no header.
+As formulas e pesos estao em `src/lib/uniodontoMetrics.js` e a documentacao detalhada esta em
+`documentacao/indicadores-uniodonto.md`.
+
 ## 7. Fórmulas de Métricas (`src/lib/metricFormulas.js`)
 
 Todas as fórmulas são strings SQL convertidas em `metricSql`. Helpers:

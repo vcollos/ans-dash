@@ -1,3 +1,5 @@
+import { fetchWithAuth } from './auth'
+
 function extractFormula(answer = '') {
   const match = answer.match(/\{[\s\S]*"tool"\s*:\s*"renderFormula"[\s\S]*\}$/)
   if (!match) return { text: answer.trim(), formula: null }
@@ -15,7 +17,7 @@ function extractFormula(answer = '') {
 }
 
 export async function askAgent(question, context) {
-  const response = await fetch('/api/agent', {
+  const response = await fetchWithAuth('/api/agent', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

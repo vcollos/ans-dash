@@ -1,72 +1,219 @@
-# Relatório de Horas – ans-dashboard (jan–fev/2025)
+Relatório de Horas – ANS Dashboard
+Período reportado: desenvolvimento concluído até 14/02/2025 
+Distribuição Geral das 227h já executadas
 
-_Relatório para prestação de contas do desenvolvimento, planejamento e implantação do painel ANS/RN 518. Valor total: **R$40.000** (2× R$20.000 em 10/jan e 10/fev). Rate máximo praticado: **R$100/h** → **400h** totais. Todo o código-fonte será entregue e hospedado em VM da própria Uniodonto. Manutenções futuras poderão ser feitas pela equipe Uniodonto ou por nós a **R$150/h**, somente quando necessário e mediante aprovação prévia._
+Categoria
+Horas
+Descrição geral
+Planejamento
+50h
+Definição de escopo, arquitetura de dados (bronze/prata/ouro), indicadores e estratégias de segurança.
+Reuniões
+32h
+Alinhamentos com Uniodontos, workshops regulatórios e checkpoints técnicos com TI/contabilidade.
+Desenvolvimento
+145h
+Implementação ponta a ponta: ingestão ANS, pipelines bronze-prata-ouro, viewtables, fórmulas, testes e UI.
+Total entregue
+227h
 
----
 
-## Condições comerciais e entrega
-- **Total do projeto:** R$40.000 (400h × R$100/h).  
-- **Pagamento:** 2 parcelas de R$20.000 com vencimentos em 10/jan e 10/fev.  
-- **Entrega:** código-fonte completo (frontend Vite/React, API Express, scripts de dados, views SQL) + implantação em VM da Uniodonto.  
-- **Manutenção opcional:** R$150/h, apenas sob demanda e após aprovação.  
-- **Escopo coberto:** ingestão ANS, camadas bronze/prata/ouro, views e materialized views, fórmulas dos indicadores, API `/api/query` e `/api/indicadores.csv`, frontend com filtros/gráficos, agente regulatório (ChatGPT) e preparação de deploy/segurança conforme `documentacao/DOCUMENTATION.md` e `documentacao/diagnostico-ans-dashboard.md`.
 
----
 
-## Resumo de horas por frente (400h)
 
-| Frente                                    | Horas | Descrição                                                                                                              |
-|-------------------------------------------|-------|-------------------------------------------------------------------------------------------------------------------------|
-| Planejamento & alinhamento regulatório    | 60h   | Escopo, leitura de RN 472/518/574/630, matriz de indicadores, critérios ANS e priorização com áreas de negócio.        |
-| Estruturação & arquitetura (dados/infra)  | 80h   | Desenho bronze/prata/ouro, definição de views, índices, versionamento de datasets, estratégia de materialização.       |
-| Programação backend & integrações         | 70h   | API Express (`/api/query`, `/api/indicadores.csv`), conexão Postgres, export SQL, upload middleware e logs.            |
-| Programação frontend & UX                 | 65h   | Filtros, controllers (`useDashboardController`), `dataService`, componentes de UI e responsividade.                    |
-| Testes, validação e homologação           | 55h   | Conferência dos indicadores vs. ANS, performance de consultas, cenários extremos, revisões funcionais com usuários.    |
-| Documentação & governança                 | 30h   | Atualização de `DOCUMENTATION.md`, guias de operação, dicionário de métricas, instruções de deploy/systemd.           |
-| Gestão, reuniões e coordenação            | 40h   | Kickoffs, workshops com Uniodontos, checkpoints técnicos/contábeis, alinhamentos com TI/infra e diretoria.             |
-| **Total**                                 | **400h** |                                                                                                                         |
+Tabela de horas e valores (R$150/h)
+Módulo
+Principais entregas
+Horas
+Valor
+Planejamento regulatório e arquitetura de dados
+Mapeamento RN 518/472/574/630, dicionário e desenho bronze/prata/ouro (documentacao/*.md)
+50h
+R$ 7.500,00
+Reuniões e governança
+Kickoffs/BI/contabilidade/TI, decisões de hospedagem e segurança
+32h
+R$ 4.800,00
+Ingestão de dados ANS
+Scripts de importação CSV/Parquet e organização de public/data/
+20h
+R$ 3.000,00
+Camada Bronze
+Staging/tipagem/normalização inicial dos demonstrativos
+18h
+R$ 2.700,00
+Camada Prata
+Normalização, dimensões auxiliares e filtros consistentes (dataService, views)
+16h
+R$ 2.400,00
+Camada Ouro
+Consolidação de métricas e agregações prontas para visualização
+12h
+R$ 1.800,00
+Materialização e viewtables
+scripts/materialize_metrics.js, views prontas para consultas repetidas
+10h
+R$ 1.500,00
+Fórmulas de indicadores
+Tradução das fórmulas ANS para SQL/metricFormulas e arredondamentos
+18h
+R$ 2.700,00
+Reconciliação com números ANS
+Comparação dashboard x valores oficiais e registro de desvios
+12h
+R$ 1.800,00
+Testes de consultas e API
+Exercícios via /api/query, validação de filtros e cenários extremos
+8h
+R$ 1.200,00
+Agrupamentos/comparações
+Ranking, pares, séries históricas e segmentações no frontend
+12h
+R$ 1.800,00
+Ajustes visuais e gráficos
+Escalas/cores/tooltips, revisão responsiva e componentes atualizados
+8h
+R$ 1.200,00
+Otimizações de API e operação
+Revisão do Express/proxy, logs/limites, scripts start-dashboard.sh/systemd
+11h
+R$ 1.650,00
+Total
+Horas executadas
+227h
+R$ 34.050,00
 
----
 
-## Cronograma financeiro (jan–fev/2025)
 
-| Parcela | Valor   | Data | Observação                                               |
-|---------|---------|------|----------------------------------------------------------|
-| 1/2     | R$20.000| 10/jan | Liberação após consolidação de arquitetura e plano de dados. |
-| 2/2     | R$20.000| 10/fev | Liberação após entrega completa e handoff em VM Uniodonto.    |
+1. Planejamento – 50h
+Análise documental e regulatória (18h)
 
----
+Leitura cruzada da RN 518, RN 472, RN 574, RN 630 e manuais (documentacao/*.md) para mapear todos os indicadores exigidos pela ANS.
+Mapeamento dos indicadores utilizados no painel (documentacao/diagnostico-ans-dashboard.md) e comparação com as fórmulas oficiais.
 
-## Detalhamento por módulo e entregas (mesmo total de 400h)
+Desenho da arquitetura de dados bronze/prata/ouro (14h)
 
-| Módulo / Entrega                                                                 | Horas | Detalhe                                                                                                                        |
-|----------------------------------------------------------------------------------|-------|---------------------------------------------------------------------------------------------------------------------------------|
-| Planejamento regulatório e escopo                                                | 40h   | Leitura das normas (RN 472/518/574/630, PPCNG), definição de KPIs ANS e critérios de cálculo.                                   |
-| Modelagem bronze/prata/ouro e arquitetura de dados                               | 70h   | Estruturação das camadas no Postgres, chaves e dimensões, estratégia de versionamento de datasets grandes (`public/data`).      |
-| Ingestão e saneamento ANS (scripts Python/Node)                                  | 45h   | Importação CSV/Parquet (DIOPS), tipagem, normalização de datas/trimestres, staging (`demonstracoes_contabeis_staging`).         |
-| Views e materialized views de métricas                                           | 45h   | Criação de `indicadores_curados` e `indicadores_metricas`, índices e deltas temporais, preparação do `export_indicadores.sql`.   |
-| API Express e exportadores                                                       | 40h   | Endpoints `/api/query`, `/api/indicadores.csv`, `/api/health`, upload middleware de dataset e logs de operação.                 |
-| Frontend – filtros, estado e data service                                        | 50h   | `useDashboardController`, `dataService`, construção de queries parametrizadas e sincronização de filtros/periodicidades.        |
-| Dashboards e visualizações (KPIs, ranking, séries, tabelas)                      | 45h   | Componentes Chart.js/Recharts, cards de KPI, ranking, tabelas detalhadas, comparações históricas e responsividade.              |
-| Agente regulatório (ChatGPT)                                                     | 15h   | Fluxo `AgentAssistant`/`/api/agent`, integração com vector store/Workflow OpenAI e formatação de respostas.                     |
-| Deploy, hospedagem e observabilidade                                             | 20h   | Scripts `start-dashboard.sh`/systemd, `npm run build/preview`, logs, preparação para VM dedicada da Uniodonto.                   |
-| Segurança e governança                                                           | 15h   | Segregação de credenciais, avaliação de riscos (`/api/query`), recomendações de firewall/VPN, checklists de acesso.             |
-| Documentação e handoff                                                           | 15h   | Atualização de `documentacao/DOCUMENTATION.md`, guia de operação, instruções de atualização e transferência de conhecimento.    |
-| **Total**                                                                        | **400h** |                                                                                                                                 |
+Definição das camadas de staging, normalização e métricas enriquecidas para garantir rastreabilidade do CSV/Parquet bruto até os indicadores exibidos.
+Planejamento de versionamento das tabelas no PostgreSQL, tamanho dos datasets em public/data/ e estratégias de materialização (viewtables e materialize_metrics.js).
 
----
+Planejamento de indicadores e validação cruzada (10h)
 
-## Linha do tempo (10/jan → 10/fev)
-- **Semana 1 (10–16/jan):** planejamento regulatório, escopo funcional, desenho da arquitetura de dados e infraestrutura.  
-- **Semana 2 (17–23/jan):** ingestão inicial ANS, saneamento bronze, normalização prata e definição das views.  
-- **Semana 3 (24–30/jan):** materialized views de métricas, fórmulas dos indicadores, API Express e exportação CSV.  
-- **Semana 4 (31/jan–06/fev):** frontend (filtros, dashboards, KPIs, séries), ajustes de UX e responsividade.  
-- **Semana 5 (07–10/fev):** testes integrados, homologação com usuários, documentação final e handoff/implantação em VM Uniodonto.
+Priorização dos KPIs revisados com as áreas de negócio, garantindo cobertura de solvência, provisões e desempenho econômico-financeiro conforme a ANS cobra.
+Definição do dicionário de dados e da matriz de testes comparando os números calculados internamente com os números auditáveis pela ANS.
 
----
+Planejamento de segurança, deploy e governança (8h)
 
-## Observações operacionais
-- Estrutura principal conforme `documentacao/DOCUMENTATION.md`: Postgres com camadas bronze/prata/ouro, `indicadores_curados/indicadores_metricas`, API Express e frontend Vite/React.  
-- Código-fonte completo será entregue; implantação prevista em VM da Uniodonto com pipeline `npm run build` + backend endurecido.  
-- Manutenções futuras (quando necessário e aprovadas) serão cobradas a R$150/h, com estimativas apresentadas antes da execução.  
-- O relatório segue a limitação de **R$100/h** para o desenvolvimento principal e vincula o valor total aos marcos de 10/jan e 10/fev.
+Avaliação do uso atual de npm run dev, exposição do endpoint /api/query e definição de plano para backend endurecido (vide riscos 1 e 4 do diagnóstico).
+Preparação do roteiro de implantação (PM2/systemd), rotação de segredos (ecosystem.config.cjs, server/index.js) e checklist de governança.
+
+
+2. Reuniões – 32h
+Kickoffs e alinhamentos estratégicos com Uniodontos (8h)
+
+Apresentação do escopo, validação da necessidade de alimentar dados contábeis mensais e discussão sobre segregação por base (ANS x Uniodontos).
+
+Workshops regulatórios e contábeis (10h)
+
+Sessões conjuntas com contabilidade e compliance para traduzir normas ANS em variáveis SQL, inclusive esclarecimentos sobre indicadores de solvência e provisões técnicas.
+Levantamento dos formatos de arquivos publicados pela ANS e definição de responsabilidades sobre atualização.
+
+Revisões quinzenais com diretoria e BI (8h)
+
+Demonstrações do dashboard em ambiente npm run dev, coleta de feedback sobre UX, filtros e priorização dos gráficos.
+Revisão de aderência dos cálculos (diferenças ainda abertas foram catalogadas para ajustes de fórmula).
+
+Coordenação técnica com TI/infra (6h)
+
+Definição de hospedagem, base PostgreSQL compartilhada e restrições de acesso à API/proxy SQL.
+Discussões sobre trilha de segurança (VPN, firewall, autenticação futura) com base nos riscos descritos no diagnóstico.
+
+
+3. Desenvolvimento – 145h
+Ingestão dos dados contábeis ANS (20h)
+
+Download automatizado da base aberta (CSV/Parquet) e conferência de integridade; scripts em scripts/*.py adaptados para lidar com datasets >1GB.
+Organização do storage temporário (public/data/) e preparo do db/export_indicadores.sql para bootstrap do PostgreSQL.
+
+Camada Bronze – staging e saneamento (18h)
+
+Carregamento bruto dos demonstrativos em tabelas staging, com aplicação de tipagem e padronização de cabeçalhos.
+Tratamento de encoding e normalização de datas/trimestres para suportar filtros múltiplos (anos, trimestres, registro ANS).
+
+Camada Prata – normalização e enriquecimento (16h)
+
+Unificação de chaves (registro ANS, CNPJ, UF), criação de dimensões auxiliares e correção de discrepâncias com as tabelas referenciais.
+Implementação dos filtros dinâmicos usados em src/lib/dataService.js garantindo consistência para filters.regAns, filters.anos e filters.trimestres.
+
+Camada Ouro – indicadores consolidados (12h)
+
+Construção de tabelas métricas com agregações trimestrais/anuais, aplicação de regras de negócio (por exemplo, exclusão de registros incompletos).
+Preparação dos dados para visualizações (ranking, séries históricas e cards de destaque).
+
+Materialização de viewtables e pipelines (10h)
+
+Escrita de viewtables consumidas pelo frontend e automação via scripts/materialize_metrics.js para garantir desempenho em consultas repetitivas.
+Ajustes na leitura síncrona do db/export_indicadores.sql para garantir que a API suba com as views já consolidadas.
+
+Fórmulas dos indicadores e lógica de cálculo (18h)
+
+Tradução dos manuais ANS para SQL: fórmulas de sinistralidade, margem operacional, capital regulatório, provisões etc.
+Implementação de arredondamentos, tratamento de divisões por zero e alinhamento dos nomes exibidos no dashboard.
+
+Reconciliação com números ANS (12h)
+
+Comparação entre resultados do dashboard e valores oficiais, identificando diferenças e ajustes necessários.
+Registro dos desvios no diagnóstico para rastreabilidade futura e evidenciação dos pontos críticos.
+
+Testes de consultas e validação funcional (8h)
+
+Exercícios de consulta via /api/query, filtros combinados e cenários extremos a fim de antecipar abusos e checar performance.
+Mock de uploads para confirmar mensagens de erro do card “Atualizar arquivo base” em modo PostgreSQL (gap nº6).
+
+Agrupamentos, comparações e segmentações (12h)
+
+Configuração dos agrupamentos por operadora, porte e região; implementação das comparações históricas no frontend.
+Ajustes de ordenação e paginação para garantir experiência fluida com filtros complexos.
+
+Ajustes visuais e gráficos (8h)
+
+Correção de escalas, cores e tooltips nos gráficos principais; revisão do layout responsive.
+Avaliação da viabilidade de reintroduzir componentes como Trend/Scatter (identificados como código morto).
+
+Otimizações de API e performance operacional (11h)
+
+Revisão do proxy Express (server/index.js), implementação de logs, limites básicos e mensagens de erro mais claras.
+Preparação de scripts start-dashboard.sh/systemd e testes de execução conjunta npm run dev para suportar a operação atual.
+
+
+Próximos passos estimados – 200h (a executar)
+Frentes futuras
+Horas
+Detalhamento
+Planejamento evolutivo
+60h
+Arquitetura para bases segregadas (ANS x Uniodontos), desenho do fluxo mensal, revisão de segurança e definição de SLAs de hospedagem/observabilidade.
+Reuniões e governança
+30h
+Workshops com cada Uniodonto regional, alinhamentos jurídicos sobre LGPD e sessões com TI para escolher provedores de identidade e stack de hospedagem.
+Desenvolvimento e implantação incremental
+110h
+
+
+Construção dos pipelines paralelos, sincronização mensal automática, controles de acesso, hardening do backend e adequações de hospedagem/monitoramento.
+Total estimado
+200h
+
+
+
+Escopo detalhado dos 200h planejados
+Base segregada e sincronizada: criar pipelines que suportem múltiplos tenants (ANS e cada Uniodonto) compartilhando as mesmas views, com isolamento lógico e rotinas mensais de ingestão.
+Alimentação mensal automatizada: desenvolver agente/scheduler que puxe as entregas contábeis, valide schema e atualize as camadas bronze/prata/ouro sem intervenção manual.
+Controle de acesso e segurança: substituir o endpoint /api/query por APIs específicas, incluir autenticação/autorização, secrets externos e camadas de firewall/VPN conforme riscos 1 a 5.
+Governança e auditoria de dados: implementar trilhas de auditoria, versionamento de datasets e alertas para divergências com números oficiais.
+Hospedagem e observabilidade: migrar do npm run dev permanente para um pipeline com build (npm run build), servir dist/ via Nginx ou similar, e subir o backend Express endurecido (PM2/systemd).
+Experiência do usuário e agente regulatório: decidir sobre a ativação do componente AgentAssistant, desenhar limites de consumo e integrar com processos de governança antes do lançamento oficial.
+
+
+
+Este relatório consolida o esforço já realizado (227h) e antecipa o investimento adicional de 200h necessário para entregar as adequações descritas no diagnóstico técnico.
+

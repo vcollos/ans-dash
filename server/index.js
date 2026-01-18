@@ -25,6 +25,111 @@ const QUERY_CACHE_MAX_ENTRIES = Number(process.env.QUERY_CACHE_MAX_ENTRIES ?? 25
 const queryCache = new Map()
 const inFlightQueries = new Map()
 
+const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60 * 1000
+const AUTH_SESSION_TTL_MS = Number(process.env.DASHBOARD_SESSION_TTL_MS ?? DEFAULT_SESSION_TTL_MS)
+const SESSION_TTL_MS =
+  Number.isFinite(AUTH_SESSION_TTL_MS) && AUTH_SESSION_TTL_MS > 0 ? AUTH_SESSION_TTL_MS : DEFAULT_SESSION_TTL_MS
+
+const authUsers = new Map()
+const sessionStore = new Map()
+
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(String(password ?? '')).digest()
+}
+
+function addAuthUser(username, password) {
+  const normalized = String(username ?? '').trim()
+  if (!normalized || password === undefined || password === null) return
+  authUsers.set(normalized, { hash: hashPassword(password) })
+}
+
+function loadAuthUsers() {
+  const rawList = process.env.DASHBOARD_USERS
+  if (rawList) {
+    rawList.split(',').forEach((entry) => {
+      const trimmed = entry.trim()
+      if (!trimmed) return
+      const [user, ...passParts] = trimmed.split(':')
+      const pass = passParts.join(':')
+      if (!user || !pass) {
+        console.warn(`[server] Entrada invalida em DASHBOARD_USERS: ${entry}`)
+        return
+      }
+      addAuthUser(user, pass)
+    })
+  }
+  const singleUser = process.env.DASHBOARD_USER
+  const singlePass = process.env.DASHBOARD_PASSWORD
+  if (singleUser && singlePass) {
+    addAuthUser(singleUser, singlePass)
+  }
+  return authUsers.size > 0
+}
+
+const AUTH_ENABLED = loadAuthUsers()
+const AUTH_PUBLIC_PATHS = new Set(['/api/login', '/api/logout', '/api/health', '/api/auth/status'])
+
+if (!AUTH_ENABLED) {
+  console.warn('[server] Autenticacao desativada: configure DASHBOARD_USER/DASHBOARD_PASSWORD para habilitar.')
+}
+
+function verifyCredentials(username, password) {
+  const normalized = String(username ?? '').trim()
+  const record = authUsers.get(normalized)
+  if (!record) return false
+  const candidate = hashPassword(password)
+  if (record.hash.length !== candidate.length) return false
+  return crypto.timingSafeEqual(record.hash, candidate)
+}
+
+function createSession(username) {
+  const token = crypto.randomBytes(32).toString('hex')
+  const expiresAt = Date.now() + SESSION_TTL_MS
+  sessionStore.set(token, { username, expiresAt })
+  return { token, expiresAt }
+}
+
+function getSession(token) {
+  if (!token) return null
+  const session = sessionStore.get(token)
+  if (!session) return null
+  if (session.expiresAt <= Date.now()) {
+    sessionStore.delete(token)
+    return null
+  }
+  session.expiresAt = Date.now() + SESSION_TTL_MS
+  return session
+}
+
+function revokeSession(token) {
+  if (!token) return
+  sessionStore.delete(token)
+}
+
+function extractToken(req) {
+  const header = req.headers.authorization
+  if (typeof header === 'string' && header.startsWith('Bearer ')) {
+    const token = header.slice(7).trim()
+    if (token) return token
+  }
+  const fallback = req.headers['x-auth-token']
+  if (typeof fallback === 'string' && fallback.trim()) return fallback.trim()
+  return null
+}
+
+function authMiddleware(req, res, next) {
+  if (!AUTH_ENABLED) return next()
+  if (req.method === 'OPTIONS') return next()
+  if (AUTH_PUBLIC_PATHS.has(req.path)) return next()
+  const token = extractToken(req)
+  const session = getSession(token)
+  if (!session) {
+    return res.status(401).json({ error: 'Autenticacao necessaria.' })
+  }
+  req.user = { username: session.username }
+  return next()
+}
+
 function getCacheKey(sql) {
   return crypto
     .createHash('sha256')
@@ -122,6 +227,43 @@ async function runBigQuery(queryText) {
 
 const app = express()
 app.use(express.json({ limit: '5mb' }))
+app.use(authMiddleware)
+
+app.get('/api/auth/status', (req, res) => {
+  res.json({ enabled: AUTH_ENABLED })
+})
+
+app.post('/api/login', (req, res) => {
+  if (!AUTH_ENABLED) {
+    return res.status(403).json({ error: 'Autenticacao nao configurada.' })
+  }
+  const { username, password } = req.body ?? {}
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Usuario e senha sao obrigatorios.' })
+  }
+  if (!verifyCredentials(username, password)) {
+    return res.status(401).json({ error: 'Usuario ou senha invalidos.' })
+  }
+  const normalized = String(username).trim()
+  const session = createSession(normalized)
+  res.setHeader('Cache-Control', 'no-store')
+  return res.json({ token: session.token, expiresAt: session.expiresAt, user: { username: normalized } })
+})
+
+app.post('/api/logout', (req, res) => {
+  if (AUTH_ENABLED) {
+    const token = extractToken(req)
+    revokeSession(token)
+  }
+  res.json({ ok: true })
+})
+
+app.get('/api/auth/verify', (req, res) => {
+  if (!AUTH_ENABLED) {
+    return res.status(403).json({ error: 'Autenticacao nao configurada.' })
+  }
+  return res.json({ ok: true, user: req.user ?? null })
+})
 
 app.get('/api/health', async (req, res) => {
   try {
@@ -171,7 +313,7 @@ app.post('/api/query', async (req, res) => {
       try {
         const rows = await inflight
         return res.json({ rows, cache: 'deduped' })
-      } catch (err) {
+      } catch {
         // deixa cair para executar normalmente
       }
     }

@@ -65,14 +65,14 @@ export const REGULATORY_INDICATORS = [
   },
   {
     id: 'pmpe',
-    label: 'PMPE (dias)',
+    label: 'PMPG (dias)',
     format: 'days',
     unit: 'dias',
     trend: 'lower',
   },
   {
     id: 'pmcr',
-    label: 'PMCR (dias)',
+    label: 'PMRC (dias)',
     format: 'days',
     unit: 'dias',
     trend: 'lower',
@@ -153,13 +153,13 @@ export const REGULATORY_INDICATORS = [
 
 export const REGULATORY_SOLVENCY_BLOCK = {
   id: 'solvency',
-  label: 'Provisões / PMPE / PMCR',
+  label: 'Provisões / PMPG / PMRC',
   indicators: ['cobertura_provisoes', 'pmpe', 'pmcr'],
   weight: 0.2,
 }
 
 export const REGULATORY_BASE_TEXT =
-  'Classificação baseada na metodologia ANS – RN 518/2022 (DM, DA, DC, PMPE, PMCR, IRF) e diretrizes prudenciais da RN 630/2025, incluindo sinistro per capta mensal.'
+  'Classificação baseada na metodologia ANS – RN 518/2022 (DM, DA, DC, PMPG, PMRC, IRF) e diretrizes prudenciais da RN 630/2025, incluindo sinistro per capta mensal.'
 
 const INDICATOR_MAP = Object.fromEntries(REGULATORY_INDICATORS.map((indicator) => [indicator.id, indicator]))
 

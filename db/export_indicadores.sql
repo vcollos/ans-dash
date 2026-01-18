@@ -1,3 +1,15 @@
+WITH prestadores AS (
+  SELECT
+    CAST(reg_ans AS STRING) AS reg_ans_join,
+    COUNT(DISTINCT ID_ESTABELECIMENTO_SAUDE) AS qt_prestadores_proprios
+  FROM `bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem`
+  WHERE origem = 'PRÓPRIA'
+    AND COMPETENCIA = (
+      SELECT MAX(COMPETENCIA)
+      FROM `bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem`
+    )
+  GROUP BY reg_ans_join
+)
 SELECT
   nome_operadora,
   modalidade,
@@ -7,7 +19,7 @@ SELECT
   ELSE ''
   END AS uniodonto,
   qt_beneficiarios AS qt_beneficiarios_periodo,
-  qt_prestadores AS qt_prestadores_periodo,
+  COALESCE(qt_prestadores, prestadores.qt_prestadores_proprios) AS qt_prestadores_periodo,
   CASE
     WHEN ativa IS TRUE THEN 'SIM'
     WHEN ativa IS FALSE THEN 'NÃO'
@@ -36,13 +48,22 @@ SELECT
   vr_despesas_fin AS `45_vr_despesas_fin`,
   vr_outras_receitas_operacionais AS `33_vr_outras_receitas_operacionais`,
   vr_ativo_circulante AS `12_vr_ativo_circulante`,
+  vr_conta_1213 AS `1213_vr_conta_1213`,
+  vr_conta_1214 AS `1214_vr_conta_1214`,
+  vr_conta_122 AS `122_vr_conta_122`,
   vr_ativo_permanente AS `13_vr_ativo_permanente`,
   vr_passivo_circulante AS `21_vr_passivo_circulante`,
   vr_passivo_nao_circulante AS `23_vr_passivo_nao_circulante`,
   vr_patrimonio_liquido AS `25_vr_patrimonio_liquido`,
   vr_ativos_garantidores AS `31_vr_ativos_garantidores`,
   vr_provisoes_tecnicas AS `32_vr_provisoes_tecnicas`,
+  vr_conta_216 AS `216_vr_conta_216`,
+  vr_conta_236 AS `236_vr_conta_236`,
+  vr_conta_237 AS `237_vr_conta_237`,
+  vr_conta_271 AS `271_vr_conta_271`,
   vr_pl_ajustado AS `2521_vr_pl_ajustado`,
   vr_margem_solvencia_exigida AS `2522_vr_margem_solvencia_exigida`,
   vr_conta_61 AS `61_vr_conta_61`
-FROM indicadores_curados;
+FROM indicadores_curados
+LEFT JOIN prestadores
+  ON CAST(reg_ans AS STRING) = prestadores.reg_ans_join;

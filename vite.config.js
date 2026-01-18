@@ -61,12 +61,22 @@ export default defineConfig({
     proxy: {
       '/api': process.env.VITE_API_PROXY ?? 'http://localhost:4000',
     },
+    headers: {
+      'Cache-Control': 'no-store',
+      Pragma: 'no-cache',
+      Expires: '0',
+    },
   },
   preview: {
     host: '0.0.0.0',
     allowedHosts: ['dash.collos.com.br', 'backdash.collos.com.br'],
     proxy: {
       '/api': process.env.VITE_API_PROXY ?? 'http://localhost:4000',
+    },
+    headers: {
+      'Cache-Control': 'no-store',
+      Pragma: 'no-cache',
+      Expires: '0',
     },
   },
   resolve: {

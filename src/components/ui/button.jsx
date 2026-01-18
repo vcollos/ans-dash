@@ -43,4 +43,4 @@ const Button = React.forwardRef(({ className, variant, size, asChild = false, ty
 
 Button.displayName = 'Button'
 
-export { Button, buttonVariants }
+export { Button }

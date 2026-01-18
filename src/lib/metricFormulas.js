@@ -257,6 +257,20 @@ COALESCE(vr_eventos_liquidos, 0)
     trend: 'higher',
   },
   {
+    id: 'liquidez_imediata',
+    code: 'LI',
+    label: 'Liquidez imediata (LI)',
+    description: '(1213 + 1214 + 122) / 21_vr_passivo_circulante',
+    format: 'decimal',
+    sql: safeRatio(
+      'COALESCE(vr_conta_1213, 0) + COALESCE(vr_conta_1214, 0) + COALESCE(vr_conta_122, 0)',
+      'COALESCE(vr_passivo_circulante, 0)',
+    ),
+    showInCatalog: true,
+    showInCards: true,
+    trend: 'higher',
+  },
+  {
     id: 'capital_terceiros_sobre_pl',
     code: 'CT/PL',
     label: 'Capital de Terceiros / PL (CT/CP)',
@@ -275,8 +289,8 @@ END
   },
   {
     id: 'pmcr',
-    code: 'PPMCR',
-    label: 'Prazo Médio de Contraprestações (PMCR)',
+    code: 'PMRC',
+    label: 'Prazo Médio de Recebimento de Contraprestações (PMRC)',
     description: '(1231_vr_creditos_operacoes_saude * 90) / 311121_vr_contraprestacoes_pre',
     format: 'days',
     sql: safeDays('COALESCE(vr_creditos_operacoes_saude, 0)', 'COALESCE(vr_contraprestacoes_pre, 0)', 90),
@@ -286,8 +300,8 @@ END
   },
   {
     id: 'pmpe',
-    code: 'PPME',
-    label: 'Prazo Médio de Pagamento de Eventos (PMPE)',
+    code: 'PMPG',
+    label: 'Prazo Médio de Pagamento de Eventos (PMPG)',
     description: '(2111_vr_eventos_a_liquidar * 90) / 41_vr_eventos_liquidos',
     format: 'days',
     sql: safeDays('COALESCE(vr_eventos_a_liquidar, 0)', 'COALESCE(vr_eventos_liquidos, 0)', 90),

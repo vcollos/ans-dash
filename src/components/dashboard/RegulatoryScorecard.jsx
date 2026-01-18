@@ -105,7 +105,7 @@ function ScoreSummary({ report, comparisonLabel }) {
         </div>
         <GaugeBar value={report.solvency.value ?? null} />
         <p className="text-xs text-muted-foreground">
-          Média das notas para cobertura de provisões, PMPE e PMCR ({report.solvency.value ? report.solvency.value.toFixed(2) : '—'})
+          Média das notas para cobertura de provisões, PMPG e PMRC ({report.solvency.value ? report.solvency.value.toFixed(2) : '—'})
         </p>
       </div>
     </div>
