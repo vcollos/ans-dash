@@ -58,9 +58,9 @@ SELECT
   vr_ativos_garantidores AS `31_vr_ativos_garantidores`,
   vr_provisoes_tecnicas AS `32_vr_provisoes_tecnicas`,
   vr_conta_216 AS `216_vr_conta_216`,
+  vr_conta_217 AS `217_vr_conta_217`,
   vr_conta_236 AS `236_vr_conta_236`,
   vr_conta_237 AS `237_vr_conta_237`,
-  vr_conta_271 AS `271_vr_conta_271`,
   vr_pl_ajustado AS `2521_vr_pl_ajustado`,
   vr_margem_solvencia_exigida AS `2522_vr_margem_solvencia_exigida`,
   vr_conta_61 AS `61_vr_conta_61`

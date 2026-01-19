@@ -1,4 +1,3 @@
-import './lib/charts'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle } from 'lucide-react'
 import { useDashboardController } from './hooks/useDashboardController'
@@ -9,8 +8,10 @@ import KpiCards from './components/dashboard/KpiCards'
 import UniodontoKpiCards from './components/dashboard/UniodontoKpiCards'
 import RankingPanel from './components/dashboard/RankingPanel'
 import IndicatorTrendChart from './components/dashboard/IndicatorTrendChart'
+import UniodontoCorrelationPanel from './components/dashboard/UniodontoCorrelationPanel'
 import DataTable from './components/dashboard/DataTable'
 import MonetarySummary from './components/dashboard/MonetarySummary'
+import DashboardAnalysisDialog from './components/dashboard/DashboardAnalysisDialog'
 import { Skeleton } from './components/ui/skeleton'
 import { Card, CardContent } from './components/ui/card'
 import { Button } from './components/ui/button'
@@ -90,6 +91,7 @@ function ErrorState({ error, onRetry }) {
 
 function DashboardApp({ onLogout }) {
   const [filtersSidebarOpen, setFiltersSidebarOpen] = useState(false)
+  const [analysisOpen, setAnalysisOpen] = useState(false)
   const {
     status,
     error,
@@ -159,6 +161,22 @@ function DashboardApp({ onLogout }) {
           onLogout={onLogout}
           uniodontoMode={uniodontoMode}
           onUniodontoModeChange={setUniodontoMode}
+          onOpenAnalysis={() => setAnalysisOpen(true)}
+        />
+        <DashboardAnalysisDialog
+          open={analysisOpen}
+          onOpenChange={setAnalysisOpen}
+          uniodontoMode={uniodontoMode}
+          filters={filters}
+          comparisonFilters={comparisonFilters}
+          operatorName={operatorInsight?.operatorName}
+          kpis={kpis}
+          monetarySummary={monetarySummary}
+          rankingData={rankingData}
+          rankingMetric={rankingMetric}
+          uniodontoRankingMetric={uniodontoRankingMetric}
+          trendSeriesByMetric={trendSeriesByMetric}
+          isLoading={isRefreshingData}
         />
         <DataLoadingIndicator
           isActive={isRefreshingData}
@@ -272,6 +290,9 @@ function DashboardApp({ onLogout }) {
                   : undefined
               }
             />
+            {uniodontoMode ? (
+              <UniodontoCorrelationPanel rows={rankingData.rows ?? []} isLoading={isQuerying} />
+            ) : null}
             <DataTable
               rows={tableData.rows ?? []}
               columns={tableData.columns ?? []}
@@ -293,6 +314,29 @@ function App() {
   const [isAuthVerifying, setIsAuthVerifying] = useState(false)
   const [isAuthLoading, setIsAuthLoading] = useState(false)
   const verifiedTokenRef = useRef(null)
+  const bootKeyRef = useRef('ans-dashboard:auth-boot-id')
+
+  const readStoredBootId = () => {
+    if (typeof window === 'undefined') return null
+    try {
+      return window.localStorage.getItem(bootKeyRef.current)
+    } catch {
+      return null
+    }
+  }
+
+  const writeStoredBootId = (bootId) => {
+    if (typeof window === 'undefined') return
+    try {
+      if (!bootId) {
+        window.localStorage.removeItem(bootKeyRef.current)
+        return
+      }
+      window.localStorage.setItem(bootKeyRef.current, bootId)
+    } catch {
+      // ignore storage errors
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -304,6 +348,17 @@ function App() {
         }
         const payload = await response.json()
         if (!cancelled) {
+          const bootId = payload?.bootId ?? null
+          if (bootId) {
+            const storedBootId = readStoredBootId()
+            if (storedBootId && storedBootId !== bootId) {
+              persistAuthToken(null)
+              setAuthTokenState(null)
+              setAuthVerified(false)
+              verifiedTokenRef.current = null
+            }
+            writeStoredBootId(bootId)
+          }
           setAuthRequired(payload?.enabled !== false)
         }
       } catch {

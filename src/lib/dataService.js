@@ -57,20 +57,6 @@ export const DETAIL_TABLE_FIELDS = [
 ]
 
 const DEFAULT_VIEW = import.meta.env?.VITE_DATASET_VIEW ?? 'indicadores_curados'
-const VIEW_IDENTIFIER = (() => {
-  const raw = DEFAULT_VIEW.replace(/"/g, '')
-  if (raw.includes('.')) {
-    const [schema, table] = raw.split('.')
-    return {
-      schema: schema && schema.trim().length ? schema.trim() : 'public',
-      table: table && table.trim().length ? table.trim() : null,
-    }
-  }
-  return {
-    schema: 'public',
-    table: raw.trim(),
-  }
-})()
 let cachedViewColumns = null
 
 const PRESTADORES_TABLE_RAW =
@@ -78,6 +64,7 @@ const PRESTADORES_TABLE_RAW =
 const PRESTADORES_TABLE = PRESTADORES_TABLE_RAW.replace(/`/g, '')
 const PRESTADORES_ORIGEM = import.meta.env?.VITE_PRESTADORES_ORIGEM ?? 'PRÓPRIA'
 const PRESTADORES_CACHE_TTL_MS = Number(import.meta.env?.VITE_PRESTADORES_CACHE_TTL_MS ?? 12 * 60 * 60 * 1000)
+const PRESTADORES_ERROR_TTL_MS = Number(import.meta.env?.VITE_PRESTADORES_ERROR_TTL_MS ?? 5 * 60 * 1000)
 const PRESTADORES_CACHE_ENABLED =
   Number.isFinite(PRESTADORES_CACHE_TTL_MS) && PRESTADORES_CACHE_TTL_MS > 0
 let prestadoresCache = null
@@ -198,8 +185,13 @@ const COHORT_AGGREGATE_SUM_COLUMNS = [
   'qt_prestadores',
   ...monetaryIndicatorPhysicalColumns,
   'vr_desp_comerciais_promocoes',
+  'vr_conta_464',
+  'vr_conta_442129119',
+  'vr_conta_332129111',
+  'vr_conta_332189111',
+  'vr_conta_32',
   'vr_conta_237',
-  'vr_conta_271',
+  'vr_conta_217',
   'vr_conta_216',
   'vr_conta_236',
   'resultado_financeiro',
@@ -447,6 +439,13 @@ async function getPrestadoresMap() {
     })
     .catch((err) => {
       console.warn('[dataService] Falha ao carregar prestadores', err)
+      const shouldCacheError =
+        PRESTADORES_CACHE_ENABLED && Number.isFinite(PRESTADORES_ERROR_TTL_MS) && PRESTADORES_ERROR_TTL_MS > 0
+      if (shouldCacheError) {
+        prestadoresCache = new Map()
+        prestadoresCacheExpiresAt = Date.now() + PRESTADORES_ERROR_TTL_MS
+        return prestadoresCache
+      }
       prestadoresCache = null
       prestadoresCacheExpiresAt = 0
       throw err
@@ -623,14 +622,18 @@ async function summarizePeriod(filters) {
         SUM(COALESCE(vr_eventos_a_liquidar, 0)) AS vr_eventos_a_liquidar,
         SUM(COALESCE(vr_desp_comerciais, 0)) AS vr_desp_comerciais,
         SUM(COALESCE(vr_desp_comerciais_promocoes, 0)) AS vr_desp_comerciais_promocoes,
+        SUM(COALESCE(vr_conta_464, 0)) AS vr_conta_464,
         SUM(COALESCE(vr_desp_administrativas, 0)) AS vr_desp_administrativas,
         SUM(COALESCE(vr_outras_desp_oper, 0)) AS vr_outras_desp_oper,
+        SUM(COALESCE(vr_conta_442129119, 0)) AS vr_conta_442129119,
         SUM(COALESCE(vr_desp_tributos, 0)) AS vr_desp_tributos,
         SUM(COALESCE(vr_receitas_fin, 0)) AS vr_receitas_fin,
         SUM(COALESCE(vr_despesas_fin, 0)) AS vr_despesas_fin,
         SUM(COALESCE(resultado_financeiro, 0)) AS resultado_financeiro,
         SUM(COALESCE(vr_receitas_patrimoniais, 0)) AS vr_receitas_patrimoniais,
         SUM(COALESCE(vr_outras_receitas_operacionais, 0)) AS vr_outras_receitas_operacionais,
+        SUM(COALESCE(vr_conta_332129111, 0)) AS vr_conta_332129111,
+        SUM(COALESCE(vr_conta_332189111, 0)) AS vr_conta_332189111,
         SUM(COALESCE(vr_ativo_circulante, 0)) AS vr_ativo_circulante,
         SUM(COALESCE(vr_conta_1213, 0)) AS vr_conta_1213,
         SUM(COALESCE(vr_conta_1214, 0)) AS vr_conta_1214,
@@ -641,10 +644,11 @@ async function summarizePeriod(filters) {
         SUM(COALESCE(vr_patrimonio_liquido, 0)) AS vr_patrimonio_liquido,
         SUM(COALESCE(vr_ativos_garantidores, 0)) AS vr_ativos_garantidores,
         SUM(COALESCE(vr_provisoes_tecnicas, 0)) AS vr_provisoes_tecnicas,
+        SUM(COALESCE(vr_conta_32, 0)) AS vr_conta_32,
         SUM(COALESCE(vr_conta_216, 0)) AS vr_conta_216,
+        SUM(COALESCE(vr_conta_217, 0)) AS vr_conta_217,
         SUM(COALESCE(vr_conta_236, 0)) AS vr_conta_236,
         SUM(COALESCE(vr_conta_237, 0)) AS vr_conta_237,
-        SUM(COALESCE(vr_conta_271, 0)) AS vr_conta_271,
         SUM(COALESCE(vr_pl_ajustado, 0)) AS vr_pl_ajustado,
         SUM(COALESCE(vr_margem_solvencia_exigida, 0)) AS vr_margem_solvencia_exigida,
         SUM(COALESCE(vr_conta_61, 0)) AS vr_conta_61,
@@ -699,22 +703,35 @@ export async function fetchUniodontoPeerSummary(filters = {}, options = {}) {
   const query = `
     SELECT
       COUNT(DISTINCT nome_operadora) AS peer_count,
+      MAX(ano) AS ano,
+      MAX(trimestre) AS trimestre,
+      MAX(periodo_id) AS periodo_id,
+      MAX(periodo) AS periodo,
       SUM(COALESCE(qt_beneficiarios, 0)) AS qt_beneficiarios,
       SUM(COALESCE(prev_qt_beneficiarios, 0)) AS prev_qt_beneficiarios,
       SUM(COALESCE(qt_prestadores, 0)) AS qt_prestadores,
       SUM(COALESCE(vr_contraprestacoes, 0)) AS vr_contraprestacoes,
       SUM(COALESCE(vr_outras_receitas_operacionais, 0)) AS vr_outras_receitas_operacionais,
+      SUM(COALESCE(vr_conta_332129111, 0)) AS vr_conta_332129111,
+      SUM(COALESCE(vr_conta_332189111, 0)) AS vr_conta_332189111,
+      SUM(COALESCE(vr_conta_32, 0)) AS vr_conta_32,
       SUM(COALESCE(vr_conta_61, 0)) AS vr_conta_61,
       SUM(COALESCE(vr_desp_administrativas, 0)) AS vr_desp_administrativas,
       SUM(COALESCE(vr_eventos_liquidos, 0)) AS vr_eventos_liquidos,
       SUM(COALESCE(vr_outras_desp_oper, 0)) AS vr_outras_desp_oper,
+      SUM(COALESCE(vr_conta_442129119, 0)) AS vr_conta_442129119,
       SUM(COALESCE(vr_desp_comerciais, 0)) AS vr_desp_comerciais,
       SUM(COALESCE(vr_desp_comerciais_promocoes, 0)) AS vr_desp_comerciais_promocoes,
+      SUM(COALESCE(vr_conta_464, 0)) AS vr_conta_464,
       SUM(COALESCE(vr_ativos_garantidores, 0)) AS vr_ativos_garantidores,
+      SUM(COALESCE(vr_ativo_circulante, 0)) AS vr_ativo_circulante,
+      SUM(COALESCE(vr_creditos_operacoes_saude, 0)) AS vr_creditos_operacoes_saude,
+      SUM(COALESCE(vr_contraprestacoes_pre, 0)) AS vr_contraprestacoes_pre,
+      SUM(COALESCE(vr_eventos_a_liquidar, 0)) AS vr_eventos_a_liquidar,
       SUM(COALESCE(vr_conta_216, 0)) AS vr_conta_216,
+      SUM(COALESCE(vr_conta_217, 0)) AS vr_conta_217,
       SUM(COALESCE(vr_conta_236, 0)) AS vr_conta_236,
       SUM(COALESCE(vr_conta_237, 0)) AS vr_conta_237,
-      SUM(COALESCE(vr_conta_271, 0)) AS vr_conta_271,
       SUM(COALESCE(vr_conta_1213, 0)) AS vr_conta_1213,
       SUM(COALESCE(vr_conta_1214, 0)) AS vr_conta_1214,
       SUM(COALESCE(vr_conta_122, 0)) AS vr_conta_122,
@@ -1501,7 +1518,7 @@ function buildUniodontoRankingQuery(whereClause, metricId, order = 'DESC', limit
       SELECT
         base.*,
         base.${metricIdentifier} AS valor,
-        ROW_NUMBER() OVER (ORDER BY base.${metricIdentifier} ${order}) AS rank
+        DENSE_RANK() OVER (ORDER BY base.${metricIdentifier} ${order}) AS rank
       FROM base
     )
     SELECT *
@@ -1603,7 +1620,12 @@ export async function fetchUniodontoRanking(metric, filters, limit = null, order
     const operatorValue = toNumeric(operatorRow?.valor ?? operatorRow?.[metricColumn])
     if (operatorValue !== null) {
       const values = rows.map((row) => toNumeric(row[metricColumn] ?? row.valor)).filter((value) => value !== null)
-      const betterCount = values.filter((value) => (order === 'ASC' ? value < operatorValue : value > operatorValue)).length
+      const distinctValues = Array.from(new Set(values.map((value) => String(value))))
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value))
+      const betterCount = distinctValues.filter((value) =>
+        order === 'ASC' ? value < operatorValue : value > operatorValue,
+      ).length
       operatorRow.rank_position = betterCount + 1
       operatorRow.rank = operatorRow.rank_position
     }

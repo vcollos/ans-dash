@@ -69,9 +69,9 @@ const fieldLabels = {
   vr_ativos_garantidores: 'Ativos Garantidores',
   vr_provisoes_tecnicas: 'Provisões Técnicas',
   vr_conta_216: 'Conta 216',
+  vr_conta_217: 'Conta 217',
   vr_conta_236: 'Conta 236',
   vr_conta_237: 'Conta 237',
-  vr_conta_271: 'Conta 271',
   vr_pl_ajustado: 'PL Ajustado',
   vr_margem_solvencia_exigida: 'Margem de Solvência Exigida',
 }
@@ -121,9 +121,9 @@ const currencyFields = new Set([
   'vr_ativos_garantidores',
   'vr_provisoes_tecnicas',
   'vr_conta_216',
+  'vr_conta_217',
   'vr_conta_236',
   'vr_conta_237',
-  'vr_conta_271',
   'vr_pl_ajustado',
   'vr_margem_solvencia_exigida',
 ])

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import RankingChart from './RankingChart'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs'
-import { UNIODONTO_RANKING_METRICS } from '../../lib/uniodontoMetrics.js'
+import { UNIODONTO_INDICATOR_GROUPS, UNIODONTO_RANKING_METRICS } from '../../lib/uniodontoMetrics.js'
 
 const monetaryRankingMetricGroups = [
   {
@@ -61,6 +61,11 @@ const monetaryRankingMetricGroups = [
 ]
 
 const monetaryRankingMetrics = monetaryRankingMetricGroups.flatMap((group) => group.items)
+const uniodontoMetricMap = Object.fromEntries(UNIODONTO_RANKING_METRICS.map((metric) => [metric.id, metric]))
+const uniodontoRankingMetricGroups = UNIODONTO_INDICATOR_GROUPS.map((group) => ({
+  label: group.label,
+  items: (group.items ?? []).map((id) => uniodontoMetricMap[id]).filter(Boolean),
+}))
 
 function RankingPanel({
   indicatorRanking,
@@ -91,6 +96,7 @@ function RankingPanel({
   }, [tab, isUniodontoMode])
 
   const indicatorMetrics = isUniodontoMode ? UNIODONTO_RANKING_METRICS : null
+  const indicatorMetricGroups = isUniodontoMode ? uniodontoRankingMetricGroups : null
   const activeIndicatorMetric = isUniodontoMode ? uniodontoMetric : indicatorMetric
   const handleIndicatorMetricChange = isUniodontoMode ? onUniodontoMetricChange : onIndicatorMetricChange
   const indicatorTitle = isUniodontoMode ? 'Ranking Uniodonto' : 'Ranking de Operadoras'
@@ -117,6 +123,7 @@ function RankingPanel({
             metric={activeIndicatorMetric}
             onMetricChange={handleIndicatorMetricChange}
             metrics={indicatorMetrics}
+            metricGroups={indicatorMetricGroups}
             title={indicatorTitle}
             onOperatorClick={onOperatorClick}
           />

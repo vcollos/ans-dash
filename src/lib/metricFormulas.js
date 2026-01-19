@@ -12,10 +12,11 @@ CASE
 END
 `
 
-const safeDays = (numerator, denominator, days) => `
+const safeDays = (numerator, denominator, daysExpr) => `
 CASE
+  WHEN (${daysExpr}) IS NULL OR (${daysExpr}) = 0 THEN NULL
   WHEN (${denominator}) IS NULL OR (${denominator}) = 0 THEN NULL
-  ELSE ((${numerator}) * ${days}) / (${denominator})
+  ELSE ((${numerator}) * (${daysExpr})) / (${denominator})
 END
 `
 
@@ -53,7 +54,7 @@ CASE
 END
     `,
     showInCatalog: true,
-    showInCards: true,
+    showInCards: false,
     trend: 'lower',
   },
   {
@@ -70,7 +71,7 @@ CASE
 END
     `,
     showInCatalog: true,
-    showInCards: true,
+    showInCards: false,
     trend: 'higher',
   },
   {
@@ -88,16 +89,16 @@ END
     id: 'emprestimos_parcelamentos',
     code: 'EP/AG',
     label: 'Empréstimos e parcelamentos',
-    description: '(237 + 271) / 31 — razão sobre ativos garantidores',
+    description: '(237 + 217) / 31 — razão sobre ativos garantidores',
     format: 'decimal',
     sql: `
 CASE
   WHEN vr_ativos_garantidores IS NULL OR vr_ativos_garantidores = 0 THEN NULL
-  ELSE (ABS(COALESCE(vr_conta_271, 0)) + ABS(COALESCE(vr_conta_237, 0))) / ABS(vr_ativos_garantidores)
+  ELSE (ABS(COALESCE(vr_conta_217, 0)) + ABS(COALESCE(vr_conta_237, 0))) / ABS(vr_ativos_garantidores)
 END
     `,
     showInCatalog: true,
-    showInCards: true,
+    showInCards: false,
     trend: 'lower',
   },
   {
@@ -291,9 +292,13 @@ END
     id: 'pmcr',
     code: 'PMRC',
     label: 'Prazo Médio de Recebimento de Contraprestações (PMRC)',
-    description: '(1231_vr_creditos_operacoes_saude * 90) / 311121_vr_contraprestacoes_pre',
+    description: '(1231_vr_creditos_operacoes_saude * dias do período) / 311121_vr_contraprestacoes_pre',
     format: 'days',
-    sql: safeDays('COALESCE(vr_creditos_operacoes_saude, 0)', 'COALESCE(vr_contraprestacoes_pre, 0)', 90),
+    sql: safeDays(
+      'COALESCE(vr_creditos_operacoes_saude, 0)',
+      'COALESCE(vr_contraprestacoes_pre, 0)',
+      'CAST(trimestre AS FLOAT64) * 90',
+    ),
     showInCatalog: true,
     showInCards: true,
     trend: 'lower',
@@ -302,9 +307,13 @@ END
     id: 'pmpe',
     code: 'PMPG',
     label: 'Prazo Médio de Pagamento de Eventos (PMPG)',
-    description: '(2111_vr_eventos_a_liquidar * 90) / 41_vr_eventos_liquidos',
+    description: '(2111_vr_eventos_a_liquidar * dias do período) / 41_vr_eventos_liquidos',
     format: 'days',
-    sql: safeDays('COALESCE(vr_eventos_a_liquidar, 0)', 'COALESCE(vr_eventos_liquidos, 0)', 90),
+    sql: safeDays(
+      'COALESCE(vr_eventos_a_liquidar, 0)',
+      'COALESCE(vr_eventos_liquidos, 0)',
+      'CAST(trimestre AS FLOAT64) * 90',
+    ),
     showInCatalog: true,
     showInCards: true,
     trend: 'lower',

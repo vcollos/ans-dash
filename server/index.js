@@ -4,7 +4,6 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import crypto from 'crypto'
-import { runAgent } from './agentRunner.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -19,6 +18,11 @@ const bigquery = new BigQuery({
   projectId: BQ_PROJECT_ID,
 })
 
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY
+const OPENAI_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
+const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '')
+const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS ?? 20_000)
+
 const QUERY_CACHE_TTL_MS = Number(process.env.QUERY_CACHE_TTL_MS ?? 60_000)
 const QUERY_CACHE_MAX_ENTRIES = Number(process.env.QUERY_CACHE_MAX_ENTRIES ?? 250)
 
@@ -29,6 +33,7 @@ const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60 * 1000
 const AUTH_SESSION_TTL_MS = Number(process.env.DASHBOARD_SESSION_TTL_MS ?? DEFAULT_SESSION_TTL_MS)
 const SESSION_TTL_MS =
   Number.isFinite(AUTH_SESSION_TTL_MS) && AUTH_SESSION_TTL_MS > 0 ? AUTH_SESSION_TTL_MS : DEFAULT_SESSION_TTL_MS
+const SERVER_BOOT_ID = crypto.randomBytes(8).toString('hex')
 
 const authUsers = new Map()
 const sessionStore = new Map()
@@ -211,6 +216,105 @@ function normalizeBigQueryRows(rows) {
   return rows.map((row) => normalizeBigQueryScalar(row))
 }
 
+function buildCorrelationPrompt(summary) {
+  const payload = JSON.stringify(summary, null, 2)
+  return [
+    'Dados resumidos do painel de correlacao entre despesa comercial e desempenho.',
+    'Use somente as informacoes fornecidas para comentar; nao invente dados.',
+    'Se |r| < 0.20, diga que nao ha correlacao linear clara.',
+    'Se n < 5, indique que a amostra e pequena e evite conclusoes fortes.',
+    'Retorne 3 a 5 bullets e uma conclusao final em uma unica frase.',
+    '',
+    payload,
+  ].join('\n')
+}
+
+function buildDashboardPrompt(summary) {
+  const payload = JSON.stringify(summary, null, 2)
+  return [
+    'Voce vai gerar comentarios sobre o dashboard com base no resumo abaixo.',
+    'Responda em Markdown com blocos titulados exatamente assim:',
+    '## Visao geral',
+    '## Indicadores',
+    '## Ranking',
+    '## Tendencias',
+    '## Monetarios',
+    '## Correlacao (se aplicavel)',
+    'Para Indicadores e Tendencias, gere uma linha por item informado (use "- <label>: ...").',
+    'Se nao houver dados suficientes em algum bloco, escreva "Sem dados suficientes".',
+    'Se |r| < 0.20, diga que nao ha correlacao linear clara.',
+    'Se n < 5, indique que a amostra e pequena.',
+    '',
+    payload,
+  ].join('\n')
+}
+
+function getTokenLimitPayload(model, maxTokens) {
+  const normalized = String(model ?? '').trim().toLowerCase()
+  const useCompletionTokens = normalized.startsWith('gpt-5') || normalized.startsWith('o')
+  return useCompletionTokens ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }
+}
+
+function getTemperaturePayload(model) {
+  const normalized = String(model ?? '').trim().toLowerCase()
+  const disableTemperature = normalized.startsWith('gpt-5') || normalized.startsWith('o')
+  return disableTemperature ? {} : { temperature: 0.3 }
+}
+
+async function requestOpenAiAnalysis({ system, prompt, maxTokens = 260 }) {
+  if (!OPENAI_API_KEY) {
+    const error = new Error('OpenAI API key nao configurada.')
+    error.code = 'OPENAI_DISABLED'
+    throw error
+  }
+  if (typeof fetch !== 'function') {
+    throw new Error('Fetch API indisponivel no servidor.')
+  }
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS)
+  try {
+    const response = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content:
+              system ??
+              'Voce e um analista de performance de operadoras de saude. Escreva comentarios curtos e objetivos em PT-BR.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        ...getTokenLimitPayload(OPENAI_MODEL, maxTokens),
+        ...getTemperaturePayload(OPENAI_MODEL),
+      }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      const bodyText = await response.text().catch(() => '')
+      throw new Error(`OpenAI erro ${response.status}: ${bodyText || 'Falha na requisicao.'}`)
+    }
+
+    const payload = await response.json()
+    const content = payload?.choices?.[0]?.message?.content
+    if (!content) {
+      throw new Error('Resposta vazia da OpenAI.')
+    }
+    return content.trim()
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 async function runBigQuery(queryText) {
   const [rows, metadata] = await bigquery.query({
     query: queryText,
@@ -230,7 +334,8 @@ app.use(express.json({ limit: '5mb' }))
 app.use(authMiddleware)
 
 app.get('/api/auth/status', (req, res) => {
-  res.json({ enabled: AUTH_ENABLED })
+  res.setHeader('Cache-Control', 'no-store')
+  res.json({ enabled: AUTH_ENABLED, bootId: SERVER_BOOT_ID })
 })
 
 app.post('/api/login', (req, res) => {
@@ -287,6 +392,72 @@ app.get('/api/indicadores.csv', async (req, res) => {
   }
 })
 
+app.post('/api/analysis/correlation', async (req, res) => {
+  const summary = req.body?.summary
+  if (!summary || typeof summary !== 'object') {
+    return res.status(400).json({ error: 'Resumo invalido para analise.' })
+  }
+  const summaryText = JSON.stringify(summary)
+  if (summaryText.length > 12_000) {
+    return res.status(413).json({ error: 'Resumo muito extenso para analise.' })
+  }
+  if (!OPENAI_API_KEY) {
+    return res.status(503).json({ error: 'OpenAI API key nao configurada.' })
+  }
+  try {
+    const text = await requestOpenAiAnalysis({
+      prompt: buildCorrelationPrompt(summary),
+      maxTokens: 260,
+    })
+    return res.json({ text })
+  } catch (err) {
+    if (err?.code === 'OPENAI_DISABLED') {
+      return res.status(503).json({ error: 'OpenAI API key nao configurada.' })
+    }
+    if (err?.name === 'AbortError') {
+      return res.status(504).json({ error: 'Timeout ao gerar comentarios.' })
+    }
+    console.error('[server] falha ao gerar comentarios', err?.message ?? err)
+    return res.status(500).json({ error: 'Falha ao gerar comentarios.' })
+  }
+})
+
+app.post('/api/analysis/dashboard', async (req, res) => {
+  const summary = req.body?.summary
+  if (!summary || typeof summary !== 'object') {
+    return res.status(400).json({ error: 'Resumo invalido para analise.' })
+  }
+  const summaryText = JSON.stringify(summary)
+  if (summaryText.length > 30_000) {
+    return res.status(413).json({ error: 'Resumo muito extenso para analise.' })
+  }
+  if (!OPENAI_API_KEY) {
+    return res.status(503).json({ error: 'OpenAI API key nao configurada.' })
+  }
+  const indicatorCount = Array.isArray(summary?.indicatorGroups)
+    ? summary.indicatorGroups.reduce((sum, group) => sum + (group?.metrics?.length ?? 0), 0)
+    : 0
+  const trendCount = Array.isArray(summary?.trendStats) ? summary.trendStats.length : 0
+  const estimatedTokens = 600 + indicatorCount * 12 + trendCount * 8
+  const maxTokens = Math.min(2000, Math.max(700, estimatedTokens))
+  try {
+    const text = await requestOpenAiAnalysis({
+      prompt: buildDashboardPrompt(summary),
+      maxTokens,
+    })
+    return res.json({ text })
+  } catch (err) {
+    if (err?.code === 'OPENAI_DISABLED') {
+      return res.status(503).json({ error: 'OpenAI API key nao configurada.' })
+    }
+    if (err?.name === 'AbortError') {
+      return res.status(504).json({ error: 'Timeout ao gerar comentarios.' })
+    }
+    console.error('[server] falha ao gerar comentarios do dashboard', err?.message ?? err)
+    return res.status(500).json({ error: 'Falha ao gerar comentarios do dashboard.' })
+  }
+})
+
 app.post('/api/query', async (req, res) => {
   const sql = req.body?.sql
   if (!sql || typeof sql !== 'string') {
@@ -340,20 +511,6 @@ app.post('/api/query', async (req, res) => {
   } catch (err) {
     console.error('[server] erro ao executar consulta', err?.message ?? err, '\nSQL:', sanitized)
     res.status(500).json({ error: 'Falha ao executar consulta' })
-  }
-})
-
-app.post('/api/agent', async (req, res) => {
-  const { question, context } = req.body ?? {}
-  if (!question || typeof question !== 'string') {
-    return res.status(400).json({ error: 'Pergunta obrigatória.' })
-  }
-  try {
-    const result = await runAgent(question, context)
-    res.json({ answer: result.output_text })
-  } catch (err) {
-    console.error('[server] erro ao executar agente', err)
-    res.status(500).json({ error: 'Falha ao consultar agente OpenAI.' })
   }
 })
 

@@ -187,12 +187,6 @@ export function useDashboardController() {
         trimestres: [operatorPeriod.trimestre],
       }
     }
-    if (uniodontoMode) {
-      nextFilters = {
-        ...nextFilters,
-        uniodonto: true,
-      }
-    }
     return nextFilters
   }, [filters, operatorPeriod?.trimestre, operatorContext?.name, uniodontoMode])
 
@@ -247,14 +241,8 @@ export function useDashboardController() {
   )
 
   const applyUniodontoModeFilters = useCallback(
-    (baseFilters) => {
-      if (!uniodontoMode) return baseFilters
-      return {
-        ...baseFilters,
-        uniodonto: true,
-      }
-    },
-    [uniodontoMode],
+    (baseFilters) => baseFilters,
+    [],
   )
 
   useEffect(() => {

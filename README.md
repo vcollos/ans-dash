@@ -102,6 +102,23 @@ curl -X POST http://localhost:4000/api/agent \
 
 O retorno inclui `answer` contendo o texto do agente e, quando aplicável, o JSON `{ "tool": "renderFormula", "latex": "..." }` no final da mensagem (interpretado automaticamente pelo frontend).
 
+## Comentários IA (OpenAI)
+
+- O dashboard inclui o botão **Comentarios IA** no topo para gerar uma leitura automática do que está filtrado (KPIs, ranking, tendências, monetários e correlação).
+- O backend expõe:
+  - `POST /api/analysis/correlation` (comentários da seção de correlação).
+  - `POST /api/analysis/dashboard` (comentários globais do painel filtrado).
+- Variáveis de ambiente usadas no servidor:
+  - `OPENAI_API_KEY` (obrigatória).
+  - `OPENAI_MODEL` (opcional, ex.: `gpt-5-mini-2025-08-07`).
+  - `OPENAI_BASE_URL` e `OPENAI_TIMEOUT_MS` (opcionais).
+- **Importante**: o servidor não lê `.env.local` automaticamente. Para usar `.env.local` no `dash-api`, carregue o arquivo antes do restart:
+
+```bash
+set -a; . ./.env.local; set +a
+pm2 restart dash-api --update-env
+```
+
 ## Execução como serviço (systemd)
 
 Um serviço de exemplo está em `scripts/ans-dashboard.service`. Ele executa `scripts/start-dashboard.sh`, que sobe a API Express e o Vite em paralelo (modo desenvolvimento). Para habilitar no host Linux:

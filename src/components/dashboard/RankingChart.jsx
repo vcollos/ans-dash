@@ -3,6 +3,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../ui/select'
 import { cn, formatNumber, formatPercent, toNumber } from '../../lib/utils'
 import { metricFormulas } from '../../lib/metricFormulas.js'
+import {
+  ADMIN_WEIGHT_RULES,
+  ASSIST_WEIGHT_RULES,
+  COMERCIAL_WEIGHT_RULES,
+  RESULT_WEIGHT_RULES,
+} from '../../lib/metricFormulasModoUniodonto.js'
 
 const defaultRankingMetrics = [
   { id: 'regulatory_score', label: 'Score regulatório (RN 518)', format: 'score', trend: 'higher' },
@@ -33,6 +39,22 @@ function formatValue(value, format) {
     return formatNumber(numeric, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
   }
   return formatNumber(numeric)
+}
+
+const applyWeightRules = (value, rules) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return null
+  for (const rule of rules) {
+    if (rule.max === null || rule.max === undefined) return rule.weight
+    if (value <= rule.max) return rule.weight
+  }
+  return null
+}
+
+const UNIODONTO_WEIGHT_RULES = {
+  indice_despesas_assistenciais_pct: ASSIST_WEIGHT_RULES,
+  indice_despesas_administrativas_pct: ADMIN_WEIGHT_RULES,
+  indice_despesas_comerciais_pct: COMERCIAL_WEIGHT_RULES,
+  icu_operacional: RESULT_WEIGHT_RULES,
 }
 
 function RankingChart({
@@ -77,6 +99,7 @@ function RankingChart({
 
   const rankingMetricOptions = useMemo(() => [...activeMetrics], [activeMetrics])
   const selectedMetric = rankingMetricOptions.find((item) => item.id === metric) ?? rankingMetricOptions[0]
+  const selectedMetricId = selectedMetric?.id ?? ''
 
   const sortedRows = useMemo(() => {
     const rows = [...data]
@@ -142,6 +165,24 @@ function RankingChart({
   const getHeatStyle = (metricId, value) => {
     const stats = metricStats[metricId]
     if (!stats || stats.p10 === null || stats.p90 === null || !Number.isFinite(value)) return {}
+    const palette = [
+      { bg: 'rgb(220 38 38 / 0.32)', fg: 'rgb(127 29 29)' }, // vermelho forte
+      { bg: 'rgb(249 115 22 / 0.30)', fg: 'rgb(124 45 18)' }, // laranja
+      { bg: 'rgb(234 179 8 / 0.28)', fg: 'rgb(113 63 18)' }, // amarelo
+      { bg: 'rgb(34 197 94 / 0.24)', fg: 'rgb(20 83 45)' }, // verde claro
+      { bg: 'rgb(22 163 74 / 0.30)', fg: 'rgb(20 83 45)' }, // verde forte
+    ]
+    const weightRules = UNIODONTO_WEIGHT_RULES[metricId]
+    if (weightRules) {
+      const weight = applyWeightRules(value, weightRules)
+      if (weight === null) return {}
+      if (weight < 0) return { backgroundColor: palette[0].bg, color: palette[0].fg }
+      if (weight >= 10) return { backgroundColor: palette[4].bg, color: palette[4].fg }
+      const clamped = Math.min(Math.max(weight, 0), 10)
+      const t = clamped / 10
+      const idx = t <= 0.2 ? 0 : t <= 0.4 ? 1 : t <= 0.6 ? 2 : t <= 0.8 ? 3 : 4
+      return { backgroundColor: palette[idx].bg, color: palette[idx].fg }
+    }
     const baseMin = stats.p10
     const baseMax = stats.p90
     const span = baseMax - baseMin
@@ -150,13 +191,6 @@ function RankingChart({
     const rawT = (clamped - baseMin) / span
     const meta = activeMetrics.find((item) => item.id === metricId)
     const t = meta?.trend === 'lower' ? 1 - rawT : rawT
-    const palette = [
-      { bg: 'rgb(220 38 38 / 0.32)', fg: 'rgb(127 29 29)' }, // vermelho forte
-      { bg: 'rgb(249 115 22 / 0.30)', fg: 'rgb(124 45 18)' }, // laranja
-      { bg: 'rgb(234 179 8 / 0.28)', fg: 'rgb(113 63 18)' }, // amarelo
-      { bg: 'rgb(34 197 94 / 0.24)', fg: 'rgb(20 83 45)' }, // verde claro
-      { bg: 'rgb(22 163 74 / 0.30)', fg: 'rgb(20 83 45)' }, // verde forte
-    ]
     const idx = t <= 0.1 ? 0 : t <= 0.3 ? 1 : t <= 0.7 ? 2 : t <= 0.9 ? 3 : 4
     return {
       backgroundColor: palette[idx].bg,
@@ -182,7 +216,7 @@ function RankingChart({
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Ordenar por</p>
-            <Select value={selectedMetric?.id} onValueChange={(value) => onMetricChange?.(value)}>
+            <Select value={selectedMetricId} onValueChange={(value) => onMetricChange?.(value)}>
               <SelectTrigger className="w-[260px]">
                 <SelectValue placeholder="Métrica do ranking" />
               </SelectTrigger>
@@ -263,7 +297,7 @@ function RankingChart({
             </thead>
             <tbody>
               {sortedRows.map((row, index) => {
-                const rank = row.rank_position ?? index + 1
+                const rank = row.rank_position ?? row.rank ?? index + 1
                 const isOperator = row.nome_operadora === operatorName
                 return (
                   <tr

@@ -17,9 +17,11 @@ function AppHeader({
   onLogout,
   uniodontoMode = false,
   onUniodontoModeChange,
+  onOpenAnalysis,
 }) {
   const operadorasValue = formatInteger(summary?.operadoras)
   const beneficiariosValue = formatInteger(summary?.beneficiarios)
+  const prestadoresValue = formatInteger(summary?.qt_prestadores)
   const headerTitle = uniodontoMode ? 'Painel Uniodonto' : 'Painel Regulatório RN 518'
   const headerSubtitle = uniodontoMode ? 'Indicadores exclusivos do sistema Uniodonto.' : 'DIOPS Financeiro'
 
@@ -38,6 +40,7 @@ function AppHeader({
         <div className="flex flex-wrap items-center gap-3 sm:justify-end">
           <SummaryBadge label="Operadoras selecionadas" value={operadorasValue} />
           <SummaryBadge label="Beneficiários (último período)" value={beneficiariosValue} />
+          <SummaryBadge label="Prestadores (último período)" value={prestadoresValue} />
           {typeof onUniodontoModeChange === 'function' ? (
             <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
               <Switch
@@ -57,6 +60,15 @@ function AppHeader({
               className="rounded-md border border-border bg-secondary px-3 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:bg-secondary/80"
             >
               Abrir filtros
+            </button>
+          ) : null}
+          {onOpenAnalysis ? (
+            <button
+              type="button"
+              onClick={onOpenAnalysis}
+              className="rounded-md border border-border bg-secondary px-3 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:bg-secondary/80"
+            >
+              Comentarios IA
             </button>
           ) : null}
           {onLogout ? (

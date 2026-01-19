@@ -21,7 +21,7 @@ const defaultMetricOptions = [
 ]
 
 const OPERATOR_COLOR = '#550039'
-const FILTER_AVERAGE_COLOR = '#e1ff7b'
+const FILTER_AVERAGE_COLOR = '#ff637e'
 
 function formatMetricValue(value, format, { compact = false } = {}) {
   if (value === null || value === undefined || Number.isNaN(value)) {
