@@ -52,8 +52,8 @@ steps:
       - '300s'
       - --set-env-vars
       - NODE_ENV=production,SERVE_STATIC=true,BQ_PROJECT_ID=${_BQ_PROJECT_ID},BQ_DATASET=${_BQ_DATASET},BQ_LOCATION=${_BQ_LOCATION},OPENAI_MODEL=${_OPENAI_MODEL},FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT_ID}
-      # - --set-secrets
-      # - OPENAI_API_KEY=OPENAI_API_KEY:latest
+      - --set-secrets
+      - OPENAI_API_KEY=OPENAI_API_KEY:latest
 
 images:
   - gcr.io/$PROJECT_ID/ans-dashboard:$SHORT_SHA
