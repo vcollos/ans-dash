@@ -1,5 +1,9 @@
 # Historico da conversa (agents)
 
+## 2026-01-19T21:42:27Z
+- User: reportou média filtrada não aparecendo e pediu para filtrar pares idênticos ao selecionar operadora.
+- Agent: ajustou seleção de operadora para sempre sincronizar filtros de comparação com modalidade/porte/uniodonto/ativa.
+
 ## 2026-01-19T20:02:55Z
 - User: pediu séries de ranking anuais (mesmo trimestre ao longo dos anos) e manter modo Uniodonto sem filtrar só Uniodonto.
 - Agent: ajustou filtros de tendência para fixar o trimestre selecionado ao longo dos anos, e removeu o filtro automático de `uniodonto=true` (mantendo apenas para o operador virtual).

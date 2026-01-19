@@ -606,9 +606,7 @@ export function useDashboardController() {
             uniodonto: typeof latest.uniodonto === 'boolean' ? [latest.uniodonto] : undefined,
             ativa: typeof latest.ativa === 'boolean' ? [latest.ativa] : undefined,
           }
-      if (!uniodontoMode) {
-        syncComparisonFilters(nextComparison)
-      }
+      syncComparisonFilters(nextComparison)
       setOperatorContext({
         name: operatorName,
         modalidade: latest.modalidade ?? null,
