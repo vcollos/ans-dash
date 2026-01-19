@@ -58,6 +58,9 @@ steps:
 images:
   - gcr.io/$PROJECT_ID/ans-dashboard:$SHORT_SHA
 
+options:
+  logging: CLOUD_LOGGING_ONLY
+
 substitutions:
   _SERVICE: ans-dashboard
   _REGION: us-central1
