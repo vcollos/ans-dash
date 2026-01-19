@@ -61,7 +61,7 @@ images:
 substitutions:
   _SERVICE: ans-dashboard
   _REGION: us-central1
-  _RUN_SERVICE_ACCOUNT: dashboardubcontag@dashboardubcontag.iam.gserviceaccount.com
+  _RUN_SERVICE_ACCOUNT: ans-dashboard-run@bigdata-467917.iam.gserviceaccount.com
   _BQ_PROJECT_ID: bigdata-467917
   _BQ_DATASET: datalake_ans
   _BQ_LOCATION: US
