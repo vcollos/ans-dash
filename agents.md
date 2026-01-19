@@ -1,5 +1,9 @@
 # Historico da conversa (agents)
 
+## 2026-01-19T18:52:10Z
+- User: pediu reduzir o uso do BigQuery e considerar views/pre-tabelas porque os dados atualizam trimestralmente.
+- Agent: adicionou suporte a snapshot (`indicadores_curados_snapshot`) no export CSV via `BQ_DATASET_VIEW`, ajustou `cloudbuild.yaml`, melhorou consultas para usar `periodo_id` em filtros, reduziu leitura de schema com `includeFields`, atualizou script de snapshot (cluster por `periodo_id`) e documentou a estratégia.
+
 ## 2026-01-18T23:58:10Z
 - User: pediu comentarios IA no dashboard e correção dos gráficos de correlação com tratamento de outliers.
 - Agent: adicionou popup de Comentarios IA (DashboardAnalysisDialog), endpoints `/api/analysis/correlation` e `/api/analysis/dashboard`, ajuste de outliers por percentis nos gráficos (incluindo crescimento), e atualizou README e documentacoes Uniodonto com as novas regras.

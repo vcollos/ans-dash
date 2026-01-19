@@ -6,7 +6,7 @@ const SOURCE_VIEW = process.env.BQ_SOURCE_VIEW ?? 'indicadores_curados'
 const TARGET_TABLE = process.env.BQ_SNAPSHOT_TABLE ?? 'indicadores_curados_snapshot'
 const LOCATION = process.env.BQ_LOCATION ?? 'US'
 const PARTITION_EXPR = process.env.BQ_PARTITION_EXPR ?? process.env.BQ_PARTITION_FIELD ?? 'periodo_raw'
-const CLUSTER_FIELDS = (process.env.BQ_CLUSTER_FIELDS ?? 'reg_ans,modalidade,porte,uniodonto')
+const CLUSTER_FIELDS = (process.env.BQ_CLUSTER_FIELDS ?? 'periodo_id,reg_ans,modalidade,uniodonto')
   .split(',')
   .map((field) => field.trim())
   .filter(Boolean)

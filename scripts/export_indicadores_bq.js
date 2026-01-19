@@ -9,6 +9,7 @@ const __dirname = path.dirname(__filename)
 const PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
 const DATASET_ID = process.env.BQ_DATASET ?? 'datalake_ans'
 const LOCATION = process.env.BQ_LOCATION ?? 'US'
+const BQ_EXPORT_VIEW = process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? 'indicadores_curados'
 
 const QUERY_PATH = process.env.EXPORT_SQL_PATH
   ? path.resolve(process.cwd(), process.env.EXPORT_SQL_PATH)
@@ -17,6 +18,12 @@ const QUERY_PATH = process.env.EXPORT_SQL_PATH
 const OUTPUT_PATH = process.env.OUTPUT_PATH
   ? path.resolve(process.cwd(), process.env.OUTPUT_PATH)
   : path.resolve(__dirname, '../public/data/indicadores.csv')
+
+function formatTableRef(name) {
+  if (!name) return name
+  if (name.includes('`')) return name
+  return `\`${name}\``
+}
 
 function formatCsvValue(value) {
   if (value === null || value === undefined) return ''
@@ -65,7 +72,8 @@ function normalizeBigQueryScalar(value) {
 }
 
 async function main() {
-  const queryText = fs.readFileSync(QUERY_PATH, 'utf8').trim().replace(/;[\s]*$/, '')
+  const queryTemplate = fs.readFileSync(QUERY_PATH, 'utf8').trim().replace(/;[\s]*$/, '')
+  const queryText = queryTemplate.replaceAll('{{DATASET_VIEW}}', formatTableRef(BQ_EXPORT_VIEW))
   const bigquery = new BigQuery({ projectId: PROJECT_ID })
   console.log(`[export-bq] Exportando indicadores via BigQuery -> ${OUTPUT_PATH}`)
   const [rows] = await bigquery.query({
@@ -84,4 +92,3 @@ main().catch((err) => {
   console.error('[export-bq] Falha ao exportar indicadores', err?.message ?? err)
   process.exit(1)
 })
-

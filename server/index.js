@@ -13,6 +13,7 @@ const PORT = process.env.SERVER_PORT ?? process.env.PORT ?? 4000
 const BQ_PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
 const BQ_DATASET = process.env.BQ_DATASET ?? 'datalake_ans'
 const BQ_LOCATION = process.env.BQ_LOCATION ?? 'US'
+const BQ_EXPORT_VIEW = process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? 'indicadores_curados'
 const EXPORT_SQL_PATH = path.resolve(__dirname, '../db/export_indicadores.sql')
 const DIST_DIR = path.resolve(__dirname, '../dist')
 
@@ -83,7 +84,7 @@ function getCacheKey(sql) {
     .digest('hex')
 }
 
-function getCachedRows(key) {
+function getCachedEntry(key) {
   const cached = queryCache.get(key)
   if (!cached) return null
   if (cached.expiresAt <= Date.now()) {
@@ -92,13 +93,13 @@ function getCachedRows(key) {
   }
   queryCache.delete(key)
   queryCache.set(key, cached)
-  return cached.rows
+  return cached
 }
 
-function setCachedRows(key, rows) {
+function setCachedEntry(key, entry) {
   if (!Number.isFinite(QUERY_CACHE_TTL_MS) || QUERY_CACHE_TTL_MS <= 0) return
   if (!Number.isFinite(QUERY_CACHE_MAX_ENTRIES) || QUERY_CACHE_MAX_ENTRIES <= 0) return
-  queryCache.set(key, { rows, expiresAt: Date.now() + QUERY_CACHE_TTL_MS })
+  queryCache.set(key, { rows: entry.rows, fields: entry.fields ?? [], expiresAt: Date.now() + QUERY_CACHE_TTL_MS })
   while (queryCache.size > QUERY_CACHE_MAX_ENTRIES) {
     const oldestKey = queryCache.keys().next().value
     if (!oldestKey) break
@@ -106,7 +107,14 @@ function setCachedRows(key, rows) {
   }
 }
 
-const exportQuery = fs.readFileSync(EXPORT_SQL_PATH, 'utf8').trim().replace(/;[\s]*$/, '')
+function formatTableRef(name) {
+  if (!name) return name
+  if (name.includes('`')) return name
+  return `\`${name}\``
+}
+
+const exportQueryTemplate = fs.readFileSync(EXPORT_SQL_PATH, 'utf8').trim().replace(/;[\s]*$/, '')
+const exportQuery = exportQueryTemplate.replaceAll('{{DATASET_VIEW}}', formatTableRef(BQ_EXPORT_VIEW))
 
 function formatCsvValue(value) {
   if (value === null || value === undefined) return ''
@@ -381,18 +389,27 @@ app.post('/api/query', async (req, res) => {
     return res.status(400).json({ error: 'Somente uma instrução por requisição é permitida.' })
   }
 
+  const includeFields = Boolean(req.body?.includeFields)
   const cacheEnabled = Number.isFinite(QUERY_CACHE_TTL_MS) && QUERY_CACHE_TTL_MS > 0
   const cacheKey = cacheEnabled ? getCacheKey(sanitized) : null
   if (cacheKey) {
-    const cachedRows = getCachedRows(cacheKey)
-    if (cachedRows) {
-      return res.json({ rows: cachedRows, cache: 'hit' })
+    const cachedEntry = getCachedEntry(cacheKey)
+    if (cachedEntry) {
+      return res.json({
+        rows: cachedEntry.rows,
+        fields: includeFields ? cachedEntry.fields ?? [] : undefined,
+        cache: 'hit',
+      })
     }
     const inflight = inFlightQueries.get(cacheKey)
     if (inflight) {
       try {
-        const rows = await inflight
-        return res.json({ rows, cache: 'deduped' })
+        const entry = await inflight
+        return res.json({
+          rows: entry.rows,
+          fields: includeFields ? entry.fields ?? [] : undefined,
+          cache: 'deduped',
+        })
       } catch {
         // deixa cair para executar normalmente
       }
@@ -400,23 +417,25 @@ app.post('/api/query', async (req, res) => {
   }
 
   try {
-    const queryPromise = runBigQuery(sanitized)
-      .then((result) => result.rows)
-      .finally(() => {
-        if (cacheKey) {
-          inFlightQueries.delete(cacheKey)
-        }
-      })
+    const queryPromise = runBigQuery(sanitized).finally(() => {
+      if (cacheKey) {
+        inFlightQueries.delete(cacheKey)
+      }
+    })
 
     if (cacheKey) {
       inFlightQueries.set(cacheKey, queryPromise)
     }
 
-    const rows = await queryPromise
+    const entry = await queryPromise
     if (cacheKey) {
-      setCachedRows(cacheKey, rows)
+      setCachedEntry(cacheKey, entry)
     }
-    res.json({ rows, cache: cacheKey ? 'miss' : 'disabled' })
+    res.json({
+      rows: entry.rows,
+      fields: includeFields ? entry.fields ?? [] : undefined,
+      cache: cacheKey ? 'miss' : 'disabled',
+    })
   } catch (err) {
     console.error('[server] erro ao executar consulta', err?.message ?? err, '\nSQL:', sanitized)
     res.status(500).json({ error: 'Falha ao executar consulta' })

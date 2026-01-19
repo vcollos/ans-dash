@@ -36,6 +36,7 @@ Fluxo resumido:
 | `DATABASE_URL`                 | DSN Postgres usado pelos scripts e pela API Express.                                                    | `postgresql://ansdashboard:ansdashboard@localhost:5432/ans_dashboard` |
 | `VITE_API_PROXY`               | URL alvo para `/api` durante `npm run dev/preview`.                                                     | `http://localhost:4000`                        |
 | `VITE_DATASET_VIEW`           | Nome da view usada pelas consultas do frontend.                                                         | `indicadores_curados`                         |
+| `BQ_DATASET_VIEW`             | View/tabela usada pelo export CSV (`/api/indicadores.csv`) quando conectado ao BigQuery.               | `indicadores_curados`                         |
 | `VITE_DATASET_CURATED_URL`    | Fonte CSV curada legacy (não usada no modo Postgres).                                                   | `/data/indicadores.csv`                       |
 | `VITE_DATASET_PARQUET_URL`    | Fonte Parquet legacy (não usada no modo Postgres).                                                      | `/data/20251213_contas_ans.parquet`           |
 | `VITE_DATASET_URL`            | Fallback para `/api/indicadores.csv`.                                                                    | `/api/indicadores.csv`                        |
@@ -111,6 +112,8 @@ npm run data:materialize
 ### 4.3 Exportação
 
 `db/export_indicadores.sql` define o CSV disponibilizado em `/api/indicadores.csv`, contendo campos amigáveis aos usuários (por exemplo `311_vr_contraprestacoes`, `41_vr_eventos_liquidos`, `ativa`, `uniodonto`, etc.).
+
+No modo BigQuery, prefira materializar a tabela `indicadores_curados_snapshot` (script `npm run data:materialize-bq-snapshot`) e apontar `VITE_DATASET_VIEW` e `BQ_DATASET_VIEW` para reduzir custo de leitura.
 
 ## 5. Backend (server/index.js)
 

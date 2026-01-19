@@ -2,11 +2,11 @@ WITH prestadores AS (
   SELECT
     CAST(reg_ans AS STRING) AS reg_ans_join,
     COUNT(DISTINCT ID_ESTABELECIMENTO_SAUDE) AS qt_prestadores_proprios
-  FROM `bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem`
+  FROM prestadores_ativos_uniodonto_origem
   WHERE origem = 'PRÓPRIA'
     AND COMPETENCIA = (
       SELECT MAX(COMPETENCIA)
-      FROM `bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem`
+      FROM prestadores_ativos_uniodonto_origem
     )
   GROUP BY reg_ans_join
 )
@@ -64,6 +64,6 @@ SELECT
   vr_pl_ajustado AS `2521_vr_pl_ajustado`,
   vr_margem_solvencia_exigida AS `2522_vr_margem_solvencia_exigida`,
   vr_conta_61 AS `61_vr_conta_61`
-FROM indicadores_curados
+FROM {{DATASET_VIEW}}
 LEFT JOIN prestadores
   ON CAST(reg_ans AS STRING) = prestadores.reg_ans_join;

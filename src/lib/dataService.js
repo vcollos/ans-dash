@@ -100,6 +100,23 @@ function buildPorteExpression({ beneficiariosColumn = 'qt_beneficiarios' } = {})
   `.trim()
 }
 
+function buildPeriodoIdClause(filters = {}) {
+  const anos = sanitizeList(filters.anos).map(Number).filter(Number.isFinite)
+  if (!anos.length) return null
+  const trimestresRaw = sanitizeList(filters.trimestres).map(Number).filter(Number.isFinite)
+  const trimestres = trimestresRaw.length ? trimestresRaw : [1, 2, 3, 4]
+  const ids = []
+  for (const ano of anos) {
+    for (const trimestre of trimestres) {
+      if (trimestre >= 1 && trimestre <= 4) {
+        ids.push(ano * 10 + trimestre)
+      }
+    }
+  }
+  if (!ids.length) return null
+  return `periodo_id IN (${ids.join(',')})`
+}
+
 function buildRegulatoryIndicatorProjection({ aggregate = false } = {}) {
   return REGULATORY_INDICATORS.map((indicator) => {
     const expression = getIndicatorSql(indicator.id)
@@ -143,6 +160,8 @@ function buildWhereClause(filters = {}) {
   if (filters.trimestres?.length) {
     clauses.push(`trimestre IN (${filters.trimestres.join(',')})`)
   }
+  const periodoIdClause = buildPeriodoIdClause(filters)
+  if (periodoIdClause) clauses.push(periodoIdClause)
   if (filters.ativa === true) clauses.push('ativa IS TRUE')
   else if (filters.ativa === false) clauses.push('ativa IS FALSE')
 
@@ -508,11 +527,35 @@ async function runQuery(sql, options = {}) {
   return attachPrestadores(rows)
 }
 
+async function runQueryWithFields(sql) {
+  const response = await fetchWithAuth('/api/query', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ sql, includeFields: true }),
+  })
+  if (!response.ok) {
+    const message = (await response.json().catch(() => ({}))).error ?? `Falha ao executar consulta: ${response.status}`
+    throw new Error(message)
+  }
+  const payload = await response.json()
+  return {
+    rows: payload.rows ?? [],
+    fields: payload.fields ?? [],
+  }
+}
+
 async function getViewColumns() {
   if (cachedViewColumns) {
     return cachedViewColumns
   }
-  const sampleRows = await runQuery(`SELECT * FROM ${DEFAULT_VIEW} LIMIT 1`)
+  const { fields } = await runQueryWithFields(`SELECT * FROM ${DEFAULT_VIEW} WHERE 1=0`)
+  if (fields.length) {
+    cachedViewColumns = fields.map((field) => field.name)
+    return cachedViewColumns
+  }
+  const sampleRows = await runQuery(`SELECT * FROM ${DEFAULT_VIEW} LIMIT 1`, { skipPrestadores: true })
   if (sampleRows[0]) {
     cachedViewColumns = Object.keys(sampleRows[0])
     return cachedViewColumns
@@ -525,7 +568,7 @@ export async function loadDataset(options = {}) {
   if (options.csvText || options.parquetBuffer) {
     throw new Error('Upload manual de dataset não é suportado quando conectado ao BigQuery.')
   }
-  await runQuery(`SELECT 1 FROM ${DEFAULT_VIEW} LIMIT 1`)
+  await runQuery(`SELECT 1 FROM ${DEFAULT_VIEW} WHERE 1=0`, { skipPrestadores: true })
   return {
     source: 'bigquery',
     filename: 'bigquery',

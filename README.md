@@ -98,6 +98,10 @@ Notas importantes:
 - O backend usa BigQuery via `@google-cloud/bigquery`; preferencialmente configure uma **service account** com permissão e associe ao serviço do Cloud Run.
 - O servidor não lê `.env.local` automaticamente no Cloud Run; use `--set-env-vars` ou `--set-secrets`.
 - Para servir o frontend dentro do mesmo container, mantenha `NODE_ENV=production` ou defina `SERVE_STATIC=true`.
+- Para reduzir custo no BigQuery, materialize uma tabela snapshot (ex.: `indicadores_curados_snapshot`) e configure:
+  - Build: `VITE_DATASET_VIEW=indicadores_curados_snapshot`
+  - Runtime: `BQ_DATASET_VIEW=indicadores_curados_snapshot`
+  - Snapshot: `npm run data:materialize-bq-snapshot` (usa credenciais ADC).
 
 ## Estrutura relevante
 

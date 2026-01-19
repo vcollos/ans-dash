@@ -53,7 +53,7 @@ steps:
       - --timeout
       - '300s'
       - --set-env-vars
-      - NODE_ENV=production,SERVE_STATIC=true,BQ_PROJECT_ID=${_BQ_PROJECT_ID},BQ_DATASET=${_BQ_DATASET},BQ_LOCATION=${_BQ_LOCATION},OPENAI_MODEL=${_OPENAI_MODEL},FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT_ID}
+      - NODE_ENV=production,SERVE_STATIC=true,BQ_PROJECT_ID=${_BQ_PROJECT_ID},BQ_DATASET=${_BQ_DATASET},BQ_DATASET_VIEW=${_BQ_DATASET_VIEW},BQ_LOCATION=${_BQ_LOCATION},OPENAI_MODEL=${_OPENAI_MODEL},FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT_ID}
       - --set-secrets
       - OPENAI_API_KEY=OPENAI_API_KEY:latest
 
@@ -69,6 +69,7 @@ substitutions:
   _RUN_SERVICE_ACCOUNT: ans-dashboard-run@bigdata-467917.iam.gserviceaccount.com
   _BQ_PROJECT_ID: bigdata-467917
   _BQ_DATASET: datalake_ans
+  _BQ_DATASET_VIEW: indicadores_curados_snapshot
   _BQ_LOCATION: US
   _OPENAI_MODEL: gpt-5-mini
   _FIREBASE_PROJECT_ID: bigdata-467917
