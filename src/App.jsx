@@ -17,7 +17,7 @@ import { Card, CardContent } from './components/ui/card'
 import { Button } from './components/ui/button'
 import { describeComparisonFilters } from './lib/comparisonModes'
 import DataLoadingIndicator from './components/dashboard/DataLoadingIndicator'
-import { fetchWithAuth, getAuthToken, login, logout, setAuthToken as persistAuthToken } from './lib/auth'
+import { AuthProvider, useAuth } from './contexts/AuthProvider'
 import { UNIODONTO_INDICATORS } from './lib/uniodontoMetrics'
 
 function LoadingState() {
@@ -305,84 +305,14 @@ function DashboardApp({ onLogout }) {
   )
 }
 
-function App() {
-  const [authToken, setAuthTokenState] = useState(() => getAuthToken())
-  const [authError, setAuthError] = useState(null)
-  const [authRequired, setAuthRequired] = useState(true)
-  const [authChecked, setAuthChecked] = useState(false)
-  const [authVerified, setAuthVerified] = useState(false)
-  const [isAuthVerifying, setIsAuthVerifying] = useState(false)
+function AppContent() {
+  const { user, isLoading, error, signInWithEmail, signInWithGoogle, signOut } = useAuth()
+  const [authMessage, setAuthMessage] = useState(null)
   const [isAuthLoading, setIsAuthLoading] = useState(false)
-  const verifiedTokenRef = useRef(null)
-  const bootKeyRef = useRef('ans-dashboard:auth-boot-id')
-
-  const readStoredBootId = () => {
-    if (typeof window === 'undefined') return null
-    try {
-      return window.localStorage.getItem(bootKeyRef.current)
-    } catch {
-      return null
-    }
-  }
-
-  const writeStoredBootId = (bootId) => {
-    if (typeof window === 'undefined') return
-    try {
-      if (!bootId) {
-        window.localStorage.removeItem(bootKeyRef.current)
-        return
-      }
-      window.localStorage.setItem(bootKeyRef.current, bootId)
-    } catch {
-      // ignore storage errors
-    }
-  }
-
-  useEffect(() => {
-    let cancelled = false
-    async function checkAuth() {
-      try {
-        const response = await fetch('/api/auth/status', { cache: 'no-store' })
-        if (!response.ok) {
-          throw new Error('Falha ao validar autenticacao')
-        }
-        const payload = await response.json()
-        if (!cancelled) {
-          const bootId = payload?.bootId ?? null
-          if (bootId) {
-            const storedBootId = readStoredBootId()
-            if (storedBootId && storedBootId !== bootId) {
-              persistAuthToken(null)
-              setAuthTokenState(null)
-              setAuthVerified(false)
-              verifiedTokenRef.current = null
-            }
-            writeStoredBootId(bootId)
-          }
-          setAuthRequired(payload?.enabled !== false)
-        }
-      } catch {
-        if (!cancelled) {
-          setAuthRequired(true)
-        }
-      } finally {
-        if (!cancelled) {
-          setAuthChecked(true)
-        }
-      }
-    }
-    checkAuth()
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   useEffect(() => {
     function handleExpired() {
-      setAuthTokenState(null)
-      setAuthError('Sessao expirada. Faca login novamente.')
-      setAuthVerified(false)
-      verifiedTokenRef.current = null
+      setAuthMessage('Sessao expirada. Faca login novamente.')
     }
     window.addEventListener('auth:expired', handleExpired)
     return () => {
@@ -390,81 +320,31 @@ function App() {
     }
   }, [])
 
-  useEffect(() => {
-    if (!authChecked) return
-    if (!authRequired) {
-      setAuthVerified(true)
-      verifiedTokenRef.current = null
-      return
-    }
-    if (!authToken) {
-      setAuthVerified(false)
-      verifiedTokenRef.current = null
-      return
-    }
-    if (verifiedTokenRef.current === authToken) {
-      setAuthVerified(true)
-      return
-    }
-    let cancelled = false
-    async function verify() {
-      setIsAuthVerifying(true)
-      setAuthVerified(false)
-      try {
-        const response = await fetchWithAuth('/api/auth/verify', { cache: 'no-store' })
-        if (!response.ok) {
-          throw new Error('Autenticacao necessaria.')
-        }
-        if (!cancelled) {
-          verifiedTokenRef.current = authToken
-          setAuthVerified(true)
-        }
-      } catch {
-        if (!cancelled) {
-          setAuthTokenState(null)
-          setAuthVerified(false)
-          verifiedTokenRef.current = null
-        }
-      } finally {
-        if (!cancelled) {
-          setIsAuthVerifying(false)
-        }
-      }
-    }
-    verify()
-    return () => {
-      cancelled = true
-    }
-  }, [authChecked, authRequired, authToken])
-
-  async function handleLogin({ username, password }) {
+  async function handleLogin({ email, password }) {
     setIsAuthLoading(true)
-    setAuthError(null)
+    setAuthMessage(null)
     try {
-      const payload = await login({ username, password })
-      persistAuthToken(payload.token)
-      setAuthTokenState(payload.token)
-      verifiedTokenRef.current = payload.token
-      setAuthVerified(true)
+      await signInWithEmail(email, password)
     } catch (err) {
-      setAuthError(err?.message ?? 'Falha ao autenticar.')
+      setAuthMessage(err?.message ?? 'Falha ao autenticar.')
     } finally {
       setIsAuthLoading(false)
     }
   }
 
-  async function handleLogout() {
+  async function handleGoogleLogin() {
+    setIsAuthLoading(true)
+    setAuthMessage(null)
     try {
-      await logout()
+      await signInWithGoogle()
+    } catch (err) {
+      setAuthMessage(err?.message ?? 'Falha ao autenticar com Google.')
     } finally {
-      setAuthTokenState(null)
-      setAuthError(null)
-      setAuthVerified(false)
-      verifiedTokenRef.current = null
+      setIsAuthLoading(false)
     }
   }
 
-  if (!authChecked || (authRequired && authToken && (!authVerified || isAuthVerifying))) {
+  if (isLoading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-muted/20 px-4 py-12 text-sm text-muted-foreground">
         Verificando autenticacao...
@@ -472,13 +352,24 @@ function App() {
     )
   }
 
-  const isAuthenticated = !authRequired || (Boolean(authToken) && authVerified)
-
-  if (!isAuthenticated) {
-    return <LoginScreen onLogin={handleLogin} isLoading={isAuthLoading} errorMessage={authError} />
+  if (!user) {
+    return (
+      <LoginScreen
+        onLogin={handleLogin}
+        onGoogleLogin={handleGoogleLogin}
+        isLoading={isAuthLoading}
+        errorMessage={authMessage ?? error?.message ?? null}
+      />
+    )
   }
 
-  return <DashboardApp onLogout={authRequired ? handleLogout : null} />
+  return <DashboardApp onLogout={signOut} />
 }
 
-export default App
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  )
+}

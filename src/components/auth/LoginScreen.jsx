@@ -4,16 +4,16 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 
-function LoginScreen({ onLogin, isLoading = false, errorMessage = null }) {
-  const [username, setUsername] = useState('')
+function LoginScreen({ onLogin, onGoogleLogin, isLoading = false, errorMessage = null }) {
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
-  const canSubmit = username.trim().length > 0 && password.length > 0 && !isLoading
+  const canSubmit = email.trim().length > 0 && password.length > 0 && !isLoading
 
   function handleSubmit(event) {
     event.preventDefault()
     if (!canSubmit) return
-    onLogin?.({ username: username.trim(), password })
+    onLogin?.({ email: email.trim(), password })
   }
 
   return (
@@ -31,14 +31,15 @@ function LoginScreen({ onLogin, isLoading = false, errorMessage = null }) {
         <CardContent>
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-2">
-              <Label htmlFor="username">Usuario</Label>
+              <Label htmlFor="email">Email</Label>
               <Input
-                id="username"
-                name="username"
-                autoComplete="username"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                placeholder="Digite seu usuario"
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="Digite seu email"
                 required
               />
             </div>
@@ -59,6 +60,11 @@ function LoginScreen({ onLogin, isLoading = false, errorMessage = null }) {
             <Button type="submit" className="w-full" disabled={!canSubmit}>
               {isLoading ? 'Entrando...' : 'Entrar'}
             </Button>
+            {onGoogleLogin ? (
+              <Button type="button" variant="outline" className="w-full" onClick={onGoogleLogin} disabled={isLoading}>
+                Entrar com Google
+              </Button>
+            ) : null}
           </form>
         </CardContent>
         <CardFooter className="text-xs text-muted-foreground">

@@ -40,6 +40,8 @@
     "clsx": "^2.1.1",
     "dayjs": "^1.11.19",
     "express": "^5.1.0",
+    "firebase": "^12.8.0",
+    "firebase-admin": "^13.6.0",
     "lucide-react": "^0.552.0",
     "pg": "^8.16.3",
     "react": "^19.1.1",

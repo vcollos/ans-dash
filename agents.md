@@ -4,6 +4,22 @@
 - User: pediu comentarios IA no dashboard e correção dos gráficos de correlação com tratamento de outliers.
 - Agent: adicionou popup de Comentarios IA (DashboardAnalysisDialog), endpoints `/api/analysis/correlation` e `/api/analysis/dashboard`, ajuste de outliers por percentis nos gráficos (incluindo crescimento), e atualizou README e documentacoes Uniodonto com as novas regras.
 
+## 2026-01-19T13:22:31Z
+- User: pediu publicar o projeto no Cloud Run usando o `cloudbuild.yaml`.
+- Agent: fez deploy no Cloud Run via build local e push para `gcr.io`, criou service account `ans-dashboard-run` com permissoes BigQuery, ajustou rota wildcard no Express para evitar erro do `path-to-regexp`, e publicou o servico com URL gerada.
+
+## 2026-01-19T13:28:05Z
+- User: pediu habilitar auth com usuario e senha informados.
+- Agent: atualizou o Cloud Run para definir `DASHBOARD_USER` e `DASHBOARD_PASSWORD` e publicou nova revisao.
+
+## 2026-01-19T13:37:00Z
+- User: reportou 401 em `/api/query` após habilitar auth.
+- Agent: ajustou auth para tokens assinados (stateless) e bootId com `K_REVISION`, gerou `DASHBOARD_AUTH_SECRET`, e redeployou o Cloud Run com as variaveis de ambiente completas.
+
+## 2026-01-19T13:43:04Z
+- User: solicitou migrar a autenticacao para Firebase Auth com JWT em Cloud Run.
+- Agent: adicionou SDKs Firebase (client/admin), criou AuthProvider no frontend, ajustou login e envio de ID token nas requests, substituiu middleware do Express por validacao de Firebase ID token, e atualizou Dockerfile/cloudbuild para variaveis VITE_FIREBASE_* e FIREBASE_PROJECT_ID.
+
 ## 2026-01-19T00:12:03Z
 - User: perguntou sobre rodar o dashboard na Vercel e pediu para salvar o plano.
 - Agent: registrou o plano com duas opções: (1) Vercel apenas para o front + API Node/Express em outro host com `VITE_API_PROXY`; (2) refatorar a API para serverless, incluindo sessao/auth fora de memoria e credenciais BigQuery via env.
