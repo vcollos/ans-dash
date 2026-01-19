@@ -1,5 +1,9 @@
 # Historico da conversa (agents)
 
+## 2026-01-19T22:22:53Z
+- User: reportou 429 por excesso de requests no Cloud Run.
+- Agent: agregou séries históricas em uma única consulta via `fetchTrendSeriesBatch` para reduzir chamadas `/api/query`.
+
 ## 2026-01-19T21:42:27Z
 - User: reportou média filtrada não aparecendo e pediu para filtrar pares idênticos ao selecionar operadora.
 - Agent: ajustou seleção de operadora para sempre sincronizar filtros de comparação com modalidade/porte/uniodonto/ativa.

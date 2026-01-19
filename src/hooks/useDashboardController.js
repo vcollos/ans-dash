@@ -11,7 +11,7 @@ import {
   fetchRegulatoryScoreRanking,
   fetchUniodontoPeerSummary,
   fetchUniodontoRanking,
-  fetchTrendSeries,
+  fetchTrendSeriesBatch,
   fetchTableData,
   persistDatasetFile,
   fetchAvailablePeriods,
@@ -433,15 +433,9 @@ export function useDashboardController() {
               filters: applyUniodontoModeFilters(comparisonFilterQuery),
             }
           : null
-        const results = await Promise.all(
-          trendMetricList.map(async (metricId) => {
-            const series = await fetchTrendSeries(metricId, trendFilters, trendComparison)
-            return [metricId, series ?? []]
-          }),
-        )
+        const seriesMap = await fetchTrendSeriesBatch(trendMetricList, trendFilters, trendComparison)
         if (cancelled) return
-        const map = Object.fromEntries(results)
-        setTrendSeriesByMetric(map)
+        setTrendSeriesByMetric(seriesMap ?? {})
       } catch (err) {
         if (!cancelled) console.error('[Dashboard] Falha ao carregar séries históricas', err)
         if (!cancelled) setTrendSeriesByMetric({})
