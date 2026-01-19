@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 
-function LoginScreen({ onLogin, onGoogleLogin, isLoading = false, errorMessage = null }) {
+function LoginScreen({ onLogin, onSignUp, onGoogleLogin, isLoading = false, errorMessage = null }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
@@ -60,6 +60,17 @@ function LoginScreen({ onLogin, onGoogleLogin, isLoading = false, errorMessage =
             <Button type="submit" className="w-full" disabled={!canSubmit}>
               {isLoading ? 'Entrando...' : 'Entrar'}
             </Button>
+            {onSignUp ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                onClick={() => onSignUp({ email: email.trim(), password })}
+                disabled={!canSubmit}
+              >
+                Criar conta
+              </Button>
+            ) : null}
             {onGoogleLogin ? (
               <Button type="button" variant="outline" className="w-full" onClick={onGoogleLogin} disabled={isLoading}>
                 Entrar com Google

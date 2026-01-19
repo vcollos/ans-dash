@@ -306,7 +306,7 @@ function DashboardApp({ onLogout }) {
 }
 
 function AppContent() {
-  const { user, isLoading, error, signInWithEmail, signInWithGoogle, signOut } = useAuth()
+  const { user, isLoading, error, signInWithEmail, signUpWithEmail, signInWithGoogle, signOut } = useAuth()
   const [authMessage, setAuthMessage] = useState(null)
   const [isAuthLoading, setIsAuthLoading] = useState(false)
 
@@ -344,6 +344,18 @@ function AppContent() {
     }
   }
 
+  async function handleSignUp({ email, password }) {
+    setIsAuthLoading(true)
+    setAuthMessage(null)
+    try {
+      await signUpWithEmail(email, password)
+    } catch (err) {
+      setAuthMessage(err?.message ?? 'Falha ao criar conta.')
+    } finally {
+      setIsAuthLoading(false)
+    }
+  }
+
   if (isLoading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-muted/20 px-4 py-12 text-sm text-muted-foreground">
@@ -356,6 +368,7 @@ function AppContent() {
     return (
       <LoginScreen
         onLogin={handleLogin}
+        onSignUp={handleSignUp}
         onGoogleLogin={handleGoogleLogin}
         isLoading={isAuthLoading}
         errorMessage={authMessage ?? error?.message ?? null}

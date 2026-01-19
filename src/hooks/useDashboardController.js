@@ -241,8 +241,14 @@ export function useDashboardController() {
   )
 
   const applyUniodontoModeFilters = useCallback(
-    (baseFilters) => baseFilters,
-    [],
+    (baseFilters) => {
+      if (!uniodontoMode) return baseFilters
+      return {
+        ...baseFilters,
+        uniodonto: true,
+      }
+    },
+    [uniodontoMode],
   )
 
   useEffect(() => {
@@ -579,7 +585,9 @@ export function useDashboardController() {
             uniodonto: typeof latest.uniodonto === 'boolean' ? [latest.uniodonto] : undefined,
             ativa: typeof latest.ativa === 'boolean' ? [latest.ativa] : undefined,
           }
-      syncComparisonFilters(nextComparison)
+      if (!uniodontoMode) {
+        syncComparisonFilters(nextComparison)
+      }
       setOperatorContext({
         name: operatorName,
         modalidade: latest.modalidade ?? null,

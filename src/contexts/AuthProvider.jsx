@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signInWithPopup,
   signOut as firebaseSignOut,
 } from 'firebase/auth'
@@ -36,6 +37,12 @@ export function AuthProvider({ children }) {
     return result.user
   }, [])
 
+  const signUpWithEmail = useCallback(async (email, password) => {
+    setAuthError(null)
+    const result = await createUserWithEmailAndPassword(auth, email, password)
+    return result.user
+  }, [])
+
   const signInWithGoogle = useCallback(async () => {
     setAuthError(null)
     const result = await signInWithPopup(auth, googleProvider)
@@ -53,10 +60,11 @@ export function AuthProvider({ children }) {
       isLoading,
       error: authError,
       signInWithEmail,
+      signUpWithEmail,
       signInWithGoogle,
       signOut,
     }),
-    [user, isLoading, authError, signInWithEmail, signInWithGoogle, signOut],
+    [user, isLoading, authError, signInWithEmail, signUpWithEmail, signInWithGoogle, signOut],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
