@@ -1,5 +1,9 @@
 # Historico da conversa (agents)
 
+## 2026-01-19T20:02:55Z
+- User: pediu séries de ranking anuais (mesmo trimestre ao longo dos anos) e manter modo Uniodonto sem filtrar só Uniodonto.
+- Agent: ajustou filtros de tendência para fixar o trimestre selecionado ao longo dos anos, e removeu o filtro automático de `uniodonto=true` (mantendo apenas para o operador virtual).
+
 ## 2026-01-19T19:27:03Z
 - User: pediu iniciar sempre em modo Uniodonto no período 2024T4 e investigar ausência de séries históricas.
 - Agent: definiu o modo Uniodonto como padrão, fixou o período inicial em 2024T4 com fallback para o último disponível e ajustou filtros de tendências para não travar no período ativo (mantendo filtros de comparação e Uniodonto).

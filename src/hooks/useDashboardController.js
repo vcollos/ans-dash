@@ -192,10 +192,13 @@ export function useDashboardController() {
   const applyUniodontoModeFilters = useCallback(
     (baseFilters) => {
       if (!uniodontoMode) return baseFilters
-      return {
-        ...baseFilters,
-        uniodonto: true,
+      if (baseFilters?.operatorName === VIRTUAL_OPERATOR_UNIODONTO) {
+        return {
+          ...baseFilters,
+          uniodonto: true,
+        }
       }
+      return baseFilters
     },
     [uniodontoMode],
   )
@@ -226,8 +229,21 @@ export function useDashboardController() {
     } else {
       nextFilters = applyComparisonFilters(nextFilters)
     }
+    if (operatorPeriod?.trimestre) {
+      nextFilters = {
+        ...nextFilters,
+        anos: [],
+        trimestres: [operatorPeriod.trimestre],
+      }
+    }
     return applyUniodontoModeFilters(nextFilters)
-  }, [filters, operatorContext?.name, applyComparisonFilters, applyUniodontoModeFilters])
+  }, [
+    filters,
+    operatorContext?.name,
+    operatorPeriod?.trimestre,
+    applyComparisonFilters,
+    applyUniodontoModeFilters,
+  ])
 
   const operatorPeerFilters = useMemo(() => {
     if (!operatorContext?.name) return null
