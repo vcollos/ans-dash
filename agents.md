@@ -1,5 +1,9 @@
 # Historico da conversa (agents)
 
+## 2026-01-19T19:27:03Z
+- User: pediu iniciar sempre em modo Uniodonto no período 2024T4 e investigar ausência de séries históricas.
+- Agent: definiu o modo Uniodonto como padrão, fixou o período inicial em 2024T4 com fallback para o último disponível e ajustou filtros de tendências para não travar no período ativo (mantendo filtros de comparação e Uniodonto).
+
 ## 2026-01-19T18:52:10Z
 - User: pediu reduzir o uso do BigQuery e considerar views/pre-tabelas porque os dados atualizam trimestralmente.
 - Agent: adicionou suporte a snapshot (`indicadores_curados_snapshot`) no export CSV via `BQ_DATASET_VIEW`, ajustou `cloudbuild.yaml`, melhorou consultas para usar `periodo_id` em filtros, reduziu leitura de schema com `includeFields`, atualizou script de snapshot (cluster por `periodo_id`) e documentou a estratégia.

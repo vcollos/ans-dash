@@ -29,6 +29,7 @@ const uniodontoRankingCatalog = UNIODONTO_RANKING_METRICS
 const uniodontoIndicatorCatalog = UNIODONTO_INDICATORS
 const DEFAULT_RANKING_METRIC = 'regulatory_score'
 const DEFAULT_MONETARY_RANKING_METRIC = 'resultado_liquido_final_ans'
+const DEFAULT_START_PERIOD = { ano: 2024, trimestre: 4, periodo: '2024T4' }
 
 const getMetricTrend = (metricId) => {
   if (metricId === 'regulatory_score') return 'higher'
@@ -123,7 +124,7 @@ export function useDashboardController() {
   const [rankingMetricState, setRankingMetricState] = useState(DEFAULT_RANKING_METRIC)
   const [rankingData, setRankingData] = useState({ rows: [], operatorRow: null })
   const [rankingOrder, setRankingOrder] = useState(() => getMetricOrder(DEFAULT_RANKING_METRIC))
-  const [uniodontoMode, setUniodontoMode] = useState(false)
+  const [uniodontoMode, setUniodontoMode] = useState(true)
   const [uniodontoRankingMetric, setUniodontoRankingMetric] = useState(DEFAULT_UNIODONTO_RANKING_METRIC)
   const [uniodontoRankingOrder, setUniodontoRankingOrder] = useState(() =>
     getUniodontoMetricOrder(DEFAULT_UNIODONTO_RANKING_METRIC),
@@ -152,62 +153,10 @@ export function useDashboardController() {
     availablePeriods: [],
     selectedPeriod: null,
   })
-  const [operatorPeriod, setOperatorPeriod] = useState(null)
+  const [operatorPeriod, setOperatorPeriod] = useState(() => ({ ...DEFAULT_START_PERIOD }))
   const operatorSelectionRef = useRef(0)
 
   const comparisonFilterQuery = useMemo(() => comparisonFiltersToQuery(comparisonFilters), [comparisonFilters])
-  const trendMetricList = useMemo(() => {
-    if (uniodontoMode) {
-      return uniodontoIndicatorCatalog.map((metric) => metric.id)
-    }
-    return ['regulatory_score', ...rankingCatalog.map((metric) => metric.id)]
-  }, [uniodontoMode])
-
-  const resolvedFilters = useMemo(() => {
-    let nextFilters = { ...filters }
-    if (operatorPeriod?.ano && operatorPeriod?.trimestre) {
-      nextFilters = {
-        ...nextFilters,
-        anos: [operatorPeriod.ano],
-        trimestres: [operatorPeriod.trimestre],
-      }
-    }
-    return nextFilters
-  }, [filters, operatorPeriod?.ano, operatorPeriod?.trimestre])
-
-  const trendFilters = useMemo(() => {
-    let nextFilters = { ...filters }
-    if (operatorContext?.name) {
-      const { search: _ignoredSearch, ...rest } = nextFilters
-      nextFilters = rest
-    }
-    if (operatorPeriod?.trimestre) {
-      nextFilters = {
-        ...nextFilters,
-        trimestres: [operatorPeriod.trimestre],
-      }
-    }
-    return nextFilters
-  }, [filters, operatorPeriod?.trimestre, operatorContext?.name, uniodontoMode])
-
-  const operatorPeerFilters = useMemo(() => {
-    if (!operatorContext?.name) return null
-    const peerFilters = {}
-    if (operatorContext?.modalidade) {
-      peerFilters.modalidades = [operatorContext.modalidade]
-    }
-    if (operatorContext?.porte) {
-      peerFilters.portes = [operatorContext.porte]
-    }
-    if (typeof operatorContext?.uniodonto === 'boolean') {
-      peerFilters.uniodonto = [operatorContext.uniodonto]
-    }
-    if (typeof operatorContext?.ativa === 'boolean') {
-      peerFilters.ativa = [operatorContext.ativa]
-    }
-    return peerFilters
-  }, [operatorContext?.name, operatorContext?.modalidade, operatorContext?.porte, operatorContext?.uniodonto, operatorContext?.ativa])
-
   const applyComparisonFilters = useCallback(
     (baseFilters) => {
       let nextFilters = { ...baseFilters }
@@ -250,15 +199,71 @@ export function useDashboardController() {
     },
     [uniodontoMode],
   )
+  const trendMetricList = useMemo(() => {
+    if (uniodontoMode) {
+      return uniodontoIndicatorCatalog.map((metric) => metric.id)
+    }
+    return ['regulatory_score', ...rankingCatalog.map((metric) => metric.id)]
+  }, [uniodontoMode])
+
+  const resolvedFilters = useMemo(() => {
+    let nextFilters = { ...filters }
+    if (operatorPeriod?.ano && operatorPeriod?.trimestre) {
+      nextFilters = {
+        ...nextFilters,
+        anos: [operatorPeriod.ano],
+        trimestres: [operatorPeriod.trimestre],
+      }
+    }
+    return nextFilters
+  }, [filters, operatorPeriod?.ano, operatorPeriod?.trimestre])
+
+  const trendFilters = useMemo(() => {
+    let nextFilters = { ...filters }
+    if (operatorContext?.name) {
+      const { search: _ignoredSearch, ...rest } = nextFilters
+      nextFilters = rest
+    } else {
+      nextFilters = applyComparisonFilters(nextFilters)
+    }
+    return applyUniodontoModeFilters(nextFilters)
+  }, [filters, operatorContext?.name, applyComparisonFilters, applyUniodontoModeFilters])
+
+  const operatorPeerFilters = useMemo(() => {
+    if (!operatorContext?.name) return null
+    const peerFilters = {}
+    if (operatorContext?.modalidade) {
+      peerFilters.modalidades = [operatorContext.modalidade]
+    }
+    if (operatorContext?.porte) {
+      peerFilters.portes = [operatorContext.porte]
+    }
+    if (typeof operatorContext?.uniodonto === 'boolean') {
+      peerFilters.uniodonto = [operatorContext.uniodonto]
+    }
+    if (typeof operatorContext?.ativa === 'boolean') {
+      peerFilters.ativa = [operatorContext.ativa]
+    }
+    return peerFilters
+  }, [operatorContext?.name, operatorContext?.modalidade, operatorContext?.porte, operatorContext?.uniodonto, operatorContext?.ativa])
 
   useEffect(() => {
-    if (operatorPeriod?.ano && operatorPeriod?.trimestre) return
     if (!periodOptions.length) return
-    const [latest] = periodOptions
-    if (latest) {
-      setOperatorPeriod({ ano: latest.ano, trimestre: latest.trimestre, periodo: latest.periodo })
-    }
-  }, [periodOptions, operatorPeriod?.ano, operatorPeriod?.trimestre])
+    const defaultMatch = periodOptions.find(
+      (item) => item.ano === DEFAULT_START_PERIOD.ano && item.trimestre === DEFAULT_START_PERIOD.trimestre,
+    )
+    setOperatorPeriod((current) => {
+      if (current?.ano && current?.trimestre) {
+        const match = periodOptions.find(
+          (item) => item.ano === current.ano && item.trimestre === current.trimestre,
+        )
+        if (match) return match
+      }
+      if (defaultMatch) return defaultMatch
+      const [latest] = periodOptions
+      return latest ? { ano: latest.ano, trimestre: latest.trimestre, periodo: latest.periodo } : current
+    })
+  }, [periodOptions])
 
   useEffect(() => {
     let cancelled = false
