@@ -1,0 +1,54 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - gcr.io/$PROJECT_ID/ans-dashboard:$SHORT_SHA
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - gcr.io/$PROJECT_ID/ans-dashboard:$SHORT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image
+      - gcr.io/$PROJECT_ID/ans-dashboard:$SHORT_SHA
+      - --region
+      - ${_REGION}
+      - --platform
+      - managed
+      - --allow-unauthenticated
+      - --service-account
+      - ${_RUN_SERVICE_ACCOUNT}
+      - --cpu
+      - '1'
+      - --memory
+      - '1Gi'
+      - --concurrency
+      - '1'
+      - --max-instances
+      - '3'
+      - --timeout
+      - '300s'
+      - --set-env-vars
+      - NODE_ENV=production,SERVE_STATIC=true,BQ_PROJECT_ID=${_BQ_PROJECT_ID},BQ_DATASET=${_BQ_DATASET},BQ_LOCATION=${_BQ_LOCATION},OPENAI_MODEL=${_OPENAI_MODEL}
+      # - --set-secrets
+      # - OPENAI_API_KEY=OPENAI_API_KEY:latest
+
+images:
+  - gcr.io/$PROJECT_ID/ans-dashboard:$SHORT_SHA
+
+substitutions:
+  _SERVICE: ans-dashboard
+  _REGION: us-central1
+  _RUN_SERVICE_ACCOUNT: dashboardubcontag@dashboardubcontag.iam.gserviceaccount.com
+  _BQ_PROJECT_ID: bigdata-467917
+  _BQ_DATASET: datalake_ans
+  _BQ_LOCATION: US
+  _OPENAI_MODEL: gpt-5-mini

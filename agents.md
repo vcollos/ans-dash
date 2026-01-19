@@ -8,6 +8,14 @@
 - User: perguntou sobre rodar o dashboard na Vercel e pediu para salvar o plano.
 - Agent: registrou o plano com duas opções: (1) Vercel apenas para o front + API Node/Express em outro host com `VITE_API_PROXY`; (2) refatorar a API para serverless, incluindo sessao/auth fora de memoria e credenciais BigQuery via env.
 
+## 2026-01-19T00:23:41Z
+- User: pediu ajuste para migrar do VPS para o Google Cloud Run.
+- Agent: adicionou `Dockerfile` e `.dockerignore`, ajustou o Express para servir o `dist` em produção (sem exigir auth fora de `/api`) e documentou o deploy no Cloud Run no README.
+
+## 2026-01-19T00:27:58Z
+- User: pediu preparar o `cloudbuild.yaml` para deploy no Cloud Run.
+- Agent: criou `cloudbuild.yaml` com build/push da imagem e deploy do serviço, incluindo variáveis de ambiente básicas e placeholder para secrets.
+
 ## 2026-01-18T12:51:28Z
 - User: pediu alinhar o Modo Uniodonto com as contas contabeis especificas (31/332129111/32/46/442129119/43/464).
 - Agent: atualizou formulas SQL/JS, queries de agregacao e documentacoes para usar as contas solicitadas, adicionou colunas na view e recriou a view no BigQuery.

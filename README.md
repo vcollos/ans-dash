@@ -68,6 +68,37 @@ Os artefatos ficam em `dist/`. Para testar localmente:
 npm run preview
 ```
 
+## Deploy no Google Cloud Run
+
+O projeto agora inclui um `Dockerfile` que gera o build do frontend e serve os arquivos estáticos via Express.
+Assim, o Cloud Run sobe **uma única aplicação** com frontend + API na mesma porta.
+
+Passos sugeridos:
+
+1) Build e push da imagem:
+
+```bash
+gcloud builds submit --tag gcr.io/SEU_PROJETO/ans-dashboard
+```
+
+2) Deploy no Cloud Run:
+
+```bash
+gcloud run deploy ans-dashboard \
+  --image gcr.io/SEU_PROJETO/ans-dashboard \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-env-vars "NODE_ENV=production,SERVE_STATIC=true,BQ_PROJECT_ID=...,BQ_DATASET=...,BQ_LOCATION=US,OPENAI_API_KEY=..."
+```
+
+Notas importantes:
+
+- O Cloud Run define `PORT=8080` automaticamente (já suportado pelo servidor).
+- O backend usa BigQuery via `@google-cloud/bigquery`; preferencialmente configure uma **service account** com permissão e associe ao serviço do Cloud Run.
+- O servidor não lê `.env.local` automaticamente no Cloud Run; use `--set-env-vars` ou `--set-secrets`.
+- Para servir o frontend dentro do mesmo container, mantenha `NODE_ENV=production` ou defina `SERVE_STATIC=true`.
+
 ## Estrutura relevante
 
 - `server/index.js` – API Express que executa as consultas SQL (via `/api/query`) diretamente no PostgreSQL.

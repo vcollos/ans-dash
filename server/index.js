@@ -13,6 +13,7 @@ const BQ_PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ??
 const BQ_DATASET = process.env.BQ_DATASET ?? 'datalake_ans'
 const BQ_LOCATION = process.env.BQ_LOCATION ?? 'US'
 const EXPORT_SQL_PATH = path.resolve(__dirname, '../db/export_indicadores.sql')
+const DIST_DIR = path.resolve(__dirname, '../dist')
 
 const bigquery = new BigQuery({
   projectId: BQ_PROJECT_ID,
@@ -124,6 +125,7 @@ function extractToken(req) {
 
 function authMiddleware(req, res, next) {
   if (!AUTH_ENABLED) return next()
+  if (!req.path.startsWith('/api')) return next()
   if (req.method === 'OPTIONS') return next()
   if (AUTH_PUBLIC_PATHS.has(req.path)) return next()
   const token = extractToken(req)
@@ -513,6 +515,19 @@ app.post('/api/query', async (req, res) => {
     res.status(500).json({ error: 'Falha ao executar consulta' })
   }
 })
+
+const SHOULD_SERVE_STATIC =
+  process.env.SERVE_STATIC === 'true' || (process.env.NODE_ENV === 'production' && fs.existsSync(DIST_DIR))
+
+if (SHOULD_SERVE_STATIC) {
+  app.use(express.static(DIST_DIR))
+  app.get('*', (req, res) => {
+    if (req.path.startsWith('/api')) {
+      return res.status(404).json({ error: 'Rota nao encontrada.' })
+    }
+    return res.sendFile(path.join(DIST_DIR, 'index.html'))
+  })
+}
 
 app.listen(PORT, () => {
   console.log(`[server] API disponível em http://localhost:${PORT}`)
