@@ -18,6 +18,8 @@ steps:
       - VITE_FIREBASE_MESSAGING_SENDER_ID=${_VITE_FIREBASE_MESSAGING_SENDER_ID}
       - --build-arg
       - VITE_FIREBASE_MEASUREMENT_ID=${_VITE_FIREBASE_MEASUREMENT_ID}
+      - --build-arg
+      - VITE_DATASET_VIEW=${_VITE_DATASET_VIEW}
       - .
 
   - name: gcr.io/cloud-builders/docker
@@ -77,3 +79,4 @@ substitutions:
   _VITE_FIREBASE_STORAGE_BUCKET: "bigdata-467917.firebasestorage.app"
   _VITE_FIREBASE_MESSAGING_SENDER_ID: "565810349046"
   _VITE_FIREBASE_MEASUREMENT_ID: "G-12MS8R4KQS"
+  _VITE_DATASET_VIEW: "indicadores_curados_snapshot"
