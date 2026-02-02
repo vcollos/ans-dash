@@ -48,6 +48,10 @@
 - User: pediu autorizar criacao de novas contas.
 - Agent: habilitou controle via `VITE_ALLOW_SIGNUP` (default true) e manteve o fluxo de cadastro ativo no login.
 
+## 2026-02-02T11:43:09Z
+- User: reportou botões de cadastro/link inativos.
+- Agent: garantiu reset de `isAuthLoading` ao finalizar verificação de auth para destravar os botões.
+
 ## 2026-01-31T23:36:07Z
 - User: autorizou continuar a sanitizacao apos o scan contextual.
 - Agent: removeu `src/lib/arrow.js`, ajustou `eslint.config.js`, passou a normalizar `VITE_DATASET_VIEW` em `dataService` com crases, e atualizou README/documentacoes para variaveis e notas de historico.

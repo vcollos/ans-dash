@@ -275,6 +275,12 @@ function AppContent() {
   }, [])
 
   useEffect(() => {
+    if (!isLoading) {
+      setIsAuthLoading(false)
+    }
+  }, [isLoading])
+
+  useEffect(() => {
     if (typeof window === 'undefined') return
     const linkDetected = isEmailLink?.(window.location.href)
     if (!linkDetected) return
