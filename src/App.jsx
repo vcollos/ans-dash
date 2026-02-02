@@ -74,6 +74,7 @@ function DashboardApp({ onLogout }) {
     setUniodontoMode,
     uniodontoRankingMetric,
     setUniodontoRankingMetric,
+    ansPeerSummary,
     uniodontoPeerSummary,
     monetaryRankingMetric,
     setMonetaryRankingMetric,
@@ -197,6 +198,7 @@ function DashboardApp({ onLogout }) {
               <KpiCards
                 snapshot={operatorInsight}
                 fallbackSummary={kpis}
+                peerSummary={ansPeerSummary}
                 onPeriodChange={setOperatorPeriod}
                 period={operatorPeriod}
                 peerLabel={comparisonLabel}

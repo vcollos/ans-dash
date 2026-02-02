@@ -136,6 +136,7 @@ function getComparisonTrendClass(operatorValue, peerValue, direction = 'higher')
 function KpiCards({
   snapshot,
   fallbackSummary,
+  peerSummary,
   onPeriodChange,
   period,
   peerLabel,
@@ -148,7 +149,15 @@ function KpiCards({
   const periodValue = buildPeriodValue(selectedPeriod)
   const regulatoryData = regulatoryScore?.data ?? null
   const regulatoryLoading = regulatoryScore?.isLoading ?? false
-  const peerCount = snapshot?.peerCount ?? snapshot?.peers?.peer_count ?? regulatoryData?.peerCount ?? 0
+  const hasMetricKeys = (value) =>
+    Boolean(value && indicatorSpec.some((metric) => Object.prototype.hasOwnProperty.call(value, metric.key)))
+  const peerMetrics = hasMetricKeys(peerSummary?.metrics)
+    ? peerSummary.metrics
+    : hasMetricKeys(peerSummary)
+      ? peerSummary
+      : snapshot?.peers ?? null
+  const peerCount =
+    peerSummary?.peer_count ?? snapshot?.peerCount ?? snapshot?.peers?.peer_count ?? regulatoryData?.peerCount ?? 0
   const regulatoryMetricMap = {}
   if (regulatoryData?.metrics) {
     regulatoryData.metrics.forEach((metric) => {
@@ -330,7 +339,7 @@ function KpiCards({
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {indicatorSpec.map((metric) => {
                 const operatorValue = snapshot?.operator?.[metric.key]
-                const peerValue = snapshot?.peers?.[metric.key]
+                const peerValue = peerMetrics?.[metric.key]
                 const regMetric = regulatoryMetricMap[metric.key]
                 return (
                   <div key={metric.key} className="min-w-0 space-y-2 rounded-lg border border-border/70 bg-muted/20 px-4 py-3">

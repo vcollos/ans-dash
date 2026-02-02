@@ -866,6 +866,37 @@ export async function fetchUniodontoPeerSummary(filters = {}, options = {}) {
   }
 }
 
+export async function fetchAnsPeerSummary(filters = {}, options = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
+  const { excludeOperatorName = null } = options ?? {}
+  const sanitizedName = excludeOperatorName ? sanitizeSql(excludeOperatorName) : null
+  const { whereClause } = buildFilterClauses(stripOperatorSelection(filters), { latestOnlyDefault: false })
+  const wherePieces = []
+  if (whereClause) {
+    wherePieces.push(whereClause.replace(/^WHERE\s+/i, ''))
+  }
+  if (sanitizedName) {
+    wherePieces.push(`nome_operadora <> '${sanitizedName}'`)
+  }
+  const finalWhere = wherePieces.length ? `WHERE ${wherePieces.join(' AND ')}` : ''
+  const metricSelectList = buildCardMetricSelectSql({ aggregate: true, source: 'base', mode: 'ans' })
+  const query = `
+    SELECT
+      COUNT(DISTINCT nome_operadora) AS peer_count
+      ${metricSelectList ? `,\n      ${metricSelectList}` : ''}
+    FROM ${viewRef}
+    ${finalWhere}
+  `
+  const rows = await runQuery(query)
+  if (!rows[0]) return null
+  const { peer_count: peerCount, ...metrics } = rows[0]
+  return {
+    peer_count: peerCount ?? null,
+    metrics,
+    ...metrics,
+  }
+}
+
 function extractMonetaryValues(row) {
   const baseValues = {}
   monetaryIndicatorPhysicalColumns.forEach((column) => {

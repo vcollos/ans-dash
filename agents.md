@@ -1,5 +1,9 @@
 # Historico da conversa (agents)
 
+## 2026-02-02T15:33:11Z
+- User: reportou que a média filtrada não estava aparecendo em Uniodonto e ANS.
+- Agent: adicionou fetch dedicado de médias filtradas (ANS/Uniodonto) e fallback nos cards para usar o peer summary correto.
+
 ## 2026-02-02T14:59:31Z
 - User: reportou que selecionar uma operadora não estava filtrando os indicadores.
 - Agent: adicionou auto-seleção por busca exata no hook para garantir que a escolha por texto acione o contexto da operadora.

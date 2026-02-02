@@ -9,6 +9,7 @@ import {
   fetchRanking,
   fetchMonetaryRanking,
   fetchRegulatoryScoreRanking,
+  fetchAnsPeerSummary,
   fetchUniodontoPeerSummary,
   fetchUniodontoRanking,
   fetchTrendSeriesBatch,
@@ -107,6 +108,7 @@ export function useDashboardController() {
     getMonetaryMetricOrder(DEFAULT_MONETARY_RANKING_METRIC),
   )
   const [monetaryRankingData, setMonetaryRankingData] = useState({ rows: [], operatorRow: null })
+  const [ansPeerSummary, setAnsPeerSummary] = useState(null)
   const [uniodontoPeerSummary, setUniodontoPeerSummary] = useState(null)
   const [trendSeriesByMetric, setTrendSeriesByMetric] = useState({})
   const [isTrendLoading, setIsTrendLoading] = useState(false)
@@ -479,6 +481,7 @@ export function useDashboardController() {
   useEffect(() => {
     if (!operatorContext?.name) {
       setOperatorSnapshot({ operator: null, peers: null, availablePeriods: [], selectedPeriod: null })
+      setAnsPeerSummary(null)
       setUniodontoPeerSummary(null)
       return
     }
@@ -490,28 +493,6 @@ export function useDashboardController() {
         setOperatorSnapshot(snapshot)
         if (snapshot?.selectedPeriod) {
           setOperatorPeriod(snapshot.selectedPeriod)
-        }
-        if (uniodontoMode) {
-          const resolvedPeriod = snapshot?.selectedPeriod ?? operatorPeriod
-          if (resolvedPeriod?.ano && resolvedPeriod?.trimestre) {
-            const baseFilters = applyUniodontoModeFilters(
-              applyComparisonFilters({
-                anos: [resolvedPeriod.ano],
-                trimestres: [resolvedPeriod.trimestre],
-                search: '',
-              }),
-            )
-            const excludeOperatorName =
-              operatorContext.name === VIRTUAL_OPERATOR_UNIODONTO ? null : operatorContext.name
-            const peerSummary = await fetchUniodontoPeerSummary(baseFilters, { excludeOperatorName })
-            if (!cancelled) {
-              setUniodontoPeerSummary(peerSummary)
-            }
-          } else {
-            setUniodontoPeerSummary(null)
-          }
-        } else {
-          setUniodontoPeerSummary(null)
         }
       } catch (err) {
         if (!cancelled) console.error('[Dashboard] Falha ao carregar operadora', err)
@@ -530,6 +511,89 @@ export function useDashboardController() {
     uniodontoMode,
     applyComparisonFilters,
     applyUniodontoModeFilters,
+  ])
+
+  useEffect(() => {
+    if (!operatorContext?.name || !uniodontoMode) {
+      setUniodontoPeerSummary(null)
+      return
+    }
+    let cancelled = false
+    async function loadUniodontoPeers() {
+      try {
+        if (!operatorPeriod?.ano || !operatorPeriod?.trimestre) {
+          setUniodontoPeerSummary(null)
+          return
+        }
+        const baseFilters = applyUniodontoModeFilters(
+          applyComparisonFilters({
+            anos: [operatorPeriod.ano],
+            trimestres: [operatorPeriod.trimestre],
+            search: '',
+          }),
+        )
+        const excludeOperatorName =
+          operatorContext.name === VIRTUAL_OPERATOR_UNIODONTO ? null : operatorContext.name
+        const peerSummary = await fetchUniodontoPeerSummary(baseFilters, { excludeOperatorName })
+        if (!cancelled) {
+          setUniodontoPeerSummary(peerSummary)
+        }
+      } catch (err) {
+        if (!cancelled) console.error('[Dashboard] Falha ao carregar média filtrada Uniodonto', err)
+      }
+    }
+    loadUniodontoPeers()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    operatorContext?.name,
+    operatorPeriod?.ano,
+    operatorPeriod?.trimestre,
+    comparisonFilterQuery,
+    uniodontoMode,
+    applyComparisonFilters,
+    applyUniodontoModeFilters,
+  ])
+
+  useEffect(() => {
+    if (!operatorContext?.name || uniodontoMode) {
+      setAnsPeerSummary(null)
+      return
+    }
+    let cancelled = false
+    async function loadAnsPeers() {
+      try {
+        if (!operatorPeriod?.ano || !operatorPeriod?.trimestre) {
+          setAnsPeerSummary(null)
+          return
+        }
+        const baseFilters = applyComparisonFilters({
+          anos: [operatorPeriod.ano],
+          trimestres: [operatorPeriod.trimestre],
+          search: '',
+        })
+        const excludeOperatorName =
+          operatorContext.name === VIRTUAL_OPERATOR_UNIODONTO ? null : operatorContext.name
+        const peerSummary = await fetchAnsPeerSummary(baseFilters, { excludeOperatorName })
+        if (!cancelled) {
+          setAnsPeerSummary(peerSummary)
+        }
+      } catch (err) {
+        if (!cancelled) console.error('[Dashboard] Falha ao carregar média filtrada ANS', err)
+      }
+    }
+    loadAnsPeers()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    operatorContext?.name,
+    operatorPeriod?.ano,
+    operatorPeriod?.trimestre,
+    comparisonFilterQuery,
+    uniodontoMode,
+    applyComparisonFilters,
   ])
 
   async function applyOperatorSelection(operatorName) {
@@ -644,6 +708,7 @@ export function useDashboardController() {
     uniodontoRankingMetric,
     setUniodontoRankingMetric: setUniodontoRankingMetricState,
     uniodontoRankingOrder,
+    ansPeerSummary,
     uniodontoPeerSummary,
     monetaryRankingMetric,
     setMonetaryRankingMetric: setMonetaryRankingMetricState,
