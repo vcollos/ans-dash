@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertCircle } from 'lucide-react'
 import { useDashboardController } from './hooks/useDashboardController'
 import AppHeader from './components/layout/AppHeader'
@@ -8,16 +8,15 @@ import KpiCards from './components/dashboard/KpiCards'
 import UniodontoKpiCards from './components/dashboard/UniodontoKpiCards'
 import RankingPanel from './components/dashboard/RankingPanel'
 import IndicatorTrendChart from './components/dashboard/IndicatorTrendChart'
-import UniodontoCorrelationPanel from './components/dashboard/UniodontoCorrelationPanel'
 import DataTable from './components/dashboard/DataTable'
 import MonetarySummary from './components/dashboard/MonetarySummary'
-import DashboardAnalysisDialog from './components/dashboard/DashboardAnalysisDialog'
 import { Skeleton } from './components/ui/skeleton'
 import { Card, CardContent } from './components/ui/card'
 import { Button } from './components/ui/button'
 import { describeComparisonFilters } from './lib/comparisonModes'
 import DataLoadingIndicator from './components/dashboard/DataLoadingIndicator'
-import { AuthProvider, useAuth } from './contexts/AuthProvider'
+import { AuthProvider } from './contexts/AuthProvider'
+import { useAuth } from './contexts/useAuth'
 import { UNIODONTO_INDICATORS } from './lib/uniodontoMetrics'
 
 function LoadingState() {
@@ -38,38 +37,6 @@ function LoadingState() {
   )
 }
 
-function DatasetUploadCard({ onUploadDataset, isUploading, uploadFeedback }) {
-  const fileInputRef = useRef(null)
-
-  const handleUploadClick = () => {
-    fileInputRef.current?.click()
-  }
-
-  const handleFileChange = (event) => {
-    const file = event.target.files?.[0]
-    if (file && onUploadDataset) {
-      onUploadDataset(file)
-    }
-    event.target.value = ''
-  }
-
-  return (
-    <div className="rounded-xl border border-border/60 bg-muted/30 p-4 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Atualizar arquivo base</p>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Substitua o dataset carregado enviando um novo CSV ou Parquet curado.
-      </p>
-      <input ref={fileInputRef} type="file" accept=".csv,.parquet" className="hidden" onChange={handleFileChange} />
-      <Button variant="outline" className="mt-3 w-full gap-2" onClick={handleUploadClick} disabled={isUploading}>
-        {isUploading ? 'Importando...' : 'Selecionar arquivo'}
-      </Button>
-      {uploadFeedback ? (
-        <p className="mt-2 text-xs text-muted-foreground">{uploadFeedback.message}</p>
-      ) : null}
-    </div>
-  )
-}
-
 function ErrorState({ error, onRetry }) {
   return (
     <Card className="border-destructive/40 bg-destructive/5">
@@ -78,7 +45,9 @@ function ErrorState({ error, onRetry }) {
           <AlertCircle className="h-6 w-6" />
           <div>
             <p className="text-lg font-semibold">Não foi possível carregar os dados</p>
-            <p className="text-sm">{error?.message ?? 'Verifique os arquivos na pasta public/data e tente novamente.'}</p>
+            <p className="text-sm">
+              {error?.message ?? 'Verifique as credenciais do BigQuery/Firebase e tente novamente.'}
+            </p>
           </div>
         </div>
         <Button variant="destructive" onClick={onRetry}>
@@ -91,7 +60,6 @@ function ErrorState({ error, onRetry }) {
 
 function DashboardApp({ onLogout }) {
   const [filtersSidebarOpen, setFiltersSidebarOpen] = useState(false)
-  const [analysisOpen, setAnalysisOpen] = useState(false)
   const {
     status,
     error,
@@ -114,12 +82,9 @@ function DashboardApp({ onLogout }) {
     isTrendLoading,
     tableData,
     isQuerying,
-    isUploading,
-    uploadFeedback,
     updateFilters,
     resetFilters,
     applyOperatorSelection,
-    replaceDataset,
     operatorInsight,
     operatorPeriod,
     setOperatorPeriod,
@@ -161,22 +126,6 @@ function DashboardApp({ onLogout }) {
           onLogout={onLogout}
           uniodontoMode={uniodontoMode}
           onUniodontoModeChange={setUniodontoMode}
-          onOpenAnalysis={() => setAnalysisOpen(true)}
-        />
-        <DashboardAnalysisDialog
-          open={analysisOpen}
-          onOpenChange={setAnalysisOpen}
-          uniodontoMode={uniodontoMode}
-          filters={filters}
-          comparisonFilters={comparisonFilters}
-          operatorName={operatorInsight?.operatorName}
-          kpis={kpis}
-          monetarySummary={monetarySummary}
-          rankingData={rankingData}
-          rankingMetric={rankingMetric}
-          uniodontoRankingMetric={uniodontoRankingMetric}
-          trendSeriesByMetric={trendSeriesByMetric}
-          isLoading={isRefreshingData}
         />
         <DataLoadingIndicator
           isActive={isRefreshingData}
@@ -217,11 +166,6 @@ function DashboardApp({ onLogout }) {
                   comparisonFilters={comparisonFiltersDraft}
                   onComparisonFiltersChange={updateComparisonFilters}
                   onComparisonFiltersReset={resetComparisonFiltersState}
-                />
-                <DatasetUploadCard
-                  onUploadDataset={replaceDataset}
-                  isUploading={isUploading}
-                  uploadFeedback={uploadFeedback}
                 />
               </div>
               <div className="border-t p-4">
@@ -290,9 +234,6 @@ function DashboardApp({ onLogout }) {
                   : undefined
               }
             />
-            {uniodontoMode ? (
-              <UniodontoCorrelationPanel rows={rankingData.rows ?? []} isLoading={isQuerying} />
-            ) : null}
             <DataTable
               rows={tableData.rows ?? []}
               columns={tableData.columns ?? []}
@@ -306,9 +247,22 @@ function DashboardApp({ onLogout }) {
 }
 
 function AppContent() {
-  const { user, isLoading, error, signInWithEmail, signUpWithEmail, signInWithGoogle, signOut } = useAuth()
+  const {
+    user,
+    isLoading,
+    error,
+    signInWithEmail,
+    signUpWithEmail,
+    signInWithGoogle,
+    sendEmailLink,
+    completeEmailLinkSignIn,
+    isEmailLink,
+    signOut,
+  } = useAuth()
   const [authMessage, setAuthMessage] = useState(null)
   const [isAuthLoading, setIsAuthLoading] = useState(false)
+  const [isEmailLinkFlow, setIsEmailLinkFlow] = useState(false)
+  const allowSignUp = import.meta.env?.VITE_ALLOW_SIGNUP !== 'false'
 
   useEffect(() => {
     function handleExpired() {
@@ -319,6 +273,23 @@ function AppContent() {
       window.removeEventListener('auth:expired', handleExpired)
     }
   }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const linkDetected = isEmailLink?.(window.location.href)
+    if (!linkDetected) return
+    setIsEmailLinkFlow(true)
+    const storedEmail = window.localStorage.getItem('auth:emailLink')
+    if (!storedEmail) return
+    setIsAuthLoading(true)
+    completeEmailLinkSignIn(storedEmail, window.location.href)
+      .catch((err) => {
+        setAuthMessage(err?.message ?? 'Falha ao concluir login por link.')
+      })
+      .finally(() => {
+        setIsAuthLoading(false)
+      })
+  }, [completeEmailLinkSignIn, isEmailLink])
 
   async function handleLogin({ email, password }) {
     setIsAuthLoading(true)
@@ -339,6 +310,31 @@ function AppContent() {
       await signInWithGoogle()
     } catch (err) {
       setAuthMessage(err?.message ?? 'Falha ao autenticar com Google.')
+    } finally {
+      setIsAuthLoading(false)
+    }
+  }
+
+  async function handleSendEmailLink({ email }) {
+    setIsAuthLoading(true)
+    setAuthMessage(null)
+    try {
+      await sendEmailLink(email)
+      setAuthMessage('Link enviado. Verifique o email para continuar.')
+    } catch (err) {
+      setAuthMessage(err?.message ?? 'Falha ao enviar link de acesso.')
+    } finally {
+      setIsAuthLoading(false)
+    }
+  }
+
+  async function handleCompleteEmailLink({ email }) {
+    setIsAuthLoading(true)
+    setAuthMessage(null)
+    try {
+      await completeEmailLinkSignIn(email, window.location.href)
+    } catch (err) {
+      setAuthMessage(err?.message ?? 'Falha ao concluir login por link.')
     } finally {
       setIsAuthLoading(false)
     }
@@ -368,8 +364,11 @@ function AppContent() {
     return (
       <LoginScreen
         onLogin={handleLogin}
-        onSignUp={handleSignUp}
+        onSignUp={allowSignUp ? handleSignUp : null}
         onGoogleLogin={handleGoogleLogin}
+        onSendEmailLink={handleSendEmailLink}
+        onCompleteEmailLink={handleCompleteEmailLink}
+        isEmailLinkFlow={isEmailLinkFlow}
         isLoading={isAuthLoading}
         errorMessage={authMessage ?? error?.message ?? null}
       />

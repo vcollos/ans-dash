@@ -1,4 +1,5 @@
-Relatório de Horas – ANS Dashboard
+# Relatório de Horas – ANS Dashboard
+Nota: documento histórico (pré-migração). O sistema atual roda em BigQuery/Cloud Run; referências a PostgreSQL/CSV/Parquet/PM2/systemd são apenas contexto passado e não refletem o estado atual.
 Período reportado: desenvolvimento concluído até 14/02/2025 
 Distribuição Geral das 227h já executadas
 
@@ -216,4 +217,3 @@ Experiência do usuário e agente regulatório: decidir sobre a ativação do co
 
 
 Este relatório consolida o esforço já realizado (227h) e antecipa o investimento adicional de 200h necessário para entregar as adequações descritas no diagnóstico técnico.
-

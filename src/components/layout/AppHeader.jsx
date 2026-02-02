@@ -17,7 +17,6 @@ function AppHeader({
   onLogout,
   uniodontoMode = false,
   onUniodontoModeChange,
-  onOpenAnalysis,
 }) {
   const operadorasValue = formatInteger(summary?.operadoras)
   const beneficiariosValue = formatInteger(summary?.beneficiarios)
@@ -60,15 +59,6 @@ function AppHeader({
               className="rounded-md border border-border bg-secondary px-3 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:bg-secondary/80"
             >
               Abrir filtros
-            </button>
-          ) : null}
-          {onOpenAnalysis ? (
-            <button
-              type="button"
-              onClick={onOpenAnalysis}
-              className="rounded-md border border-border bg-secondary px-3 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:bg-secondary/80"
-            >
-              Comentarios IA
             </button>
           ) : null}
           {onLogout ? (

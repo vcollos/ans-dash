@@ -1,321 +1,118 @@
-# ANS Dashboard – Documentação Completa
+# ANS Dashboard – Documentação Completa (BigQuery + Cloud Run)
 
 ## 1. Visão Geral
 
-O projeto **ans-dashboard** é um painel interativo construído com **Vite + React** que exibe indicadores exigidos pela ANS/RN 518. Todos os cálculos são executados em um banco **PostgreSQL** através de uma API Express, permitindo filtrar operadoras, portes, modalidades, períodos e comparar resultados com pares.
+O **ans-dashboard** é um painel interativo em **Vite + React** que consome indicadores financeiros da ANS diretamente do **BigQuery**. A API Express atua como proxy de consultas (`/api/query`) e exportação CSV (`/api/indicadores.csv`). A autenticação é feita via **Firebase Auth** e validada no backend com o Admin SDK. O deploy de produção roda no **Google Cloud Run**.
 
 Fluxo resumido:
 
-1. Scripts Python/Node importam os arquivos DIOPS (CSV/Parquet) para o Postgres.
-2. Views e materialized views pré-calculam as contas contábeis e métricas.
-3. O backend (`server/index.js`) expõe `/api/query` e `/api/indicadores.csv`.
-4. O frontend (`src/`) consome esses endpoints via `src/lib/dataService.js`.
-5. A camada de estado (`src/hooks/useDashboardController.js`) reage aos filtros e alimenta gráficos/tabelas e cartões de KPI.
+1. Os dados são mantidos no BigQuery (views/tabelas curadas).
+2. A API Express executa consultas somente em views/tabelas permitidas.
+3. O frontend monta filtros e consulta o endpoint `/api/query`.
+4. Comentários IA podem ser gerados via OpenAI em endpoints dedicados.
 
 ## 2. Estrutura de Diretórios Principal
 
 ```
 .
-├── db/                     # schema.sql, views.sql, export_indicadores.sql
-├── public/data/            # insumos opcionais (.csv/.parquet) para scripts
-├── scripts/                # importação de dados e materialização de métricas
-├── server/                 # API Express (query proxy e exportador CSV)
-├── src/
-│   ├── hooks/              # controllers e estado (useDashboardController)
-│   ├── lib/                # serviços de dados, fórmulas e utilitários
-│   ├── components/         # UI ShadCN + visualizações (Chart.js/Recharts)
-│   └── main.jsx            # bootstrapping do React
-├── package.json            # scripts npm e dependências
-└── DOCUMENTATION.md        # este arquivo
+├── db/                     # export_indicadores.sql (CSV)
+├── scripts/                # scripts BigQuery (view/snapshot/export)
+├── server/                 # API Express (BigQuery + Firebase)
+├── src/                    # frontend React
+├── public/                 # assets estáticos
+├── cloudbuild.yaml          # deploy Cloud Run
+└── DOCUMENTATION.md         # este arquivo
 ```
 
 ## 3. Ambiente e Variáveis
 
-| Variável                        | Descrição                                                                                               | Valor padrão                                   |
-|--------------------------------|---------------------------------------------------------------------------------------------------------|-----------------------------------------------|
-| `DATABASE_URL`                 | DSN Postgres usado pelos scripts e pela API Express.                                                    | `postgresql://ansdashboard:ansdashboard@localhost:5432/ans_dashboard` |
-| `VITE_API_PROXY`               | URL alvo para `/api` durante `npm run dev/preview`.                                                     | `http://localhost:4000`                        |
-| `VITE_DATASET_VIEW`           | Nome da view usada pelas consultas do frontend.                                                         | `indicadores_curados`                         |
-| `BQ_DATASET_VIEW`             | View/tabela usada pelo export CSV (`/api/indicadores.csv`) quando conectado ao BigQuery.               | `indicadores_curados`                         |
-| `VITE_DATASET_CURATED_URL`    | Fonte CSV curada legacy (não usada no modo Postgres).                                                   | `/data/indicadores.csv`                       |
-| `VITE_DATASET_PARQUET_URL`    | Fonte Parquet legacy (não usada no modo Postgres).                                                      | `/data/20251213_contas_ans.parquet`           |
-| `VITE_DATASET_URL`            | Fallback para `/api/indicadores.csv`.                                                                    | `/api/indicadores.csv`                        |
-| `OPENAI_API_KEY`              | Chave usada pelo agente regulatório (ChatGPT).                                                           | —                                             |
-| `OPENAI_VECTOR_STORE_ID`      | Vector Store com os PDFs normativos.                                                                     | `vs_691d04557eac8191a3dbed8d80a90e4a`         |
-| `OPENAI_WORKFLOW_ID`          | Workflow/ChatKit ID para rastreio.                                                                       | `wf_691cf24519088190be4a330d067c011605a94df9a2f95438` |
-| `OPENAI_WORKFLOW_VERSION`     | Versão usada nos metadados de trace.                                                                     | `draft`                                       |
-| `OPENAI_AGENT_MODEL`          | Modelo base do agente.                                                                                   | `gpt-4.1-mini-2025-04-14`                     |
+### Backend (API)
 
-Para ambientes locais, use `.env.local` na raiz:
+| Variável | Descrição | Exemplo |
+|---|---|---|
+| `BQ_PROJECT_ID` | Projeto GCP | `bigdata-467917` |
+| `BQ_DATASET` | Dataset BigQuery | `datalake_ans` |
+| `BQ_DATASET_VIEW` / `BQ_EXPORT_VIEW` | View/tabela principal | `indicadores_curados_snapshot` |
+| `BQ_LOCATION` | Localização | `US` |
+| `BQ_ALLOWED_VIEWS` (opcional) | Lista de views/tabelas permitidas no `/api/query` | `indicadores_curados_snapshot,bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem` |
+| `BQ_PRESTADORES_TABLE` (opcional) | Tabela de prestadores usada na complementação | `bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem` |
+| `FIREBASE_PROJECT_ID` | Projeto Firebase | `bigdata-467917` |
+| `QUERY_CACHE_TTL_MS` | Cache do `/api/query` em ms (opcional) | `60000` |
+| `QUERY_CACHE_MAX_ENTRIES` | Máx. entradas no cache (opcional) | `250` |
+| `SERVER_PORT` / `PORT` | Porta da API (opcional) | `4000` (dev) |
+| `SERVE_STATIC` | Serve `dist/` via Express (opcional) | `true` |
 
-```bash
-DATABASE_URL=postgresql://usuario:senha@localhost:5432/ans_dashboard
-VITE_DATASET_VIEW=indicadores_metricas      # após materializar
+### Frontend (Vite)
+
+| Variável | Descrição |
+|---|---|
+| `VITE_FIREBASE_API_KEY` | Firebase Web config |
+| `VITE_FIREBASE_AUTH_DOMAIN` | Firebase Web config |
+| `VITE_FIREBASE_PROJECT_ID` | Firebase Web config |
+| `VITE_FIREBASE_APP_ID` | Firebase Web config |
+| `VITE_FIREBASE_STORAGE_BUCKET` | Firebase Web config |
+| `VITE_FIREBASE_MESSAGING_SENDER_ID` | Firebase Web config |
+| `VITE_FIREBASE_MEASUREMENT_ID` | Firebase Web config |
+| `VITE_DATASET_VIEW` | View principal do BigQuery (default: `indicadores_curados_snapshot`) |
+| `VITE_PRESTADORES_TABLE` (opcional) | Tabela de prestadores para complementar dados |
+| `VITE_PRESTADORES_ORIGEM` (opcional) | Origem usada na tabela de prestadores (default `PRÓPRIA`) |
+| `VITE_PRESTADORES_CACHE_TTL_MS` (opcional) | Cache local de prestadores (ms) |
+| `VITE_PRESTADORES_ERROR_TTL_MS` (opcional) | Cache local de erro (ms) |
+| `VITE_API_PROXY` (opcional) | API local durante `npm run dev` |
+
+## 4. Dados no BigQuery
+
+### 4.1 View principal
+
+A view/tabela principal deve expor:
+- dimensões (`reg_ans`, `ano`, `trimestre`, `modalidade`, `porte`, `uniodonto`, `ativa`)
+- métricas (`vr_*`, `qt_beneficiarios`, `qt_prestadores`, etc.)
+- colunas derivadas usadas pelas fórmulas do frontend
+
+### 4.2 Snapshot recomendado
+
+Para reduzir custo e latência, recomenda-se materializar `indicadores_curados_snapshot`.
+
+```
+npm run data:materialize-bq-snapshot
 ```
 
-## 4. Banco de Dados
+### 4.3 Prestadores
 
-### 4.1 Tabelas
-
-#### `demonstracoes_contabeis_staging`
-Utilizada pelos scripts de importação para staging de arquivos brutos.
-
-| Coluna                 | Tipo  | Descrição                                                     |
-|------------------------|-------|----------------------------------------------------------------|
-| data, reg_ans, cd_conta_contabil, ... | TEXT | Valores brutos importados do DIOPS.                     |
-
-#### `demonstracoes_contabeis`
-Tabela principal com as contas contábeis normalizadas.
-
-| Coluna                             | Tipo                | Notas                                                         |
-|------------------------------------|---------------------|--------------------------------------------------------------|
-| `id`                               | BIGSERIAL PK        |                                                               |
-| `data`, `ano`, `trimestre`         | DATE/SMALLINT       | Controle temporal e partição lógica.                         |
-| `reg_ans`, `operadora`, `modalidade`, `porte`, `uniodonto`, `ativa` | Diversos | Metadados das operadoras. |
-| `cd_conta_contabil`, `vl_saldo_final` | TEXT/NUMERIC(20,4) | Valores consolidados por conta contábil.                     |
-
-Índices existentes: `idx_dc_reg_periodo`, `idx_dc_conta`.
-
-#### `plano_de_contas`
-Vocabulário das contas contábeis (nome, natureza, somatórios, etc.).
-
-#### `operadoras_metadata`
-Metadados complementares (porte/nome por `reg_ans`).
-
-### 4.2 Views
-
-#### `indicadores_curados` (`db/views.sql`)
-Principais transformações:
-
-1. Agrupa `demonstracoes_contabeis` por `reg_ans`/`ano`/`trimestre`.
-2. Soma valores das contas relevantes (3, 4, 311, 3117, 21, 25, etc.).
-3. Calcula derivados como `resultado_financeiro` ou `resultado_liquido`.
-4. Adiciona deltas (`delta_vr_contraprestacoes`, etc.) via janela `LAG`.
-5. Determina `trimestre_rank` para permitir selecionar o período mais recente por padrão.
-
-Colunas chave: `qt_beneficiarios`, `vr_*` (contas), `prev_*`, `delta_*`, `periodo_id`, `periodo`.
-
-#### `indicadores_metricas` (Materialized View)
-Gerada pelo script `npm run data:materialize`. Inclui todas as colunas de `indicadores_curados` **e** as métricas derivadas presentes em `src/lib/metricFormulas.js`. Índices:
-
-- `indicadores_metricas_pk` em `(reg_ans, ano, trimestre)`
-- `indicadores_metricas_periodo_idx` em `(ano DESC, trimestre DESC)`
-- `indicadores_metricas_nome_operadora_idx` em `nome_operadora`
-
-Recriação:
-
-```bash
-npm run data:materialize
-# ou: node scripts/materialize_metrics.js
-```
-
-### 4.3 Exportação
-
-`db/export_indicadores.sql` define o CSV disponibilizado em `/api/indicadores.csv`, contendo campos amigáveis aos usuários (por exemplo `311_vr_contraprestacoes`, `41_vr_eventos_liquidos`, `ativa`, `uniodonto`, etc.).
-
-No modo BigQuery, prefira materializar a tabela `indicadores_curados_snapshot` (script `npm run data:materialize-bq-snapshot`) e apontar `VITE_DATASET_VIEW` e `BQ_DATASET_VIEW` para reduzir custo de leitura.
+A API pode complementar `qt_prestadores` usando a tabela de prestadores. Ajuste:
+- `VITE_PRESTADORES_TABLE` no frontend
+- `BQ_PRESTADORES_TABLE` no backend
+- `BQ_ALLOWED_VIEWS` se necessário
 
 ## 5. Backend (server/index.js)
 
-- **Stack:** Express + `pg`.
-- **Configuração:** Porta `process.env.SERVER_PORT ?? process.env.PORT ?? 4000`; `DATABASE_URL` para conexão.
-- **Endpoints:**
-  - `GET /api/health`: executa `SELECT 1` no Postgres.
-  - `GET /api/indicadores.csv`: roda o SQL de `db/export_indicadores.sql` e retorna CSV.
-  - `POST /api/query`: recebe `{ sql }`, valida se é uma consulta `SELECT/WITH` única, e devolve `{ rows }`.
-- **Upload middleware:** durante `vite dev/preview`, `vite.config.js` adiciona `/api/upload-dataset` para receber arquivos e salvá-los em `public/data/`.
+- **Stack:** Express + BigQuery + Firebase Admin
+- **Porta:** `SERVER_PORT` ou `PORT` (default 4000)
+- **Segurança:** `/api/query` aceita apenas SELECT/WITH e valida se as tabelas estão no allowlist (`BQ_ALLOWED_VIEWS`).
+
+Endpoints:
+- `GET /api/health`
+- `GET /api/indicadores.csv`
+- `POST /api/query`
 
 ## 6. Frontend
 
-### 6.1 Fluxo de Estado (`useDashboardController`)
+O frontend monta filtros e queries via `src/lib/dataService.js` e gerencia estado em `src/hooks/useDashboardController.js`. Não há upload de dataset nem fallback para CSV/Parquet local.
 
-1. **Bootstrap:** `loadDataset()` garante acesso ao Postgres e busca opções de operadoras e períodos.
-2. **Filtros:** mantidos em `defaultFilters`. Há suporte a comparações via `comparisonFilters`.
-3. **Consultas principais:** `fetchKpiSummary`, `fetchRanking`, `fetchTableData` são rodadas em paralelo sempre que filtros mudam. Para operadores selecionados:
-   - As métricas usam `operatorName` e `regAns`.
-   - A tabela detalhada traz todas as colunas (ou um subconjunto) ignorando filtros de período.
-4. **Séries temporais:** `fetchTrendSeries` gera dados para os gráficos (média geral x pares ou operador x pares).
-5. **Snapshots:** `fetchOperatorSnapshot` busca o período disponível, peers (média dos pares) e métricas calculadas via `cardMetricColumnsSql`.
-6. **Upload dataset:** `replaceDataset` continua disponível mas, no modo Postgres, apenas lê arquivos para persistência manual (erro se tentar `csvText` ou `parquetBuffer` enquanto a API está conectada).
+## 7. Scripts
 
-### 6.2 Serviços (`src/lib/dataService.js`)
+| Script | Função |
+|---|---|
+| `scripts/create_bq_view.js` | Cria/atualiza view curada no BigQuery |
+| `scripts/materialize_bq_snapshot.js` | Gera snapshot para reduzir custo |
+| `scripts/export_indicadores_bq.js` | Export CSV via BigQuery |
 
-Principais funções:
+## 8. Deploy (Cloud Run)
 
-| Função                    | Descrição                                                                                     |
-|---------------------------|-------------------------------------------------------------------------------------------------|
-| `loadDataset`             | Verifica se a view definida em `VITE_DATASET_VIEW` está acessível (`SELECT 1 FROM view`).      |
-| `fetchAvailablePeriods`   | Lista anos e trimestres disponíveis.                                                           |
-| `fetchOperatorOptions`    | Nomes de operadoras (opcionalmente filtrados por período).                                    |
-| `fetchKpiSummary`         | Executa `summarizePeriod` (agrupamento + métricas).                                            |
-| `fetchTrendSeries`        | Gera séries com `AVG(metricSql[metric])` por período.                                         |
-| `fetchOperatorSnapshot`   | Retorna dados da operadora e peers (incluindo métricas calculadas).                           |
-| `fetchRanking`            | Produz ranking com `ROW_NUMBER()` e, opcionalmente, uma linha referente ao operador selecionado. |
-| `fetchTableData`          | Pagina a tabela detalhada. Quando `includeAllColumns` é `true`, descobre colunas via `information_schema`. |
-
-### 6.3 Componentes
-
-- **`components/dashboard`**: `KpiCards`, `RankingChart`, `IndicatorTrendChart`, `MonetarySummary`, `DataTable`. Utilizam `metricFormulas` para labels e formatação.
-- **`components/filters`**: `FiltersPanel` renderiza seletores (modalidade, porte, período, Uniodonto, ativa, etc.).
-- **UI**: ShadCN adaptado em `components/ui/`, `lucide-react` para ícones, `react-chartjs-2` para gráficos.
-
-### 6.4 Modo Uniodonto
-
-O dashboard possui um modo exclusivo para indicadores operacionais da Uniodonto, ativado pelo toggle no header.
-As formulas e pesos estao em `src/lib/uniodontoMetrics.js` e a documentacao detalhada esta em
-`documentacao/indicadores-uniodonto.md`.
-
-## 7. Fórmulas de Métricas (`src/lib/metricFormulas.js`)
-
-Todas as fórmulas são strings SQL convertidas em `metricSql`. Helpers:
-
-- `safePercent(numerador, denominador)` – evita divisão por zero.
-- `safeRatio(numerador, denominador)` – idem sem multiplicar por 100.
-- `safeDays(numerador, denominador, dias)` – calcula prazos médios.
-
-| ID                             | Código | Formato  | Tendência | Fórmula (descrição)                                                                                   |
-|--------------------------------|--------|----------|-----------|--------------------------------------------------------------------------------------------------------|
-| `margem_lucro_pct`             | MLL    | percent  | higher    | `resultado_liquido / vr_contraprestacoes`                                                             |
-| `retorno_pl_pct`               | ROE    | percent  | higher    | `resultado_liquido / vr_patrimonio_liquido`                                                           |
-| `sinistralidade_pct`           | DM     | percent  | lower     | `(41 + ABS(3117)) / (31 - 321 + ABS(3117))` – fórmula ANS RN 518                                      |
-| `sinistralidade_acumulada_pct` | DM_ACUM| percent  | lower     | Versão acumulada anual da fórmula de sinistralidade.                                                  |
-| `sinistralidade_trimestral_pct`| DM_TRIM| percent  | lower     | Fluxo trimestral usando deltas `delta_vr_*`.                                                          |
-| `despesas_adm_pct`             | DA     | percent  | lower     | `46 / (31 - 32 + |3117|)`                                                                             |
-| `despesas_comerciais_pct`      | DC     | percent  | lower     | `43 / (31 - 32 + |3117|)`                                                                             |
-| `despesas_operacionais_pct`    | DOP    | percent  | lower     | `(41 + |3117| + 43 + 46 + 44) / ((31 - 32 + |3117|) + 33)`                                           |
-| `indice_resultado_financeiro_pct` | IRF | percent | higher    | `(35 - 45) / 311121`                                                                                   |
-| `liquidez_corrente`            | LC     | decimal  | higher    | `12 / 21`                                                                                              |
-| `capital_terceiros_sobre_pl`   | CT/PL  | decimal  | lower     | `(21 + 23) / 25`                                                                                       |
-| `pmcr`                         | PPMCR  | days     | lower     | `(1231 * 90) / 311121`                                                                                |
-| `pmpe`                         | PPME   | days     | lower     | `(2111 * 90) / 41`                                                                                    |
-| ...                            |        |          |           | (Outras métricas podem ser adicionadas em `metricFormulas`.)                                          |
-
-`metricSql` é um objeto `id -> SQL`. Outras partes do app (ranking, tabela, cartas) usam esse mapa para gerar consultas.
-
-## 8. Scripts Auxiliares
-
-| Script                              | Descrição                                                                                         |
-|-------------------------------------|-----------------------------------------------------------------------------------------------------|
-| `scripts/import_parquet_dataset.py` | Importa Parquet bruto para `demonstracoes_contabeis` (usa `pyarrow` + `psycopg`).                   |
-| `scripts/import_demonstracoes.py`   | Alternativa para CSVs menores.                                                                     |
-| `scripts/build_curated_dataset.py`  | Usa DuckDB para gerar CSV curado (legado).                                                         |
-| `scripts/export_indicadores.sh`     | Roda `psql -f db/export_indicadores.sql` e exporta CSV.                                            |
-| `scripts/materialize_metrics.js`    | Cria/atualiza `indicadores_metricas` e respectivos índices.                                        |
-
-## 9. Fluxo de Desenvolvimento
-
-1. **Instalação:** `npm install`.
-2. **Banco:** usar scripts de importação para popular `demonstracoes_contabeis`, garantir `db/views.sql` aplicado e rodar `npm run data:materialize`.
-3. **Ambiente:** definir `.env.local` com `DATABASE_URL` e `VITE_DATASET_VIEW`.
-4. **Desenvolvimento:** `npm run dev` (sobe Vite e API Express simultaneamente). O front consulta `/api/query` automaticamente.
-5. **Build:** `npm run build` gera `dist/`. `npm run preview` testa build com proxy `/api`.
-
-## 10. Operação e Monitoramento
-
-- **Logs Backend:** `server/index.js` loga `console.error` com prefixo `[server]`. Erros SQL (ex.: falta de colunas ou permissões) aparecem no terminal.
-- **Saúde:** `curl http://localhost:4000/api/health`.
-- **CSV Export:** `curl http://localhost:4000/api/indicadores.csv` (útil para auditoria).
-- **Grant de permissões:** assegure `GRANT SELECT ON indicadores_curados/indicadores_metricas TO ansdashboard;`.
-
-## 11. Extendendo o Sistema
-
-1. **Novas métricas:**
-   - Adicione a definição em `src/lib/metricFormulas.js` (id, label, `safePercent/safeRatio`, `format`).
-   - Atualize scripts/views caso deseje pré-calcular no banco (ou confie no `metricSql`).
-   - Re-rodar `npm run data:materialize` para atualizar a view.
-2. **Novos filtros:**
-   - Ajuste `defaultFilters` em `useDashboardController`.
-   - Atualize `buildWhereClause` e `getWhereExpression` em `dataService`.
-   - Expanda `FiltersPanel` para incluir UI.
-3. **Outras fontes de dados:** Os scripts e a API assumem Postgres. Caso use DuckDB/CSV standalone, seria necessário reintroduzir o antigo `duckdbClient` (removido) e adaptar `dataService`.
-
-## 12. Referências de Dados
-
-- **Contas contábeis** seguem o plano oficial ANS (prefixos 3/4 receitas/despesas, 31/32 ativos/provisões).
-- **Resultado líquido** é calculado tanto diretamente (`vr_receitas - vr_despesas`) quanto em variantes (`resultado_liquido_final_ans`, `resultado_liquido_informado`).
-- **Deltas e `trimestre_rank`** permitem análises temporais (sinistralidade trimestral, séries de tendência).
-- **Export SQL** mantém nomes amigáveis (`31_vr_ativos_garantidores`) para cruzamentos externos.
-
-## 13. Execução contínua com systemd
-
-O repositório inclui `scripts/ans-dashboard.service`, que sobe o Vite (frontend) e a API Express usando `scripts/start-dashboard.sh`. Fluxo sugerido para hosts Ubuntu:
-
-1. Ajuste o arquivo de serviço conforme o ambiente:
-   - `User=`: conta que possui acesso ao repositório e ao Postgres.
-   - `WorkingDirectory=`: raiz do projeto.
-   - `Environment=`: exporte `DATABASE_URL`, `SERVER_PORT`, `VITE_API_PROXY` etc. se necessário.
-2. Copie para o systemd e habilite:
-
-   ```bash
-   sudo cp scripts/ans-dashboard.service /etc/systemd/system/ans-dashboard.service
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now ans-dashboard
-   ```
-
-3. Acompanhe logs com `journalctl -u ans-dashboard -f`.
-
-O script `start-dashboard.sh` inicia `npm run dev:server` e `npm run dev:client` em paralelo. Caso prefira servir o build estático, substitua o trecho por `npm run dev:server` + `npm run preview` (assegurando que `npm run build` seja executado antes de iniciar o serviço).
-
-### Diretrizes adicionais
-
-- Garanta que o usuário possua permissão de escrita em `public/data` (uploads) e no diretório raiz (node_modules).
-- Se o host usar um proxy interno para Postgres, configure `Environment="HTTP_PROXY=..."`/`HTTPS_PROXY`.
-- Para atualizar o código em produção, pare o serviço (`systemctl stop ans-dashboard`), faça o deploy (git pull + npm install + npm run build) e reinicie.
-
-## 14. Resolução de problemas comuns
-
-| Sintoma | Causa provável | Ação recomendada |
-|--------|----------------|------------------|
-| `Invalid hook call. Hooks can only be called...` no console do navegador. | Duas cópias do React ao rodar via serviço ou link local. `vite.config.js` agora inclui `resolve.dedupe = ['react','react-dom']`, mas o erro pode permanecer após caches antigos. | Pare o serviço, delete `node_modules/` e `package-lock.json`, rode `npm install` e reinicie `npm run dev`/`systemctl start ans-dashboard`. |
-| Porta 5173 ocupada ao iniciar. | Serviço Vite já rodando ou outra aplicação. | Pare o processo (`lsof -i :5173`), ajuste `VITE_PORT` ou edite `scripts/start-dashboard.sh` para usar `--host 0.0.0.0 --port XXXX`. |
-| API inacessível (`ECONNREFUSED` da UI). | `server/index.js` não iniciou ou `DATABASE_URL` inválida. | Verifique `journalctl -u ans-dashboard`, valide `DATABASE_URL` e teste `curl http://localhost:4000/api/health`. |
-| Upload para `/api/upload-dataset` retorna 500. | Falha de permissão ao gravar em `public/data` ou payload Base64 inválido. | Cheque permissões e logs `[upload-dataset]`. Ajuste `encoding` enviado pelo frontend. |
-
-## 15. Assistente regulatório (ChatGPT)
-
-- O botão **Falar com ChatGPT** (sidebar/versão mobile) monta um snapshot com filtros aplicados, período selecionado, KPIs (incluindo score regulatório), ranking (top/bottom 10), série histórica filtrada, valores monetários e contagem de operadoras/beneficiários exibidos. Esse snapshot é enviado para `POST /api/agent`.
-- O endpoint chama `runDashboardAgent` (`server/agentRunner.js`), que instancia o agente “Marinho” com `@openai/agents`, `renderFormula` e `fileSearchTool`. O agente consulta apenas os documentos presentes no vector store `OPENAI_VECTOR_STORE_ID` (RN 518/528/574/630, PPCNG, Indicadores etc.) antes de responder.
-- Variáveis necessárias: `OPENAI_API_KEY` (obrigatória), `OPENAI_VECTOR_STORE_ID`, `OPENAI_WORKFLOW_ID`, `OPENAI_WORKFLOW_VERSION`, `OPENAI_AGENT_MODEL`. Defaults estão descritos na tabela da Seção 3.
-- Como o agente recebe o contexto pronto, nenhuma consulta SQL adicional é executada; o custo da API limita-se às mensagens enviadas. Ideal para tirar dúvidas sobre o estado atual do painel sem sobrecarregar o banco.
-- Teste via curl:
+O `cloudbuild.yaml` realiza build e deploy automático:
 
 ```bash
-curl -X POST http://localhost:4000/api/agent \
-  -H "Content-Type: application/json" \
-  -d '{"question":"Explique a sinistralidade filtrada", "context":{"filters":{"modalidades":["Odontológico"]}}}'
+gcloud builds submit --config cloudbuild.yaml
 ```
 
-O JSON de resposta contém `answer`. Quando houver fórmulas, o agente encerra a resposta com `{ "tool": "renderFormula", "latex": "..." }`, interpretado pelo frontend via KaTeX.
-
-## 16. Operação com PM2 e materialização
-
-- Recriar métricas após ajustes em `metricFormulas.js` ou nas views:
-
-```bash
-node scripts/materialize_metrics.js
-# [materialize] Conectando em postgresql://ansdashboard:ansdashboard@localhost:5432/ans_dashboard
-# [materialize] Criando materialized view indicadores_metricas a partir de indicadores_curados...
-# [materialize] Criando índices...
-# [materialize] Finalizado com sucesso.
-```
-
-- Processos PM2 em produção:
-  - `dash-api` (API Express `server/index.js`)
-  - `dash-client` (frontend Vite dev/preview)
-- Arquivo de configuração: `pm2.config.cjs` (aponta para `npm run dev:server` e `npm run dev:client`). Suba tudo com `pm2 start pm2.config.cjs` ou só um app via `--only`.
-
-- Comandos úteis:
-
-```bash
-pm2 list
-# id  name         status   uptime ...
-# 1   dash-api     online
-# 0   dash-client  online
-
-pm2 restart dash-api
-pm2 restart dash-client
-```
-
----
-
-Esta documentação serve como referência completa para desenvolvedores e analistas que mantêm ou expandem o painel ANS/RN 518. Ao atualizar componentes, mantenha este arquivo sincronizado com a implementação real.***
+As variáveis `VITE_FIREBASE_*` entram como build args, e `BQ_*` e `FIREBASE_PROJECT_ID` são configuradas no runtime.

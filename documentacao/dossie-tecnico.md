@@ -1,10 +1,12 @@
 # Dossiê Técnico – ANS Dashboard
 
+> Documento de visão/roadmap. Muitos itens descritos abaixo são propostas futuras e **não** estão implementados no código atual.
+
 ## I. Diagnóstico Arquitetural
-- **Stack atual:** React/Vite no frontend; Express + `pg` no backend; PostgreSQL com views `indicadores_curados` e materialized view `indicadores_metricas`.
-- **Fluxo de dados:** importação via `scripts/import_parquet_dataset.py` ou `import_demonstracoes.py` para `demonstracoes_contabeis`; agregações e deltas em `db/views.sql`; materialização de métricas de `src/lib/metricFormulas.js` via `scripts/materialize_metrics.js`; frontend consulta `/api/query` com SQL montado no cliente (`src/lib/dataService.js`).
-- **Infra:** serviço systemd/PM2 roda `npm run dev` (Vite + API juntos); upload middleware em `vite.config.js` grava arquivos em `public/data`.
-- **Fragilidades principais:** `/api/query` executa SQL arbitrário sem auth; Vite dev server exposto em produção; datasets sensíveis em `public/data`; credenciais/IDs hardcoded (`DATABASE_URL`, Vector Store/Workflow); endpoint `/api/agent` ativo sem UI; upload não suportado no modo Postgres mas UI ainda exibe botão.
+- **Stack atual:** React/Vite no frontend; Express + BigQuery no backend; autenticação Firebase.
+- **Fluxo de dados:** views/tabelas curadas no BigQuery; consultas via `/api/query` com allowlist; frontend monta filtros/queries em `src/lib/dataService.js`.
+- **Infra:** Cloud Run com build estático; API e frontend no mesmo serviço.
+- **Fragilidades principais:** dependência de configuração correta do allowlist (`BQ_ALLOWED_VIEWS`), custo de consultas amplas no BigQuery, necessidade de governança de credenciais.
 
 ## II. Diagnóstico Analítico vs ANS
 - **Implementado:** DM, DA, DC, DOP, IRF, LC, CT/PL, PMCR, PMPE, ROE, margem líquida em `metricFormulas.js`.
@@ -14,26 +16,25 @@
 - **Governança RN 518/630:** sem PPA-DIOPS, trilha de auditoria, alerts de risco (LC<1, cobertura<1, CT/PL>1), nem ficha regulatória exportável.
 
 ## III. Evolução Estatística e ML (pontos de acoplamento)
-- **Concentração (Pareto/Gini/power-law):** nova view `indicadores_concentracao` agregando sinistros/contraprestações por operadora e por grupo; endpoint `/api/stats/concentracao`; gráficos Pareto 80/20 e log-log no frontend.
-- **Regressões:** job Python (`scripts/modeling/fit_regressions.py`) lê `indicadores_metricas`, ajusta regressão linear/robusta/log-log para DM e provisões; salva coeficientes em `model_regressao`; endpoint `/api/models/regressao` retorna previsão/explicabilidade.
-- **Previsões:** forecasts trimestrais (ARIMA/ETS/Prophet ou regressão bayesiana) para DM e provisões gravados em `forecast_metricas` com IC; consumo em cards/trends com bandas.
-- **Stress testing:** função SQL parametrizada para recomputar COMB/LC/CT-PL/DM sob choques (ex.: +10% 41, -5% 311, +5% 32); UI com sliders.
-- **Anomalias:** Isolation Forest/z-score robusto sobre DM, PMPE, PMCR, provisões; tabela `indicadores_alertas` com flags por período; badges no dashboard.
-- **Odonto aplicado:** Gini/Pareto por contrato/cooperado; outliers de custo médio de evento; segmentação por porte/modalidade/uniodonto; uso de grupos de contas odontológicas quando disponíveis.
+- **Concentração (Pareto/Gini/power-law):** view agregada por operadora; endpoint `/api/stats/concentracao`; gráficos Pareto/log-log.
+- **Regressões:** job offline para DM/provisões com regressão robusta; endpoint de consulta de coeficientes.
+- **Previsões:** forecasts trimestrais para DM/provisões com bandas de confiança.
+- **Stress testing:** função parametrizada para recomputar indicadores sob choques.
+- **Anomalias:** Isolation Forest/z-score robusto com flags por período.
 
 ## IV. Evolução do Dashboard
-- **Novas visualizações:** Pareto e log-log (escala log-log) para sinistros/contraprestações; heatmaps regulatórios (LC, cobertura, COMB, DM) com thresholds; histograma de cauda pesada com expoente α; stress tester interativo.
-- **Cartão regulatório:** reintroduzir `RegulatoryScorecard` em `src/App.jsx`; percentis estratificados por porte/modalidade; mostrar n de pares e faixas (Q1/Med/Q3).
-- **UX/legibilidade:** exibir fonte ativa (Postgres vs arquivo); esconder upload em modo DB; ficha DIOPS exportável com fórmulas e referências normativas.
+- **Novas visualizações:** Pareto, heatmaps regulatórios, histograma de cauda pesada.
+- **Cartão regulatório:** percentis estratificados por porte/modalidade; mostrar n de pares e faixas.
+- **UX/legibilidade:** indicar fonte ativa (view/snapshot), ficha regulatória exportável com fórmulas e referências.
 
 ## V. Arquitetura Futura
-- **Camadas:** (1) Ingestão/qualidade aplicando RN 472/574 (Airflow/DBT ou scripts Python); (2) Modelo de dados normalizado (`fato_contabil`, `dim_operadora`, `dim_conta`, `fat_provisoes`); (3) Serviço de indicadores ANS (Node/Go) com endpoints específicos, SQL parametrizado; (4) Motor de provisões/solvência (PESL/PEONA/PPCNG/PPNG-RVNE/RBC/stress); (5) Serviço de ML/estatística offline escrevendo previsões/alertas; (6) Frontend estático servindo APIs dedicadas; (7) Segurança: auth/token ou OIDC, rate limiting, logging estruturado, secrets via env, assets servidos por Nginx/CloudFront.
+- **Camadas:** (1) Ingestão/qualidade (DBT/Airflow); (2) Modelo de dados; (3) Serviço de indicadores com endpoints específicos; (4) Motor de provisões/solvência; (5) Serviço de ML/estatística offline; (6) Frontend estático; (7) Segurança e observabilidade.
 
 ## VI. Plano de Implementação
-1. **Contenção imediata:** revogar segredos; bloquear/desativar `/api/query` público; servir build estático (`npm run build && vite preview` ou Nginx) e rodar API isolada; remover datasets de `public/`.
-2. **Conformidade ANS básica:** aplicar RN 472 no ETL (natureza/agrupamentos do plano de contas); corrigir fórmulas DM/DA/DC/PMCR/PMPE/ROE/LC; adicionar COMB e cobertura de provisões granular; re-materializar `indicadores_metricas`.
-3. **Provisões RN 574:** modelar PESL, PEONA, PPCNG, PPNG-RVNE, PRL e RBC; calcular cobertura por subconta e exposição a risco; publicar em API/dash.
-4. **Governança RN 518/630:** PPA-DIOPS (auditoria de consistência), alerts (LC<1, cobertura<1, CT/PL>1), ficha regulatória por período; reativar cartão regulatório com percentis por porte/modalidade.
-5. **Estatística avançada:** criar view de concentração + endpoint e gráficos Pareto/log-log; heatmaps; stress tester de contas 41/311/32.
-6. **ML/previsão:** jobs de forecast/alertas; endpoints de previsões; UI com bandas de confiança e badges de anomalia.
-7. **Operação/CI:** testes mínimos (SQL smoke + e2e de API), pipeline de build/deploy, métricas e tracing; limpar código morto e alinhar documentação/UX de upload.
+1. **Segurança imediata:** manter allowlist restrito; segredos via Secret Manager; logging estruturado.
+2. **Conformidade ANS básica:** corrigir fórmulas DM/DA/DC/PMCR/PMPE/ROE/LC; adicionar COMB e cobertura de provisões granular.
+3. **Provisões RN 574:** modelar PESL, PEONA, PPCNG, PPNG-RVNE, PRL e RBC.
+4. **Governança RN 518/630:** PPA-DIOPS, alerts e ficha regulatória por período.
+5. **Estatística avançada:** concentração, heatmaps, stress tester.
+6. **ML/previsão:** jobs e endpoints de previsões/alertas.
+7. **Operação/CI:** testes mínimos, pipeline de deploy e monitoração.

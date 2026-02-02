@@ -1,14 +1,18 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
   signOut as firebaseSignOut,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
 } from 'firebase/auth'
 import { auth, googleProvider } from '../lib/firebaseClient'
+import AuthContext from './auth-context'
 
-const AuthContext = createContext(null)
+const EMAIL_LINK_STORAGE_KEY = 'auth:emailLink'
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
@@ -49,6 +53,38 @@ export function AuthProvider({ children }) {
     return result.user
   }, [])
 
+  const sendEmailLink = useCallback(async (email, continueUrl) => {
+    setAuthError(null)
+    const trimmed = String(email ?? '').trim()
+    if (!trimmed) {
+      throw new Error('Informe um email valido.')
+    }
+    const actionCodeSettings = {
+      url: continueUrl ?? window.location.origin,
+      handleCodeInApp: true,
+    }
+    await sendSignInLinkToEmail(auth, trimmed, actionCodeSettings)
+    window.localStorage.setItem(EMAIL_LINK_STORAGE_KEY, trimmed)
+    return trimmed
+  }, [])
+
+  const completeEmailLinkSignIn = useCallback(async (email, link) => {
+    setAuthError(null)
+    const trimmed = String(email ?? '').trim()
+    if (!trimmed) {
+      throw new Error('Informe o email usado para receber o link.')
+    }
+    const finalLink = link ?? window.location.href
+    const result = await signInWithEmailLink(auth, trimmed, finalLink)
+    window.localStorage.removeItem(EMAIL_LINK_STORAGE_KEY)
+    return result.user
+  }, [])
+
+  const isEmailLink = useCallback((link) => {
+    const target = link ?? window.location.href
+    return isSignInWithEmailLink(auth, target)
+  }, [])
+
   const signOut = useCallback(async () => {
     await firebaseSignOut(auth)
     setUser(null)
@@ -62,18 +98,24 @@ export function AuthProvider({ children }) {
       signInWithEmail,
       signUpWithEmail,
       signInWithGoogle,
+      sendEmailLink,
+      completeEmailLinkSignIn,
+      isEmailLink,
       signOut,
     }),
-    [user, isLoading, authError, signInWithEmail, signUpWithEmail, signInWithGoogle, signOut],
+    [
+      user,
+      isLoading,
+      authError,
+      signInWithEmail,
+      signUpWithEmail,
+      signInWithGoogle,
+      sendEmailLink,
+      completeEmailLinkSignIn,
+      isEmailLink,
+      signOut,
+    ],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext)
-  if (!context) {
-    throw new Error('useAuth deve ser usado dentro de AuthProvider')
-  }
-  return context
 }

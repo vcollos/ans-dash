@@ -4,11 +4,21 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 
-function LoginScreen({ onLogin, onSignUp, onGoogleLogin, isLoading = false, errorMessage = null }) {
+function LoginScreen({
+  onLogin,
+  onSignUp,
+  onGoogleLogin,
+  onSendEmailLink,
+  onCompleteEmailLink,
+  isEmailLinkFlow = false,
+  isLoading = false,
+  errorMessage = null,
+}) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
   const canSubmit = email.trim().length > 0 && password.length > 0 && !isLoading
+  const canSendLink = email.trim().length > 0 && !isLoading
 
   function handleSubmit(event) {
     event.preventDefault()
@@ -74,6 +84,28 @@ function LoginScreen({ onLogin, onSignUp, onGoogleLogin, isLoading = false, erro
             {onGoogleLogin ? (
               <Button type="button" variant="outline" className="w-full" onClick={onGoogleLogin} disabled={isLoading}>
                 Entrar com Google
+              </Button>
+            ) : null}
+            {onSendEmailLink ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                onClick={() => onSendEmailLink({ email: email.trim() })}
+                disabled={!canSendLink}
+              >
+                Enviar link de acesso
+              </Button>
+            ) : null}
+            {isEmailLinkFlow && onCompleteEmailLink ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={() => onCompleteEmailLink({ email: email.trim() })}
+                disabled={!canSendLink}
+              >
+                Concluir login por link
               </Button>
             ) : null}
           </form>

@@ -6,7 +6,7 @@
 - A primeira coluna `#` é a posição no ranking para o indicador escolhido.
 
 ## Como o cálculo é feito
-- **Fonte dos dados:** view/materialized view `indicadores_metricas` no PostgreSQL. Cada linha já traz os valores dos indicadores para `reg_ans`, `ano`, `trimestre`.
+- **Fonte dos dados:** view/tabela `indicadores_curados_snapshot` no BigQuery (ou a definida em `VITE_DATASET_VIEW`). Cada linha já traz os valores dos indicadores para `reg_ans`, `ano`, `trimestre`.
 - **Filtros aplicados:** Modalidade, Porte, Uniodonto, Ativa, Ano, Trimestre, busca por nome. O ranking só considera as operadoras que passam pelos filtros ativos.
 - **Ordenação:** definida pela tendência do indicador:
   - Indicadores em que “mais é melhor” (ex.: MLL, ROE, LC, IRF) ordenam em ordem decrescente.

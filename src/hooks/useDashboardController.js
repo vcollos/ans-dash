@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  loadDataset,
+  assertDatasetReady,
   fetchOperatorOptions,
   fetchOperatorLatestSnapshot,
   fetchOperatorSnapshot,
@@ -13,7 +13,6 @@ import {
   fetchUniodontoRanking,
   fetchTrendSeriesBatch,
   fetchTableData,
-  persistDatasetFile,
   fetchAvailablePeriods,
   fetchRegulatoryReport,
   fetchRegulatoryScoreForFilters,
@@ -77,17 +76,6 @@ const defaultOptions = {
 
 const createDefaultComparisonFilters = () => sanitizeComparisonFilters(DEFAULT_COMPARISON_FILTERS)
 
-const DEFAULT_CURATED_URL = import.meta.env.VITE_DATASET_CURATED_URL ?? '/data/indicadores.csv'
-const DEFAULT_PARQUET_URL = import.meta.env.VITE_DATASET_PARQUET_URL ?? '/data/20251213_contas_ans.parquet'
-const LEGACY_CSV_URL = import.meta.env.VITE_DATASET_URL ?? '/api/indicadores.csv'
-const DEFAULT_SOURCES = {
-  curatedUrl: DEFAULT_CURATED_URL,
-  parquetUrl: DEFAULT_PARQUET_URL,
-  fallbackCsvUrl: LEGACY_CSV_URL,
-}
-const PARQUET_EXTENSION = /\.parquet$/i
-
-const isParquetFile = (name) => PARQUET_EXTENSION.test(name ?? '')
 
 function computePorteFromBeneficiarios(value) {
   const beneficiarios = typeof value === 'number' ? value : Number(value)
@@ -97,21 +85,6 @@ function computePorteFromBeneficiarios(value) {
   return 'Grande Porte'
 }
 
-function readFileAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        const [, base64] = reader.result.split(',')
-        resolve(base64 ?? '')
-      } else {
-        reject(new Error('Não foi possível converter o arquivo para base64.'))
-      }
-    }
-    reader.onerror = () => reject(reader.error ?? new Error('Falha ao ler arquivo.'))
-    reader.readAsDataURL(file)
-  })
-}
 
 export function useDashboardController() {
   const [status, setStatus] = useState('loading')
@@ -139,9 +112,6 @@ export function useDashboardController() {
   const [isTrendLoading, setIsTrendLoading] = useState(false)
   const [tableData, setTableData] = useState({ rows: [], columns: [] })
   const [isQuerying, setIsQuerying] = useState(false)
-  const [isUploading, setIsUploading] = useState(false)
-  const [uploadFeedback, setUploadFeedback] = useState(null)
-  const [sourceInfo, setSourceInfo] = useState(null)
   const [regulatoryScore, setRegulatoryScore] = useState({ data: null, isLoading: false, error: null })
 
   const [comparisonFilters, setComparisonFilters] = useState(() => createDefaultComparisonFilters())
@@ -286,29 +256,8 @@ export function useDashboardController() {
     async function bootstrap() {
       try {
         setStatus('loading')
-        async function loadInitialDataset() {
-          const attempts = [
-            DEFAULT_SOURCES.curatedUrl ? { type: 'curated', payload: { csvUrl: DEFAULT_SOURCES.curatedUrl } } : null,
-            DEFAULT_SOURCES.parquetUrl ? { type: 'parquet', payload: { parquetUrl: DEFAULT_SOURCES.parquetUrl } } : null,
-            DEFAULT_SOURCES.fallbackCsvUrl ? { type: 'csv', payload: { csvUrl: DEFAULT_SOURCES.fallbackCsvUrl } } : null,
-          ].filter(Boolean)
-          if (!attempts.length) {
-            throw new Error('Nenhuma fonte padrão configurada.')
-          }
-          let lastError = null
-          for (const attempt of attempts) {
-            try {
-              return await loadDataset(attempt.payload)
-            } catch (err) {
-              lastError = err
-              console.warn(`[Dashboard] Falha ao carregar fonte ${attempt.type}, tentando próxima...`, err)
-            }
-          }
-          throw lastError ?? new Error('Não foi possível carregar nenhuma fonte de dados.')
-        }
-        const loadedSource = await loadInitialDataset()
+        await assertDatasetReady()
         if (cancelled) return
-        setSourceInfo(loadedSource)
         const [operatorNames, availablePeriods] = await Promise.all([fetchOperatorOptions(), fetchAvailablePeriods()])
         if (cancelled) return
         setOptions({
@@ -616,51 +565,6 @@ export function useDashboardController() {
     }
   }
 
-  async function replaceDataset(file) {
-    if (!file) return
-    try {
-      setIsUploading(true)
-      setError(null)
-      setStatus('loading')
-      let loadedSource = null
-      if (isParquetFile(file.name)) {
-        const buffer = await file.arrayBuffer()
-        const base64 = await readFileAsBase64(file)
-        await persistDatasetFile(file.name, base64, 'base64')
-        loadedSource = await loadDataset({ parquetBuffer: buffer, filename: file.name })
-      } else {
-        const text = await file.text()
-        await persistDatasetFile(file.name, text, 'utf8')
-        loadedSource = await loadDataset({ csvText: text, filename: file.name })
-      }
-      setSourceInfo(loadedSource)
-      const [operatorNames, availablePeriods] = await Promise.all([fetchOperatorOptions(), fetchAvailablePeriods()])
-      setOptions({
-        operadoras: operatorNames,
-      })
-      setPeriodOptions(availablePeriods ?? [])
-      setFilters({ ...defaultFilters })
-      syncComparisonFilters()
-      setOperatorContext(null)
-      setOperatorPeriod(null)
-      setStatus('ready')
-      setUploadFeedback({ type: 'success', message: `Arquivo ${file.name} importado.` })
-    } catch (err) {
-      console.error('[Dashboard] Falha ao substituir dataset', err)
-      setError(err)
-      setStatus('error')
-      setUploadFeedback({ type: 'error', message: 'Falha ao importar arquivo.' })
-    } finally {
-      setIsUploading(false)
-    }
-  }
-
-  useEffect(() => {
-    if (!uploadFeedback) return undefined
-    const timer = setTimeout(() => setUploadFeedback(null), 4000)
-    return () => clearTimeout(timer)
-  }, [uploadFeedback])
-
   function syncComparisonFilters(nextFilters = DEFAULT_COMPARISON_FILTERS) {
     const sanitized = sanitizeComparisonFilters(nextFilters)
     setComparisonFilters(sanitized)
@@ -734,13 +638,9 @@ export function useDashboardController() {
     isTrendLoading,
     tableData,
     isQuerying,
-    isUploading,
-    uploadFeedback,
     updateFilters,
     resetFilters,
     applyOperatorSelection,
-    replaceDataset,
-    sourceInfo,
     operatorInsight: {
       ...operatorSnapshot,
       operatorName: operatorContext?.name ?? null,

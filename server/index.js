@@ -13,7 +13,9 @@ const PORT = process.env.SERVER_PORT ?? process.env.PORT ?? 4000
 const BQ_PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
 const BQ_DATASET = process.env.BQ_DATASET ?? 'datalake_ans'
 const BQ_LOCATION = process.env.BQ_LOCATION ?? 'US'
-const BQ_EXPORT_VIEW = process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? 'indicadores_curados'
+const BQ_EXPORT_VIEW = process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? 'indicadores_curados_snapshot'
+const BQ_PRESTADORES_TABLE =
+  process.env.BQ_PRESTADORES_TABLE ?? `${BQ_PROJECT_ID}.${BQ_DATASET}.prestadores_ativos_uniodonto_origem`
 const EXPORT_SQL_PATH = path.resolve(__dirname, '../db/export_indicadores.sql')
 const DIST_DIR = path.resolve(__dirname, '../dist')
 
@@ -21,16 +23,42 @@ const bigquery = new BigQuery({
   projectId: BQ_PROJECT_ID,
 })
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY
-const OPENAI_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
-const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '')
-const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS ?? 20_000)
-
 const QUERY_CACHE_TTL_MS = Number(process.env.QUERY_CACHE_TTL_MS ?? 60_000)
 const QUERY_CACHE_MAX_ENTRIES = Number(process.env.QUERY_CACHE_MAX_ENTRIES ?? 250)
 
 const queryCache = new Map()
 const inFlightQueries = new Map()
+
+const RAW_ALLOWED_VIEWS = process.env.BQ_ALLOWED_VIEWS
+const ALLOWED_TABLES = (() => {
+  const allowed = new Set()
+  const add = (value) => {
+    const trimmed = String(value ?? '').trim()
+    if (!trimmed) return
+    const normalized = trimmed.replace(/^`|`$/g, '').replace(/^"|"$/g, '')
+    if (!normalized) return
+    allowed.add(normalized)
+    const parts = normalized.split('.')
+    if (parts.length === 3) {
+      allowed.add(parts.slice(1).join('.'))
+      allowed.add(parts[2])
+    } else if (parts.length === 2) {
+      allowed.add(parts[1])
+    }
+  }
+  if (RAW_ALLOWED_VIEWS) {
+    RAW_ALLOWED_VIEWS.split(',').forEach(add)
+  } else {
+    add(BQ_EXPORT_VIEW)
+    const normalizedExport = String(BQ_EXPORT_VIEW ?? '').replace(/^`|`$/g, '').replace(/^"|"$/g, '')
+    if (normalizedExport && normalizedExport.split('.').length === 1) {
+      add(`${BQ_DATASET}.${BQ_EXPORT_VIEW}`)
+      add(`${BQ_PROJECT_ID}.${BQ_DATASET}.${BQ_EXPORT_VIEW}`)
+    }
+    add(BQ_PRESTADORES_TABLE)
+  }
+  return allowed
+})()
 
 const SERVER_BOOT_ID = process.env.K_REVISION ?? crypto.randomBytes(8).toString('hex')
 
@@ -82,6 +110,35 @@ function getCacheKey(sql) {
     .createHash('sha256')
     .update(`${BQ_PROJECT_ID}.${BQ_DATASET}:${BQ_LOCATION}:${sql}`)
     .digest('hex')
+}
+
+function extractCteNames(sql) {
+  const trimmed = String(sql ?? '').trim()
+  if (!/^with\b/i.test(trimmed)) return new Set()
+  const body = trimmed.replace(/^with\b/i, '')
+  const names = new Set()
+  const regex = /(?:^|,)\s*([a-zA-Z_][\w]*)\s+as\s*\(/gi
+  let match = null
+  while ((match = regex.exec(body))) {
+    names.add(match[1])
+  }
+  return names
+}
+
+function extractTableRefs(sql, cteNames) {
+  const refs = new Set()
+  const regex = /\b(from|join)\s+([`"][^`"]+[`"]|[a-zA-Z0-9_.:-]+)/gi
+  let match = null
+  while ((match = regex.exec(sql))) {
+    const raw = match[2]
+    if (!raw) continue
+    const cleaned = raw.replace(/[,)]$/g, '').replace(/^`|`$/g, '').replace(/^"|"$/g, '')
+    if (!cleaned || cleaned.startsWith('(')) continue
+    if (cleaned.toLowerCase() === 'unnest') continue
+    if (cteNames?.has(cleaned)) continue
+    refs.add(cleaned)
+  }
+  return refs
 }
 
 function getCachedEntry(key) {
@@ -165,105 +222,6 @@ function normalizeBigQueryRows(rows) {
   return rows.map((row) => normalizeBigQueryScalar(row))
 }
 
-function buildCorrelationPrompt(summary) {
-  const payload = JSON.stringify(summary, null, 2)
-  return [
-    'Dados resumidos do painel de correlacao entre despesa comercial e desempenho.',
-    'Use somente as informacoes fornecidas para comentar; nao invente dados.',
-    'Se |r| < 0.20, diga que nao ha correlacao linear clara.',
-    'Se n < 5, indique que a amostra e pequena e evite conclusoes fortes.',
-    'Retorne 3 a 5 bullets e uma conclusao final em uma unica frase.',
-    '',
-    payload,
-  ].join('\n')
-}
-
-function buildDashboardPrompt(summary) {
-  const payload = JSON.stringify(summary, null, 2)
-  return [
-    'Voce vai gerar comentarios sobre o dashboard com base no resumo abaixo.',
-    'Responda em Markdown com blocos titulados exatamente assim:',
-    '## Visao geral',
-    '## Indicadores',
-    '## Ranking',
-    '## Tendencias',
-    '## Monetarios',
-    '## Correlacao (se aplicavel)',
-    'Para Indicadores e Tendencias, gere uma linha por item informado (use "- <label>: ...").',
-    'Se nao houver dados suficientes em algum bloco, escreva "Sem dados suficientes".',
-    'Se |r| < 0.20, diga que nao ha correlacao linear clara.',
-    'Se n < 5, indique que a amostra e pequena.',
-    '',
-    payload,
-  ].join('\n')
-}
-
-function getTokenLimitPayload(model, maxTokens) {
-  const normalized = String(model ?? '').trim().toLowerCase()
-  const useCompletionTokens = normalized.startsWith('gpt-5') || normalized.startsWith('o')
-  return useCompletionTokens ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }
-}
-
-function getTemperaturePayload(model) {
-  const normalized = String(model ?? '').trim().toLowerCase()
-  const disableTemperature = normalized.startsWith('gpt-5') || normalized.startsWith('o')
-  return disableTemperature ? {} : { temperature: 0.3 }
-}
-
-async function requestOpenAiAnalysis({ system, prompt, maxTokens = 260 }) {
-  if (!OPENAI_API_KEY) {
-    const error = new Error('OpenAI API key nao configurada.')
-    error.code = 'OPENAI_DISABLED'
-    throw error
-  }
-  if (typeof fetch !== 'function') {
-    throw new Error('Fetch API indisponivel no servidor.')
-  }
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS)
-  try {
-    const response = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: OPENAI_MODEL,
-        messages: [
-          {
-            role: 'system',
-            content:
-              system ??
-              'Voce e um analista de performance de operadoras de saude. Escreva comentarios curtos e objetivos em PT-BR.',
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-        ...getTokenLimitPayload(OPENAI_MODEL, maxTokens),
-        ...getTemperaturePayload(OPENAI_MODEL),
-      }),
-      signal: controller.signal,
-    })
-
-    if (!response.ok) {
-      const bodyText = await response.text().catch(() => '')
-      throw new Error(`OpenAI erro ${response.status}: ${bodyText || 'Falha na requisicao.'}`)
-    }
-
-    const payload = await response.json()
-    const content = payload?.choices?.[0]?.message?.content
-    if (!content) {
-      throw new Error('Resposta vazia da OpenAI.')
-    }
-    return content.trim()
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
 async function runBigQuery(queryText) {
   const [rows, metadata] = await bigquery.query({
     query: queryText,
@@ -309,72 +267,6 @@ app.get('/api/indicadores.csv', async (req, res) => {
   }
 })
 
-app.post('/api/analysis/correlation', async (req, res) => {
-  const summary = req.body?.summary
-  if (!summary || typeof summary !== 'object') {
-    return res.status(400).json({ error: 'Resumo invalido para analise.' })
-  }
-  const summaryText = JSON.stringify(summary)
-  if (summaryText.length > 12_000) {
-    return res.status(413).json({ error: 'Resumo muito extenso para analise.' })
-  }
-  if (!OPENAI_API_KEY) {
-    return res.status(503).json({ error: 'OpenAI API key nao configurada.' })
-  }
-  try {
-    const text = await requestOpenAiAnalysis({
-      prompt: buildCorrelationPrompt(summary),
-      maxTokens: 260,
-    })
-    return res.json({ text })
-  } catch (err) {
-    if (err?.code === 'OPENAI_DISABLED') {
-      return res.status(503).json({ error: 'OpenAI API key nao configurada.' })
-    }
-    if (err?.name === 'AbortError') {
-      return res.status(504).json({ error: 'Timeout ao gerar comentarios.' })
-    }
-    console.error('[server] falha ao gerar comentarios', err?.message ?? err)
-    return res.status(500).json({ error: 'Falha ao gerar comentarios.' })
-  }
-})
-
-app.post('/api/analysis/dashboard', async (req, res) => {
-  const summary = req.body?.summary
-  if (!summary || typeof summary !== 'object') {
-    return res.status(400).json({ error: 'Resumo invalido para analise.' })
-  }
-  const summaryText = JSON.stringify(summary)
-  if (summaryText.length > 30_000) {
-    return res.status(413).json({ error: 'Resumo muito extenso para analise.' })
-  }
-  if (!OPENAI_API_KEY) {
-    return res.status(503).json({ error: 'OpenAI API key nao configurada.' })
-  }
-  const indicatorCount = Array.isArray(summary?.indicatorGroups)
-    ? summary.indicatorGroups.reduce((sum, group) => sum + (group?.metrics?.length ?? 0), 0)
-    : 0
-  const trendCount = Array.isArray(summary?.trendStats) ? summary.trendStats.length : 0
-  const estimatedTokens = 600 + indicatorCount * 12 + trendCount * 8
-  const maxTokens = Math.min(2000, Math.max(700, estimatedTokens))
-  try {
-    const text = await requestOpenAiAnalysis({
-      prompt: buildDashboardPrompt(summary),
-      maxTokens,
-    })
-    return res.json({ text })
-  } catch (err) {
-    if (err?.code === 'OPENAI_DISABLED') {
-      return res.status(503).json({ error: 'OpenAI API key nao configurada.' })
-    }
-    if (err?.name === 'AbortError') {
-      return res.status(504).json({ error: 'Timeout ao gerar comentarios.' })
-    }
-    console.error('[server] falha ao gerar comentarios do dashboard', err?.message ?? err)
-    return res.status(500).json({ error: 'Falha ao gerar comentarios do dashboard.' })
-  }
-})
-
 app.post('/api/query', async (req, res) => {
   const sql = req.body?.sql
   if (!sql || typeof sql !== 'string') {
@@ -387,6 +279,15 @@ app.post('/api/query', async (req, res) => {
   }
   if (sanitized.includes(';')) {
     return res.status(400).json({ error: 'Somente uma instrução por requisição é permitida.' })
+  }
+  const cteNames = extractCteNames(sanitized)
+  const tableRefs = extractTableRefs(sanitized, cteNames)
+  const disallowed = [...tableRefs].filter((ref) => !ALLOWED_TABLES.has(ref))
+  if (disallowed.length) {
+    return res.status(403).json({
+      error: 'Consulta bloqueada. Acesso permitido apenas às views/tabelas autorizadas.',
+      tables: disallowed,
+    })
   }
 
   const includeFields = Boolean(req.body?.includeFields)

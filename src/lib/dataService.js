@@ -15,6 +15,7 @@ import {
 } from './regulatoryScore'
 import {
   DEFAULT_UNIODONTO_RANKING_METRIC,
+  UNIODONTO_INDICATORS,
   UNIODONTO_RANKING_METRICS,
   getUniodontoMetricSql,
   computeUniodontoMetrics,
@@ -56,7 +57,15 @@ export const DETAIL_TABLE_FIELDS = [
   'vr_eventos_liquidos',
 ]
 
-const DEFAULT_VIEW = import.meta.env?.VITE_DATASET_VIEW ?? 'indicadores_curados'
+const formatTableRef = (value) => {
+  const trimmed = String(value ?? '').trim()
+  if (!trimmed) return trimmed
+  if (trimmed.includes('`')) return trimmed
+  return `\`${trimmed}\``
+}
+
+const DEFAULT_VIEW_RAW = import.meta.env?.VITE_DATASET_VIEW ?? 'indicadores_curados_snapshot'
+const DEFAULT_VIEW = formatTableRef(DEFAULT_VIEW_RAW)
 let cachedViewColumns = null
 
 const PRESTADORES_TABLE_RAW =
@@ -591,20 +600,13 @@ async function getViewColumns() {
   return cachedViewColumns
 }
 
-export async function loadDataset(options = {}) {
-  if (options.csvText || options.parquetBuffer) {
-    throw new Error('Upload manual de dataset não é suportado quando conectado ao BigQuery.')
-  }
+export async function assertDatasetReady() {
   await runQuery(`SELECT 1 FROM ${DEFAULT_VIEW} WHERE 1=0`, { skipPrestadores: true })
   return {
     source: 'bigquery',
-    filename: 'bigquery',
+    view: DEFAULT_VIEW,
     updatedAt: new Date().toISOString(),
   }
-}
-
-export async function persistDatasetFile() {
-  throw new Error('Persistência de dataset no servidor não é suportada no modo BigQuery.')
 }
 
 export async function fetchAvailablePeriods() {
@@ -770,47 +772,22 @@ export async function fetchUniodontoPeerSummary(filters = {}, options = {}) {
     wherePieces.push(`nome_operadora <> '${sanitizedName}'`)
   }
   const finalWhere = wherePieces.length ? `WHERE ${wherePieces.join(' AND ')}` : ''
+  const entries = buildTrendMetricEntries(UNIODONTO_INDICATORS.map((metric) => metric.id))
+  const metricSelectList = buildTrendMetricSelectList(entries, { aggregate: true })
   const query = `
     SELECT
-      COUNT(DISTINCT nome_operadora) AS peer_count,
-      MAX(ano) AS ano,
-      MAX(trimestre) AS trimestre,
-      MAX(periodo_id) AS periodo_id,
-      MAX(periodo) AS periodo,
-      SUM(COALESCE(qt_beneficiarios, 0)) AS qt_beneficiarios,
-      SUM(COALESCE(prev_qt_beneficiarios, 0)) AS prev_qt_beneficiarios,
-      SUM(COALESCE(qt_prestadores, 0)) AS qt_prestadores,
-      SUM(COALESCE(vr_contraprestacoes, 0)) AS vr_contraprestacoes,
-      SUM(COALESCE(vr_outras_receitas_operacionais, 0)) AS vr_outras_receitas_operacionais,
-      SUM(COALESCE(vr_conta_332129111, 0)) AS vr_conta_332129111,
-      SUM(COALESCE(vr_conta_332189111, 0)) AS vr_conta_332189111,
-      SUM(COALESCE(vr_conta_32, 0)) AS vr_conta_32,
-      SUM(COALESCE(vr_conta_61, 0)) AS vr_conta_61,
-      SUM(COALESCE(vr_desp_administrativas, 0)) AS vr_desp_administrativas,
-      SUM(COALESCE(vr_eventos_liquidos, 0)) AS vr_eventos_liquidos,
-      SUM(COALESCE(vr_outras_desp_oper, 0)) AS vr_outras_desp_oper,
-      SUM(COALESCE(vr_conta_442129119, 0)) AS vr_conta_442129119,
-      SUM(COALESCE(vr_desp_comerciais, 0)) AS vr_desp_comerciais,
-      SUM(COALESCE(vr_desp_comerciais_promocoes, 0)) AS vr_desp_comerciais_promocoes,
-      SUM(COALESCE(vr_conta_464, 0)) AS vr_conta_464,
-      SUM(COALESCE(vr_ativos_garantidores, 0)) AS vr_ativos_garantidores,
-      SUM(COALESCE(vr_ativo_circulante, 0)) AS vr_ativo_circulante,
-      SUM(COALESCE(vr_creditos_operacoes_saude, 0)) AS vr_creditos_operacoes_saude,
-      SUM(COALESCE(vr_contraprestacoes_pre, 0)) AS vr_contraprestacoes_pre,
-      SUM(COALESCE(vr_eventos_a_liquidar, 0)) AS vr_eventos_a_liquidar,
-      SUM(COALESCE(vr_conta_216, 0)) AS vr_conta_216,
-      SUM(COALESCE(vr_conta_217, 0)) AS vr_conta_217,
-      SUM(COALESCE(vr_conta_236, 0)) AS vr_conta_236,
-      SUM(COALESCE(vr_conta_237, 0)) AS vr_conta_237,
-      SUM(COALESCE(vr_conta_1213, 0)) AS vr_conta_1213,
-      SUM(COALESCE(vr_conta_1214, 0)) AS vr_conta_1214,
-      SUM(COALESCE(vr_conta_122, 0)) AS vr_conta_122,
-      SUM(COALESCE(vr_passivo_circulante, 0)) AS vr_passivo_circulante
+      COUNT(DISTINCT nome_operadora) AS peer_count
+      ${metricSelectList ? `,\n      ${metricSelectList}` : ''}
     FROM ${DEFAULT_VIEW}
     ${finalWhere}
   `
   const rows = await runQuery(query)
-  return rows[0] ?? null
+  if (!rows[0]) return null
+  const { peer_count: peerCount, ...metrics } = rows[0]
+  return {
+    peer_count: peerCount ?? null,
+    metrics,
+  }
 }
 
 function extractMonetaryValues(row) {
@@ -1188,7 +1165,7 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
     const sanitizedName = sanitizeSql(comparisonContext.operatorName)
     const isVirtual = isVirtualUniodontoOperator(comparisonContext.operatorName)
     const baseFilter = buildWhereClause({ ...filters, search: '' })
-    const operatorFilter = baseFilter ? baseFilter.replace(/^WHERE\\s+/i, '') : ''
+    const operatorFilter = baseFilter ? baseFilter.replace(/^WHERE\s+/i, '') : ''
     const comparisonFilter = getWhereExpression(comparisonContext.filters ?? {})
     const { uniodonto: _ignoredUniodonto, ...comparisonWithoutUniodonto } = comparisonContext.filters ?? {}
     const operatorComparisonFilter = getWhereExpression(comparisonWithoutUniodonto)
@@ -1202,13 +1179,13 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
       if (comparisonFilter) {
         peerWherePieces.push(`(${comparisonFilter})`)
       }
-      const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\\n        AND ')}` : ''
+      const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\n        AND ')}` : ''
       const aliasSelectList = [
         ...entries.map(({ id }) => `operador.${quoteIdentifier(id)} AS ${quoteIdentifier(`operador_${id}`)}`),
         ...entries.map(({ id }) => `pares.${quoteIdentifier(id)} AS ${quoteIdentifier(`pares_${id}`)}`),
       ]
         .filter(Boolean)
-        .join(',\\n      ')
+        .join(',\n      ')
       const query = `
         WITH operador_base AS (
           SELECT *
@@ -1221,7 +1198,7 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
             ano,
             trimestre,
             periodo
-            ${sumSelectList.length ? `,\\n        ${sumSelectList.join(',\\n        ')}` : ''}
+            ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
           FROM operador_base
           GROUP BY ano, trimestre, periodo
         ), operador AS (
@@ -1229,7 +1206,7 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
             ano,
             trimestre,
             periodo
-            ${operatorMetricSelect ? `,\\n      ${operatorMetricSelect}` : ''}
+            ${operatorMetricSelect ? `,\n      ${operatorMetricSelect}` : ''}
           FROM operador_agg
         ), pares_base AS (
           SELECT *
@@ -1241,7 +1218,7 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
             ano,
             trimestre,
             periodo
-            ${sumSelectList.length ? `,\\n        ${sumSelectList.join(',\\n        ')}` : ''}
+            ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
           FROM pares_base
           GROUP BY ano, trimestre, periodo
         ), pares AS (
@@ -1249,14 +1226,14 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
             ano,
             trimestre,
             periodo
-            ${peerMetricSelect ? `,\\n      ${peerMetricSelect}` : ''}
+            ${peerMetricSelect ? `,\n      ${peerMetricSelect}` : ''}
           FROM pares_agg
         )
         SELECT
           COALESCE(operador.ano, pares.ano) AS ano,
           COALESCE(operador.trimestre, pares.trimestre) AS trimestre,
           COALESCE(operador.periodo, pares.periodo) AS periodo
-          ${aliasSelectList ? `,\\n      ${aliasSelectList}` : ''}
+          ${aliasSelectList ? `,\n      ${aliasSelectList}` : ''}
         FROM operador
         FULL OUTER JOIN pares ON operador.ano = pares.ano AND operador.trimestre = pares.trimestre
         ORDER BY ano, trimestre
@@ -1280,20 +1257,20 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
     if (comparisonFilter) {
       peerWherePieces.push(`(${comparisonFilter})`)
     }
-    const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\\n        AND ')}` : ''
+    const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\n        AND ')}` : ''
     const aliasSelectList = [
       ...entries.map(({ id }) => `operador.${quoteIdentifier(id)} AS ${quoteIdentifier(`operador_${id}`)}`),
       ...entries.map(({ id }) => `pares.${quoteIdentifier(id)} AS ${quoteIdentifier(`pares_${id}`)}`),
     ]
       .filter(Boolean)
-      .join(',\\n      ')
+      .join(',\n      ')
     const query = `
       WITH operador AS (
         SELECT
           ano,
           trimestre,
           periodo
-          ${operatorMetricSelect ? `,\\n      ${operatorMetricSelect}` : ''}
+          ${operatorMetricSelect ? `,\n      ${operatorMetricSelect}` : ''}
         FROM ${DEFAULT_VIEW}
         WHERE nome_operadora = '${sanitizedName}'
         ${operatorFilter ? ` AND ${operatorFilter}` : ''}
@@ -1302,7 +1279,7 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
           ano,
           trimestre,
           periodo
-          ${peerMetricSelect ? `,\\n      ${peerMetricSelect}` : ''}
+          ${peerMetricSelect ? `,\n      ${peerMetricSelect}` : ''}
         FROM ${DEFAULT_VIEW}
         ${peerWhere}
         ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
@@ -1312,7 +1289,7 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
         COALESCE(operador.ano, pares.ano) AS ano,
         COALESCE(operador.trimestre, pares.trimestre) AS trimestre,
         COALESCE(operador.periodo, pares.periodo) AS periodo
-        ${aliasSelectList ? `,\\n      ${aliasSelectList}` : ''}
+        ${aliasSelectList ? `,\n      ${aliasSelectList}` : ''}
       FROM operador
       FULL OUTER JOIN pares ON operador.ano = pares.ano AND operador.trimestre = pares.trimestre
       ORDER BY ano, trimestre
@@ -1337,7 +1314,7 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
       ano,
       trimestre,
       periodo
-      ${metricSelectList ? `,\\n      ${metricSelectList}` : ''}
+      ${metricSelectList ? `,\n      ${metricSelectList}` : ''}
     FROM ${DEFAULT_VIEW}
     ${whereClause ?? ''}
     GROUP BY ano, trimestre, periodo

@@ -1,5 +1,69 @@
 # Historico da conversa (agents)
 
+## 2026-02-01T02:09:36Z
+- User: pediu para corrigir o erro do lint (fast refresh).
+- Agent: moveu `useAuth` para `src/contexts/useAuth.js`, criou `src/contexts/auth-context.js`, ajustou imports e confirmou `npm run lint` sem erros.
+
+## 2026-02-01T13:17:28Z
+- User: pediu para fazer o app rodar; parecia nao conectar ao BigQuery.
+- Agent: identificou falta de ADC, usou o service account local em `.cert/`, subiu `npm run dev` com `GOOGLE_APPLICATION_CREDENTIALS`/`BQ_*`/`FIREBASE_PROJECT_ID`, e confirmou `/api/health` com status ok.
+
+## 2026-02-01T15:08:23Z
+- User: pediu a opcao 1 (script para subir local sem export manual).
+- Agent: criou `scripts/dev-local.sh`, adicionou `npm run dev:local` e documentou no README.
+
+## 2026-02-01T15:12:18Z
+- User: reportou que os graficos "Evolucao dos indicadores Uniodonto" nao aparecem.
+- Agent: corrigiu strings SQL com `\\n` em `fetchTrendSeriesBatch` para usar novas linhas reais, evitando erro de sintaxe no BigQuery.
+
+## 2026-02-01T19:08:17Z
+- User: reportou "Media filtrada" vazia ao selecionar operadora Uniodonto.
+- Agent: ajustou `fetchUniodontoPeerSummary` para calcular a media por indicador via `AVG(<sql>)`, e atualizou o card para usar `peerSummary.metrics`.
+
+## 2026-02-01T19:34:01Z
+- User: pediu um script para fechar portas e recarregar (5173/5174).
+- Agent: criou `scripts/reload-dev.sh` e adicionou `npm run dev:reload`.
+
+## 2026-02-01T19:38:40Z
+- User: reportou erros 500 no `/api/query` ao carregar series historicas.
+- Agent: corrigiu `operatorFilter` em `fetchTrendSeriesBatch` (regex `/^WHERE\s+/i`) para evitar "AND WHERE".
+
+## 2026-02-02T11:10:05Z
+- User: pediu reiniciar servicos e investigar "Media Filtrada" nao preenchida.
+- Agent: ajustou `scripts/dev-local.sh` para exportar defaults e reiniciou via `npm run dev:reload`.
+
+## 2026-02-02T11:16:06Z
+- User: pediu remover os graficos "Relacao entre despesa comercial e desempenho".
+- Agent: removeu o painel de correlacao Uniodonto do dashboard.
+
+## 2026-02-02T11:20:12Z
+- User: pediu remover comentarios por IA.
+- Agent: removeu dialogo/acao de comentarios, endpoints OpenAI, referencias em docs e envs do Cloud Build.
+
+## 2026-02-02T11:24:25Z
+- User: pediu habilitar login via link no email do Firebase.
+- Agent: adicionou envio e conclusao de login por link no AuthProvider e LoginScreen, com auto-complete quando abrir o link.
+
+## 2026-02-02T11:33:04Z
+- User: pediu autorizar criacao de novas contas.
+- Agent: habilitou controle via `VITE_ALLOW_SIGNUP` (default true) e manteve o fluxo de cadastro ativo no login.
+
+## 2026-01-31T23:36:07Z
+- User: autorizou continuar a sanitizacao apos o scan contextual.
+- Agent: removeu `src/lib/arrow.js`, ajustou `eslint.config.js`, passou a normalizar `VITE_DATASET_VIEW` em `dataService` com crases, e atualizou README/documentacoes para variaveis e notas de historico.
+
+## 2026-01-31T21:05:52Z
+- User: autorizou corrigir riscos, limpar legado e atualizar documentacao para BigQuery/Cloud Run.
+- Agent: endureceu `/api/query` com allowlist, removeu upload/dataset local, apagou artefatos Postgres/PM2/systemd/datasets, ajustou scripts/deps e atualizou README/documentacao.
+
+## 2026-01-31T20:42:34Z
+- User: pediu para rodar o sistema localmente.
+- Agent: confirmou que o dev server ja estava ativo nas portas 5173 (client) e 4000 (API).
+
+## 2026-01-31T20:41:06Z
+- User: escolheu manter o certificado local nao versionado.
+- Agent: manteve o arquivo em `.cert/` sem alterar o Git.
+
 ## 2026-01-19T22:22:53Z
 - User: reportou 429 por excesso de requests no Cloud Run.
 - Agent: agregou séries históricas em uma única consulta via `fetchTrendSeriesBatch` para reduzir chamadas `/api/query`.

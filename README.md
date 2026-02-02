@@ -1,184 +1,108 @@
 # Painel DIOPS RN 518
 
-Dashboard interativo em Vite + React para análise dos indicadores DIOPS/ANS consumindo os dados diretamente de um PostgreSQL (via API Node/Express) e componentes de UI inspirados no ShadCN.
+Dashboard interativo em Vite + React para análise de indicadores DIOPS/ANS consumindo dados do **BigQuery** via API Express. Autenticação é feita com **Firebase Auth** (ID token validado no backend). O deploy de produção roda no **Google Cloud Run**.
 
 ## Pré-requisitos
 
 - Node.js 18+
 - npm 9+
+- Acesso ao projeto GCP/BigQuery
+- Projeto Firebase configurado
 
-## Instalação
+## Desenvolvimento local
 
 ```bash
 npm install
-```
-
-## Desenvolvimento
-
-```bash
 npm run dev
 ```
 
-Esse comando agora sobe **tanto** o Vite quanto a API Express em paralelo (via `concurrently`). O frontend fica acessível normalmente em `http://localhost:5173` (ou a próxima porta disponível) e já aponta pelo proxy `/api` para `http://localhost:4000`.
+Esse comando sobe **Vite + API** em paralelo (via `concurrently`).
+- Frontend: `http://localhost:5173`
+- API: `http://localhost:4000`
 
-Se preferir controlar cada processo manualmente:
-
+Se quiser evitar exportar variáveis manualmente, use:
 ```bash
-npm run dev:client   # apenas o Vite
-npm run dev:server   # apenas a API Express
+npm run dev:local
+```
+O script lê `.env.local.server` (opcional) e aplica defaults compatíveis com o projeto.
+
+### Variáveis essenciais (local)
+
+**BigQuery (API):**
+- `GOOGLE_APPLICATION_CREDENTIALS` (caminho do JSON da service account) **ou** `gcloud auth application-default login`.
+- `BQ_PROJECT_ID` (ex.: `bigdata-467917`)
+- `BQ_DATASET` (ex.: `datalake_ans`)
+- `BQ_DATASET_VIEW` ou `BQ_EXPORT_VIEW` (ex.: `indicadores_curados_snapshot`)
+- `BQ_LOCATION` (ex.: `US`)
+- `BQ_ALLOWED_VIEWS` (opcional): lista de views/tabelas permitidas no `/api/query` (ex.: `indicadores_curados_snapshot,bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem`).
+- `BQ_PRESTADORES_TABLE` (opcional): tabela de prestadores usada na complementação de dados.
+- `QUERY_CACHE_TTL_MS` (opcional): cache em ms para `/api/query` (default 60000).
+- `QUERY_CACHE_MAX_ENTRIES` (opcional): tamanho máximo do cache (default 250).
+- `SERVER_PORT` ou `PORT` (opcional): porta da API (default 4000 em dev).
+- `SERVE_STATIC` (opcional): `true` para servir o `dist/` pelo Express.
+
+**Firebase (frontend):** crie `.env.local` com as chaves do Firebase Web:
+```
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+VITE_FIREBASE_APP_ID=...
+VITE_FIREBASE_STORAGE_BUCKET=...
+VITE_FIREBASE_MESSAGING_SENDER_ID=...
+VITE_FIREBASE_MEASUREMENT_ID=...
 ```
 
-Independentemente da forma escolhida, garanta que a variável `DATABASE_URL` aponte para o PostgreSQL com as tabelas/visões definidas em `db/schema.sql` e `db/views.sql`.
+Outras variáveis Vite (opcionais):
+- `VITE_DATASET_VIEW` (tabela/view principal do BigQuery; aceita `tabela`, `dataset.tabela` ou `projeto.dataset.tabela`).
+- `VITE_PRESTADORES_TABLE` (tabela de prestadores para complementar dados).
+- `VITE_PRESTADORES_ORIGEM` (default `PRÓPRIA`).
+- `VITE_PRESTADORES_CACHE_TTL_MS` e `VITE_PRESTADORES_ERROR_TTL_MS` (cache local para prestadores).
+- `VITE_API_PROXY` (proxy local da API; default `http://localhost:4000`).
+- `VITE_ALLOW_SIGNUP` (default `true`; use `false` para esconder "Criar conta").
+
+**Firebase (API):**
+- `FIREBASE_PROJECT_ID` (normalmente o mesmo do GCP)
 
 ## Autenticação
 
-Para proteger o dashboard com usuário e senha:
+O login é feito via **Firebase Auth** (email/senha, link por email ou Google). O frontend envia o ID token e o backend valida com o Admin SDK. Sem token válido, as rotas `/api/*` retornam 401.
 
-- `DASHBOARD_USER` e `DASHBOARD_PASSWORD`: credenciais simples (usuário e senha).
-- ou `DASHBOARD_USERS`: múltiplos usuários no formato `usuario:senha,usuario2:senha2`.
-- `DASHBOARD_SESSION_TTL_MS`: tempo de expiração da sessão em ms (padrão 12h).
+Para **login por link**, o app envia um link para o email informado. Ao abrir o link, o navegador conclui o login automaticamente (ou solicita o email usado, se não estiver salvo).
 
-Quando configurado, o frontend exibe a tela de login e a API exige o token nos endpoints `/api`.
+## Dados (BigQuery)
 
-## Modo Uniodonto
-
-O dashboard possui um modo exclusivo com indicadores operacionais da Uniodonto.
-As formulas e pesos ficam em `src/lib/uniodontoMetrics.js` e a documentacao completa esta em
-`documentacao/indicadores-uniodonto.md`.
-
-### Otimizando consultas com materialized view
-
-Quando o volume de filtros e comparações aumenta, é recomendável materializar os indicadores com os cálculos mais usados. O script abaixo gera/atualiza a `MATERIALIZED VIEW` `indicadores_metricas` (que inclui as colunas derivadas de `src/lib/metricFormulas.js`):
-
-```bash
-npm run data:materialize   # usa DATABASE_URL para se conectar
-```
-
-Depois de gerar a view, exponha-a ao frontend criando um `.env.local` (ou exportando no shell) com `VITE_DATASET_VIEW=indicadores_metricas`. Assim o dashboard consulta diretamente os campos já calculados e evita repetir fórmulas pesadas a cada requisição.
-
-## Build de produção
-
-```bash
-npm run build
-```
-
-Os artefatos ficam em `dist/`. Para testar localmente:
-
-```bash
-npm run preview
-```
+- O frontend consulta a view definida em `VITE_DATASET_VIEW` (default: `indicadores_curados_snapshot`).
+- O backend usa `BQ_DATASET_VIEW`/`BQ_EXPORT_VIEW` para `/api/indicadores.csv`.
+- Para reduzir custo, materialize uma tabela snapshot (`indicadores_curados_snapshot`) e use-a como view principal.
 
 ## Deploy no Google Cloud Run
 
-O projeto agora inclui um `Dockerfile` que gera o build do frontend e serve os arquivos estáticos via Express.
-Assim, o Cloud Run sobe **uma única aplicação** com frontend + API na mesma porta.
-
-Passos sugeridos:
-
-1) Build e push da imagem:
+O deploy é automatizado via `cloudbuild.yaml`:
 
 ```bash
-gcloud builds submit --tag gcr.io/SEU_PROJETO/ans-dashboard
+gcloud builds submit --config cloudbuild.yaml
 ```
 
-2) Deploy no Cloud Run:
+A imagem é construída com as variáveis `VITE_FIREBASE_*` e `VITE_DATASET_VIEW`, e o serviço do Cloud Run recebe `BQ_*` e `FIREBASE_PROJECT_ID`.
 
-```bash
-gcloud run deploy ans-dashboard \
-  --image gcr.io/SEU_PROJETO/ans-dashboard \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --set-env-vars "NODE_ENV=production,SERVE_STATIC=true,BQ_PROJECT_ID=...,BQ_DATASET=...,BQ_LOCATION=US,OPENAI_API_KEY=..."
-```
+## Endpoints principais
 
-Notas importantes:
+- `POST /api/query` – proxy de consultas (somente SELECT/WITH e tabelas permitidas).
+- `GET /api/indicadores.csv` – export CSV via BigQuery.
+- `GET /api/health` – healthcheck BigQuery.
+- `GET /api/auth/status` – status do auth.
 
-- O Cloud Run define `PORT=8080` automaticamente (já suportado pelo servidor).
-- O backend usa BigQuery via `@google-cloud/bigquery`; preferencialmente configure uma **service account** com permissão e associe ao serviço do Cloud Run.
-- O servidor não lê `.env.local` automaticamente no Cloud Run; use `--set-env-vars` ou `--set-secrets`.
-- Para servir o frontend dentro do mesmo container, mantenha `NODE_ENV=production` ou defina `SERVE_STATIC=true`.
-- Para reduzir custo no BigQuery, materialize uma tabela snapshot (ex.: `indicadores_curados_snapshot`) e configure:
-  - Build: `VITE_DATASET_VIEW=indicadores_curados_snapshot`
-  - Runtime: `BQ_DATASET_VIEW=indicadores_curados_snapshot`
-  - Snapshot: `npm run data:materialize-bq-snapshot` (usa credenciais ADC).
-
-## Estrutura relevante
-
-- `server/index.js` – API Express que executa as consultas SQL (via `/api/query`) diretamente no PostgreSQL.
-- `src/lib/dataService.js` – monta as instruções SQL de acordo com os filtros e consome o endpoint `/api/query`.
-- `src/hooks/useDashboardController.js` – controla filtros, métricas selecionadas e faz as consultas reativas.
-- `src/components` – componentes de UI (ShadCN adaptado), filtros e visualizações (Chart.js via `react-chartjs-2`).
-- `public/data` – diretório opcional com insumos locais (Parquet) usados pelos scripts de importação.
-
-## Observações
-
-- Todo cálculo (sinistralidade, DA, DC, DOP etc.) é executado no Postgres com base no plano de contas oficial. O frontend apenas apresenta os resultados.
-- O botão de upload deixa de aceitar `.csv/.parquet` – o dataset precisa ser carregado no banco via scripts antes de iniciar o dashboard.
-- Utilize `scripts/import_parquet_dataset.py` para povoar o banco diretamente a partir de `public/data/20251213_contas_ans.parquet`. O script trunca `demonstracoes_contabeis`, insere os 4M+ registros e atualiza `operadoras_metadata`.
-- Caso prefira manter um CSV curado para outros fins, `scripts/build_curated_dataset.py` continua disponível (usa DuckDB localmente) mas não é mais necessário para o dashboard.
-
-## Assistente regulatório (ChatGPT)
-
-- O bloco “Falar com ChatGPT” na barra lateral/móvel abre um diálogo para conversar com o agente **Marinho**. Ele recebe automaticamente os filtros, KPIs, ranking, séries e valores monetários exibidos na tela e usa apenas os PDFs carregados no vector store para responder.
-- Configure as variáveis antes de iniciar o servidor/API:
-  - `OPENAI_API_KEY`: chave do projeto OpenAI.
-  - `OPENAI_VECTOR_STORE_ID`: vector store com as normas (padrão `vs_691d04557eac8191a3dbed8d80a90e4a`).
-  - `OPENAI_WORKFLOW_ID` / `OPENAI_WORKFLOW_VERSION`: metadados opcionais para rastreamento (`wf_691cf24519088190be4a330d067c011605a94df9a2f95438`, versão `draft`).
-  - `OPENAI_AGENT_MODEL`: modelo base (`gpt-4.1-mini-2025-04-14`).
-- O backend expõe `POST /api/agent`, que roda `server/agentRunner.js` usando `@openai/agents` e `fileSearchTool` para cumprir o hard-retrieval. Nenhum SQL adicional é executado: o agente interpreta apenas o contexto enviado pelo usuário e o material normativo.
-- Teste rápido:
-
-```bash
-curl -X POST http://localhost:4000/api/agent \
-  -H "Content-Type: application/json" \
-  -d '{"question":"Qual a situação do ROE?", "context":{"kpis":{"retorno_pl_pct":1.2}}}'
-```
-
-O retorno inclui `answer` contendo o texto do agente e, quando aplicável, o JSON `{ "tool": "renderFormula", "latex": "..." }` no final da mensagem (interpretado automaticamente pelo frontend).
-
-## Comentários IA (OpenAI)
-
-- O dashboard inclui o botão **Comentarios IA** no topo para gerar uma leitura automática do que está filtrado (KPIs, ranking, tendências, monetários e correlação).
-- O backend expõe:
-  - `POST /api/analysis/correlation` (comentários da seção de correlação).
-  - `POST /api/analysis/dashboard` (comentários globais do painel filtrado).
-- Variáveis de ambiente usadas no servidor:
-  - `OPENAI_API_KEY` (obrigatória).
-  - `OPENAI_MODEL` (opcional, ex.: `gpt-5-mini-2025-08-07`).
-  - `OPENAI_BASE_URL` e `OPENAI_TIMEOUT_MS` (opcionais).
-- **Importante**: o servidor não lê `.env.local` automaticamente. Para usar `.env.local` no `dash-api`, carregue o arquivo antes do restart:
-
-```bash
-set -a; . ./.env.local; set +a
-pm2 restart dash-api --update-env
-```
-
-## Execução como serviço (systemd)
-
-Um serviço de exemplo está em `scripts/ans-dashboard.service`. Ele executa `scripts/start-dashboard.sh`, que sobe a API Express e o Vite em paralelo (modo desenvolvimento). Para habilitar no host Linux:
-
-```bash
-sudo cp scripts/ans-dashboard.service /etc/systemd/system/ans-dashboard.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now ans-dashboard
-```
-
-Edite `User=`, `WorkingDirectory=` ou as variáveis de ambiente caso o projeto esteja em outro caminho. Os logs ficam disponíveis via `journalctl -u ans-dashboard -f`. Sempre verifique se `DATABASE_URL` está exportada no ambiente do serviço antes de iniciar.
 
 ## Solução de problemas
 
-- **Invalid hook call / múltiplas cópias do React** – O `vite.config.js` agora força `dedupe: ['react', 'react-dom']`. Caso o erro persista, remova `node_modules`/`package-lock.json`, rode `npm install` e reinicie `npm run dev`.
-- **Portas ocupadas** – Se o serviço já estiver em execução, parar com `systemctl stop ans-dashboard` antes de rodar `npm run dev` manualmente. Ajuste `SERVER_PORT` ou `VITE_PORT` nas variáveis do serviço se já existirem processos nas portas 4000/5173.
-- **Uploads falhando** – confirme que `public/data` é gravável pelo usuário do serviço e que o request passa pelo middleware `/api/upload-dataset`.
+- **Firebase invalid-api-key**: confira `.env.local` e reinicie o Vite.
+- **401/403**: usuário sem sessão ou `FIREBASE_PROJECT_ID` divergente.
+- **Falha no BigQuery**: verifique `BQ_PROJECT_ID/BQ_DATASET/BQ_DATASET_VIEW`, permissões e ADC.
 
-## Atualizar o PostgreSQL a partir do Parquet
+## Estrutura relevante
 
-1. Copie o arquivo bruto para `public/data/20251213_contas_ans.parquet`.
-2. Execute:
-
-```bash
-python3 scripts/import_parquet_dataset.py --dsn postgresql://usuario:senha@host:porta/ans_dashboard
-```
-
-O script depende de `pyarrow` e `psycopg`. Use `--batch-size` para ajustar o tamanho dos lotes durante o `COPY`. Ao final, a view `indicadores_curados` (definida em `db/views.sql`) fica pronta para atender às consultas em tempo real.
+- `server/index.js` – API Express (BigQuery + auth Firebase).
+- `src/lib/dataService.js` – monta SQL e consome `/api/query`.
+- `src/hooks/useDashboardController.js` – estado e consultas reativas.
+- `db/export_indicadores.sql` – SQL do export CSV.
+- `scripts/materialize_bq_snapshot.js` – gera snapshot no BigQuery.

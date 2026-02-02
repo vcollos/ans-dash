@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react'
+import { useId, useMemo } from 'react'
 import { Scatter, ScatterChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { ChartContainer, ChartTooltip } from '../ui/chart'
-import { Button } from '../ui/button'
-import { fetchWithAuth } from '../../lib/auth'
 import { formatNumber, formatPercent, toNumber } from '../../lib/utils'
 
 const computePercentile = (values, percentile) => {
@@ -96,51 +94,6 @@ const computePearson = (points) => {
   return sumXY / denom
 }
 
-const computeStats = (values) => {
-  if (!values?.length) return null
-  const total = values.reduce((sum, value) => sum + value, 0)
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  return {
-    min,
-    max,
-    mean: total / values.length,
-  }
-}
-
-const pickExtreme = (points, key, mode) => {
-  if (!points?.length) return null
-  const comparator = mode === 'min'
-    ? (current, best) => current[key] < best[key]
-    : (current, best) => current[key] > best[key]
-  return points.reduce((best, current) => {
-    if (!best) return current
-    return comparator(current, best) ? current : best
-  }, null)
-}
-
-const buildCorrelationSummary = (points, yLabel) => {
-  const n = points.length
-  if (!n) {
-    return { n: 0, r: null, yLabel, x: null, y: null, extremes: null }
-  }
-  const xs = points.map((point) => point.x)
-  const ys = points.map((point) => point.y)
-  return {
-    n,
-    r: computePearson(points),
-    yLabel,
-    x: computeStats(xs),
-    y: computeStats(ys),
-    extremes: {
-      maxX: pickExtreme(points, 'x', 'max'),
-      minX: pickExtreme(points, 'x', 'min'),
-      maxY: pickExtreme(points, 'y', 'max'),
-      minY: pickExtreme(points, 'y', 'min'),
-    },
-  }
-}
-
 function CorrelationTooltip({ active, payload, yLabel }) {
   if (!active || !payload?.length) return null
   const point = payload[0]?.payload
@@ -223,9 +176,6 @@ function ScatterBlock({ id, title, description, points, yLabel, color }) {
 
 function UniodontoCorrelationPanel({ rows = [], isLoading = false }) {
   const chartId = useId().replace(/:/g, '')
-  const [analysis, setAnalysis] = useState(null)
-  const [analysisError, setAnalysisError] = useState(null)
-  const [analysisLoading, setAnalysisLoading] = useState(false)
   const filteredRows = useMemo(() => filterOutliers(rows ?? []), [rows])
   const filteredGrowthRows = useMemo(() => filterOutliers(rows ?? [], { includeGrowth: true }), [rows])
   const growthPoints = useMemo(
@@ -233,56 +183,6 @@ function UniodontoCorrelationPanel({ rows = [], isLoading = false }) {
     [filteredGrowthRows],
   )
   const resultadoPoints = useMemo(() => buildScatterData(filteredRows, 'icu_operacional'), [filteredRows])
-  const growthSummary = useMemo(
-    () => buildCorrelationSummary(growthPoints, 'Crescimento (%)'),
-    [growthPoints],
-  )
-  const resultadoSummary = useMemo(
-    () => buildCorrelationSummary(resultadoPoints, 'Resultado real (%)'),
-    [resultadoPoints],
-  )
-  const hasAnalysisData = growthSummary.n > 1 || resultadoSummary.n > 1
-
-  useEffect(() => {
-    setAnalysis(null)
-    setAnalysisError(null)
-  }, [rows])
-
-  const handleGenerateAnalysis = useCallback(async () => {
-    if (!hasAnalysisData || analysisLoading) return
-    setAnalysisLoading(true)
-    setAnalysisError(null)
-    try {
-      const response = await fetchWithAuth('/api/analysis/correlation', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          summary: {
-            title: 'Relacao entre despesa comercial e desempenho',
-            xMetric: {
-              label: 'Despesa comercial (%)',
-            },
-            growth: growthSummary,
-            result: resultadoSummary,
-          },
-        }),
-      })
-      if (!response.ok) {
-        const message =
-          (await response.json().catch(() => ({}))).error ?? 'Falha ao gerar comentarios.'
-        throw new Error(message)
-      }
-      const payload = await response.json()
-      setAnalysis(payload?.text ?? null)
-    } catch (err) {
-      setAnalysisError(err?.message ?? 'Falha ao gerar comentarios.')
-    } finally {
-      setAnalysisLoading(false)
-    }
-  }, [analysisLoading, growthSummary, hasAnalysisData, resultadoSummary])
-
   return (
     <Card className="min-w-0">
       <CardHeader>
@@ -309,38 +209,6 @@ function UniodontoCorrelationPanel({ rows = [], isLoading = false }) {
             yLabel="Resultado real (%)"
             color="hsl(var(--chart-4))"
           />
-        </div>
-        <div className="mt-4 rounded-lg border p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-sm font-semibold">Comentarios automaticos</p>
-              <p className="text-xs text-muted-foreground">
-                Gere uma leitura rapida da correlacao com base nos dados exibidos.
-              </p>
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={handleGenerateAnalysis}
-              disabled={!hasAnalysisData || analysisLoading}
-            >
-              {analysis ? 'Atualizar comentarios' : 'Gerar comentarios'}
-            </Button>
-          </div>
-          {analysisLoading ? (
-            <div className="mt-2 text-xs text-muted-foreground">Gerando comentarios...</div>
-          ) : null}
-          {analysisError ? (
-            <div className="mt-2 text-xs text-destructive">{analysisError}</div>
-          ) : null}
-          {analysis ? (
-            <div className="mt-3 whitespace-pre-wrap text-sm">{analysis}</div>
-          ) : (
-            <div className="mt-3 text-xs text-muted-foreground">
-              Nenhum comentario gerado ainda.
-            </div>
-          )}
         </div>
         {isLoading ? (
           <div className="mt-3 text-xs text-muted-foreground">Atualizando correlação...</div>

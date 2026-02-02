@@ -10,6 +10,10 @@ lerna-debug.log*
 # Google service account keys
 servicegoogle/
 servicegoogle/*.json
+/.cert/
+
+# Local datasets (legacy)
+public/data/
 
 node_modules
 dist

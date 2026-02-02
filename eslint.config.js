@@ -31,8 +31,6 @@ export default defineConfig([
       'server/**/*.{js,jsx}',
       'scripts/**/*.js',
       'vite.config.js',
-      'pm2.config.cjs',
-      'test-listen.js',
     ],
     languageOptions: {
       globals: globals.node,
