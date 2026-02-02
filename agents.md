@@ -1,5 +1,49 @@
 # Historico da conversa (agents)
 
+## 2026-02-02T14:07:03Z
+- User: reportou que a média filtrada não aparece no modo Uniodonto.
+- Agent: ajustou a leitura de métricas para aceitar payload aninhado ou flat em `UniodontoKpiCards` e passou a espalhar métricas no retorno de `fetchUniodontoPeerSummary`.
+
+## 2026-02-02T13:43:06Z
+- User: reportou 403/401 ao tentar logar e erro de allowlist no prestadores.
+- Agent: adicionou `prestadores_ativos_uniodonto_origem` ao BQ_ALLOWED_VIEWS local e reiniciou o dev server.
+
+## 2026-02-02T13:38:09Z
+- User: reportou erro 500 no /api/query com dataset dash-ans inexistente.
+- Agent: explicou que dataset ids nao aceitam hifen, criou o dataset `dash_ans`, materializou as tabelas mart via `bq query` e reiniciou o dev server em background.
+
+## 2026-02-02T13:28:52Z
+- User: pediu para rodar build/deploy e iniciar local para testes.
+- Agent: tentou `gcloud builds submit` (falhou por NOT_FOUND/permissão), iniciou `npm run dev:local` via `scripts/reload-dev.sh` em background e confirmou portas 5173/4000 ouvindo.
+
+## 2026-02-02T13:27:24Z
+- User: pediu a opcao 2 (ajustar cloudbuild para VITE_* e envs das marts).
+- Agent: atualizou `cloudbuild.yaml` com build args VITE_MART_* e envs BQ_MART_* + allowlist para dash-ans.
+
+## 2026-02-02T13:24:54Z
+- User: decidiu separar as marts em um dataset dedicado (dash-ans).
+- Agent: adicionou suporte a BQ_MART_DATASET nos scripts/backend, atualizou envs locais para dash-ans e documentacao com o passo de criacao do dataset dedicado.
+
+## 2026-02-02T13:15:49Z
+- User: reportou 403 no /api/query e erro de consulta bloqueada ao tentar logar.
+- Agent: adicionou allowlist para tabelas mart no backend, setou BQ_ALLOWED_VIEWS em envs locais e atualizou documentacao com nota de 403.
+
+## 2026-02-02T13:07:33Z
+- User: pediu para rodar o necessario, ajustar o passo 2 e documentar o procedimento de atualizacao de dados.
+- Agent: tentou materializar as tabelas mart (falha por permissao de criacao no dataset), adicionou `.env.local.server` e atualizou `.env.local` com as envs VITE_MART, e criou `documentacao/operacao-atualizacao-dados.md`.
+
+## 2026-02-02T13:04:32Z
+- User: pediu para definir envs e reportou erro de credenciais ao materializar as tabelas mart.
+- Agent: adicionou envs default no `scripts/dev-local.sh`, criou `scripts/materialize-bq-mart-local.sh` e adicionou `data:materialize-bq-mart:local`.
+
+## 2026-02-02T12:54:50Z
+- User: pediu para ajustar o dataService para usar as tabelas mart por modo (ANS e Uniodonto).
+- Agent: adicionou resolucao de views por modo, uso de metricas pre-calculadas quando disponiveis e atualizou consultas para usar as tabelas mart.
+
+## 2026-02-02T12:25:18Z
+- User: pediu para gerar a estrutura otimizada dos indicadores (ANS e Uniodonto).
+- Agent: gerou `db/materialize_indicadores_mart.sql`, adicionou `scripts/materialize_bq_mart.js` e o script `data:materialize-bq-mart`.
+
 ## 2026-02-01T02:09:36Z
 - User: pediu para corrigir o erro do lint (fast refresh).
 - Agent: moveu `useAuth` para `src/contexts/useAuth.js`, criou `src/contexts/auth-context.js`, ajustou imports e confirmou `npm run lint` sem erros.

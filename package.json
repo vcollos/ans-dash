@@ -15,6 +15,8 @@
     "data:export-bq": "node scripts/export_indicadores_bq.js",
     "data:create-bq-view": "node scripts/create_bq_view.js",
     "data:materialize-bq-snapshot": "node scripts/materialize_bq_snapshot.js",
+    "data:materialize-bq-mart": "node scripts/materialize_bq_mart.js",
+    "data:materialize-bq-mart:local": "bash scripts/materialize-bq-mart-local.sh",
     "server": "node server/index.js"
   },
   "dependencies": {

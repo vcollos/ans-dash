@@ -16,6 +16,7 @@ import {
 import {
   DEFAULT_UNIODONTO_RANKING_METRIC,
   UNIODONTO_INDICATORS,
+  UNIODONTO_METRIC_SQL,
   UNIODONTO_RANKING_METRICS,
   getUniodontoMetricSql,
   computeUniodontoMetrics,
@@ -64,9 +65,18 @@ const formatTableRef = (value) => {
   return `\`${trimmed}\``
 }
 
-const DEFAULT_VIEW_RAW = import.meta.env?.VITE_DATASET_VIEW ?? 'indicadores_curados_snapshot'
+const BASE_VIEW_RAW = import.meta.env?.VITE_DATASET_VIEW ?? 'indicadores_curados_snapshot'
+const MART_ANS_VIEW_RAW =
+  import.meta.env?.VITE_MART_ANS_TABLE ?? import.meta.env?.VITE_DATASET_VIEW_ANS ?? ''
+const MART_UNIODONTO_VIEW_RAW =
+  import.meta.env?.VITE_MART_UNIODONTO_TABLE ?? import.meta.env?.VITE_DATASET_VIEW_UNIODONTO ?? ''
+const DEFAULT_VIEW_RAW = MART_ANS_VIEW_RAW || BASE_VIEW_RAW
+const UNIODONTO_VIEW_RAW = MART_UNIODONTO_VIEW_RAW || BASE_VIEW_RAW
 const DEFAULT_VIEW = formatTableRef(DEFAULT_VIEW_RAW)
-let cachedViewColumns = null
+const UNIODONTO_VIEW = formatTableRef(UNIODONTO_VIEW_RAW)
+const HAS_ANS_MART = Boolean(MART_ANS_VIEW_RAW || import.meta.env?.VITE_DATASET_VIEW_ANS)
+const HAS_UNIODONTO_MART = Boolean(MART_UNIODONTO_VIEW_RAW || import.meta.env?.VITE_DATASET_VIEW_UNIODONTO)
+const viewColumnsCache = new Map()
 
 const PRESTADORES_TABLE_RAW =
   import.meta.env?.VITE_PRESTADORES_TABLE ?? 'bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem'
@@ -83,6 +93,42 @@ let prestadoresCachePromise = null
 const sanitizeList = (values = []) => values.filter((value) => value !== null && value !== undefined && value !== '')
 const sanitizeSql = (value) => (value ? value.replaceAll('\\', '\\\\').replaceAll("'", "''") : value)
 const quoteIdentifier = (value) => `\`${String(value).replace(/`/g, '\\`')}\``
+
+const ANS_METRIC_IDS = new Set(metricFormulas.map((metric) => metric.id))
+const UNIODONTO_METRIC_IDS = new Set(Object.keys(UNIODONTO_METRIC_SQL))
+const UNIODONTO_INDICATOR_IDS = new Set(UNIODONTO_INDICATORS.map((metric) => metric.id))
+
+function isUniodontoMetricId(metricId) {
+  return UNIODONTO_INDICATOR_IDS.has(metricId)
+}
+
+function isUniodontoMetricList(metrics = []) {
+  const filtered = (metrics ?? []).filter((metric) => metric && metric !== 'regulatory_score')
+  if (!filtered.length) return false
+  return filtered.every((metric) => UNIODONTO_INDICATOR_IDS.has(metric))
+}
+
+function resolveView({ mode, metrics } = {}) {
+  if (mode === 'uniodonto') return UNIODONTO_VIEW
+  if (mode === 'ans') return DEFAULT_VIEW
+  if (metrics && isUniodontoMetricList(metrics)) return UNIODONTO_VIEW
+  return DEFAULT_VIEW
+}
+
+function resolveMetricExpression(metricId, { mode = 'ans', source = 'base' } = {}) {
+  if (!metricId) return null
+  const allowPrecomputed = source === 'base'
+  if (mode === 'ans') {
+    if (allowPrecomputed && HAS_ANS_MART && ANS_METRIC_IDS.has(metricId)) {
+      return quoteIdentifier(metricId)
+    }
+    return metricSql[metricId] ?? getUniodontoMetricSql(metricId) ?? null
+  }
+  if (allowPrecomputed && HAS_UNIODONTO_MART && UNIODONTO_METRIC_IDS.has(metricId)) {
+    return quoteIdentifier(metricId)
+  }
+  return getUniodontoMetricSql(metricId) ?? metricSql[metricId] ?? null
+}
 
 const isVirtualUniodontoOperator = (operatorName) => operatorName === VIRTUAL_OPERATOR_UNIODONTO
 const stripOperatorSelection = (filters = {}) => {
@@ -126,9 +172,9 @@ function buildPeriodoIdClause(filters = {}) {
   return `periodo_id IN (${ids.join(',')})`
 }
 
-function buildRegulatoryIndicatorProjection({ aggregate = false } = {}) {
+function buildRegulatoryIndicatorProjection({ aggregate = false, source = 'base' } = {}) {
   return REGULATORY_INDICATORS.map((indicator) => {
-    const expression = getIndicatorSql(indicator.id)
+    const expression = resolveMetricExpression(indicator.id, { mode: 'ans', source }) ?? getIndicatorSql(indicator.id)
     if (!expression) {
       throw new Error(`Sem expressão SQL para indicador ${indicator.id}`)
     }
@@ -140,13 +186,13 @@ function buildRegulatoryIndicatorProjection({ aggregate = false } = {}) {
   })
 }
 
-function buildTrendMetricEntries(metrics = []) {
+function buildTrendMetricEntries(metrics = [], { mode = 'ans', source = 'base' } = {}) {
   const unique = new Set()
   return (metrics ?? [])
     .map((metricId) => {
       if (!metricId || metricId === 'regulatory_score') return null
       if (unique.has(metricId)) return null
-      const expression = getUniodontoMetricSql(metricId) ?? metricSql[metricId] ?? null
+      const expression = resolveMetricExpression(metricId, { mode, source })
       if (!expression) return null
       unique.add(metricId)
       return {
@@ -273,15 +319,17 @@ function buildCohortAggregateSelectList(sumColumns = COHORT_AGGREGATE_SUM_COLUMN
 }
 
 async function fetchVirtualCohortSnapshot(filters = {}, { label = VIRTUAL_OPERATOR_UNIODONTO } = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
   const cohortFilters = buildCohortFilters(filters, { uniodonto: true })
   const { whereClause } = buildFilterClauses(cohortFilters, { latestOnlyDefault: false })
-  const availableColumns = await getViewColumns()
+  const availableColumns = await getViewColumns(viewRef)
   const sumSelectList = buildCohortAggregateSelectList(COHORT_AGGREGATE_SUM_COLUMNS, availableColumns)
-  const indicatorProjection = buildRegulatoryIndicatorProjection().join(',\n      ')
+  const cardMetricColumnsSql = buildCardMetricSelectSql({ aggregate: false, source: 'aggregate', mode: 'ans' })
+  const indicatorProjection = buildRegulatoryIndicatorProjection({ source: 'aggregate' }).join(',\n      ')
   const query = `
     WITH base AS (
       SELECT *
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       ${whereClause ?? ''}
     ), aggregated AS (
       SELECT
@@ -321,15 +369,17 @@ async function fetchVirtualCohortSnapshot(filters = {}, { label = VIRTUAL_OPERAT
 }
 
 async function fetchVirtualMarketSnapshot(filters = {}, { label = 'Mercado (sem Uniodonto)' } = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
   const marketFilters = buildCohortFilters(filters, { uniodonto: false })
   const { whereClause } = buildFilterClauses(marketFilters, { latestOnlyDefault: false })
-  const availableColumns = await getViewColumns()
+  const availableColumns = await getViewColumns(viewRef)
   const sumSelectList = buildCohortAggregateSelectList(COHORT_AGGREGATE_SUM_COLUMNS, availableColumns)
-  const indicatorProjection = buildRegulatoryIndicatorProjection().join(',\n      ')
+  const cardMetricColumnsSql = buildCardMetricSelectSql({ aggregate: false, source: 'aggregate', mode: 'ans' })
+  const indicatorProjection = buildRegulatoryIndicatorProjection({ source: 'aggregate' }).join(',\n      ')
   const query = `
     WITH base AS (
       SELECT *
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       ${whereClause ?? ''}
     ), aggregated AS (
       SELECT
@@ -582,37 +632,43 @@ async function runQueryWithFields(sql) {
   }
 }
 
-async function getViewColumns() {
-  if (cachedViewColumns) {
-    return cachedViewColumns
+async function getViewColumns(viewRef = DEFAULT_VIEW) {
+  const cacheKey = viewRef ?? DEFAULT_VIEW
+  if (viewColumnsCache.has(cacheKey)) {
+    return viewColumnsCache.get(cacheKey)
   }
-  const { fields } = await runQueryWithFields(`SELECT * FROM ${DEFAULT_VIEW} WHERE 1=0`)
+  const { fields } = await runQueryWithFields(`SELECT * FROM ${cacheKey} WHERE 1=0`)
   if (fields.length) {
-    cachedViewColumns = fields.map((field) => field.name)
-    return cachedViewColumns
+    const columns = fields.map((field) => field.name)
+    viewColumnsCache.set(cacheKey, columns)
+    return columns
   }
-  const sampleRows = await runQuery(`SELECT * FROM ${DEFAULT_VIEW} LIMIT 1`, { skipPrestadores: true })
+  const sampleRows = await runQuery(`SELECT * FROM ${cacheKey} LIMIT 1`, { skipPrestadores: true })
   if (sampleRows[0]) {
-    cachedViewColumns = Object.keys(sampleRows[0])
-    return cachedViewColumns
+    const columns = Object.keys(sampleRows[0])
+    viewColumnsCache.set(cacheKey, columns)
+    return columns
   }
-  cachedViewColumns = []
-  return cachedViewColumns
+  const columns = []
+  viewColumnsCache.set(cacheKey, columns)
+  return columns
 }
 
 export async function assertDatasetReady() {
-  await runQuery(`SELECT 1 FROM ${DEFAULT_VIEW} WHERE 1=0`, { skipPrestadores: true })
+  const viewRef = resolveView({ mode: 'ans' })
+  await runQuery(`SELECT 1 FROM ${viewRef} WHERE 1=0`, { skipPrestadores: true })
   return {
     source: 'bigquery',
-    view: DEFAULT_VIEW,
+    view: viewRef,
     updatedAt: new Date().toISOString(),
   }
 }
 
 export async function fetchAvailablePeriods() {
+  const viewRef = resolveView({ mode: 'ans' })
   const rows = await runQuery(`
     SELECT DISTINCT ano, trimestre, CONCAT(ano, 'T', trimestre) AS periodo
-    FROM ${DEFAULT_VIEW}
+    FROM ${viewRef}
     WHERE ano IS NOT NULL AND trimestre IS NOT NULL
     ORDER BY ano DESC, trimestre DESC
   `)
@@ -624,13 +680,14 @@ export async function fetchAvailablePeriods() {
 }
 
 export async function fetchOperatorOptions({ anos = [], trimestres = [] } = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
   const clauses = []
   if (anos.length) clauses.push(`ano IN (${anos.join(',')})`)
   if (trimestres.length) clauses.push(`trimestre IN (${trimestres.join(',')})`)
   const whereClause = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
   const rows = await runQuery(`
     SELECT DISTINCT nome_operadora
-    FROM ${DEFAULT_VIEW}
+    FROM ${viewRef}
     ${whereClause}
     ORDER BY nome_operadora
   `)
@@ -640,10 +697,11 @@ export async function fetchOperatorOptions({ anos = [], trimestres = [] } = {}) 
 
 export async function fetchOperatorPeriods(operatorName) {
   if (!operatorName) return []
+  const viewRef = resolveView({ mode: 'ans' })
   if (isVirtualUniodontoOperator(operatorName)) {
     const rows = await runQuery(`
       SELECT DISTINCT ano, trimestre
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       WHERE COALESCE(uniodonto, FALSE) IS TRUE
       ORDER BY ano, trimestre
     `)
@@ -651,7 +709,7 @@ export async function fetchOperatorPeriods(operatorName) {
   }
   const rows = await runQuery(`
     SELECT DISTINCT ano, trimestre
-    FROM ${DEFAULT_VIEW}
+    FROM ${viewRef}
     WHERE nome_operadora = '${sanitizeSql(operatorName)}'
     ORDER BY ano, trimestre
   `)
@@ -660,17 +718,30 @@ export async function fetchOperatorPeriods(operatorName) {
 
 const cardMetricDefinitions = metricFormulas.filter((metric) => metric.showInCards)
 
-const cardMetricSelectSql = cardMetricDefinitions.map((metric) => `AVG(${metricSql[metric.id].trim()}) AS ${metric.id}`).join(',\n        ')
-
-const cardMetricColumnsSql = cardMetricDefinitions.map((metric) => `${metricSql[metric.id].trim()} AS ${metric.id}`).join(',\n        ')
+function buildCardMetricSelectSql({ aggregate = true, source = 'base', mode = 'ans' } = {}) {
+  return cardMetricDefinitions
+    .map((metric) => {
+      const expression = resolveMetricExpression(metric.id, { mode, source })
+      if (!expression) return null
+      if (aggregate) {
+        return `AVG(${expression.trim()}) AS ${metric.id}`
+      }
+      return `${expression.trim()} AS ${metric.id}`
+    })
+    .filter(Boolean)
+    .join(',\n        ')
+}
 
 async function summarizePeriod(filters) {
+  const viewRef = resolveView({ mode: 'ans' })
   const isVirtual = isVirtualUniodontoOperator(filters?.operatorName)
   const { whereClause } = buildFilterClauses(isVirtual ? buildCohortFilters(filters, { uniodonto: true }) : filters)
+  const cardMetricSelectSql = buildCardMetricSelectSql({ aggregate: true, source: 'base', mode: 'ans' })
+  const cardMetricColumnsSql = buildCardMetricSelectSql({ aggregate: false, source: 'aggregate', mode: 'ans' })
   const query = `
     WITH base AS (
       SELECT *
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       ${whereClause}
     ), period_raw AS (
       SELECT
@@ -761,6 +832,7 @@ export async function fetchKpiSummary(filters) {
 }
 
 export async function fetchUniodontoPeerSummary(filters = {}, options = {}) {
+  const viewRef = resolveView({ mode: 'uniodonto' })
   const { excludeOperatorName = null } = options ?? {}
   const sanitizedName = excludeOperatorName ? sanitizeSql(excludeOperatorName) : null
   const { whereClause } = buildFilterClauses(stripOperatorSelection(filters), { latestOnlyDefault: false })
@@ -772,13 +844,16 @@ export async function fetchUniodontoPeerSummary(filters = {}, options = {}) {
     wherePieces.push(`nome_operadora <> '${sanitizedName}'`)
   }
   const finalWhere = wherePieces.length ? `WHERE ${wherePieces.join(' AND ')}` : ''
-  const entries = buildTrendMetricEntries(UNIODONTO_INDICATORS.map((metric) => metric.id))
+  const entries = buildTrendMetricEntries(UNIODONTO_INDICATORS.map((metric) => metric.id), {
+    mode: 'uniodonto',
+    source: 'base',
+  })
   const metricSelectList = buildTrendMetricSelectList(entries, { aggregate: true })
   const query = `
     SELECT
       COUNT(DISTINCT nome_operadora) AS peer_count
       ${metricSelectList ? `,\n      ${metricSelectList}` : ''}
-    FROM ${DEFAULT_VIEW}
+    FROM ${viewRef}
     ${finalWhere}
   `
   const rows = await runQuery(query)
@@ -787,6 +862,7 @@ export async function fetchUniodontoPeerSummary(filters = {}, options = {}) {
   return {
     peer_count: peerCount ?? null,
     metrics,
+    ...metrics,
   }
 }
 
@@ -803,14 +879,14 @@ function extractMonetaryValues(row) {
   return resolved
 }
 
-async function queryMonetarySnapshot(filters, availableColumns, options = {}) {
+async function queryMonetarySnapshot(filters, availableColumns, options = {}, viewRef = DEFAULT_VIEW) {
   const { whereClause } = buildFilterClauses(filters, options)
   const aggregateFragments = buildMonetaryAggregateFragments(availableColumns)
   const selectList = buildMonetarySelectList('latest')
   const query = `
     WITH base AS (
       SELECT *
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       ${whereClause}
     ), aggregated AS (
       SELECT
@@ -840,8 +916,9 @@ async function queryMonetarySnapshot(filters, availableColumns, options = {}) {
 }
 
 export async function fetchMonetarySummary(filters = {}) {
-  const availableColumns = await getViewColumns()
-  const currentRow = await queryMonetarySnapshot(filters, availableColumns)
+  const viewRef = resolveView({ mode: 'ans' })
+  const availableColumns = await getViewColumns(viewRef)
+  const currentRow = await queryMonetarySnapshot(filters, availableColumns, {}, viewRef)
   if (!currentRow) return null
   const currentValues = extractMonetaryValues(currentRow)
   let previousRow = null
@@ -851,7 +928,7 @@ export async function fetchMonetarySummary(filters = {}) {
       anos: [currentRow.ano - 1],
       trimestres: [currentRow.trimestre],
     }
-    previousRow = await queryMonetarySnapshot(previousFilters, availableColumns, { latestOnlyDefault: false })
+    previousRow = await queryMonetarySnapshot(previousFilters, availableColumns, { latestOnlyDefault: false }, viewRef)
   }
   const previousComputedValues = previousRow ? extractMonetaryValues(previousRow) : null
   const values = {}
@@ -887,7 +964,8 @@ export async function fetchMonetarySummary(filters = {}) {
 
 export async function fetchRegulatoryReport(operatorFilters = {}, peerFilters = {}) {
   if (!operatorFilters?.operatorName) return null
-  const indicatorProjection = buildRegulatoryIndicatorProjection().join(',\n        ')
+  const viewRef = resolveView({ mode: 'ans' })
+  const indicatorProjection = buildRegulatoryIndicatorProjection({ source: 'base' }).join(',\n        ')
   const percentileFragments = buildRegulatoryPercentileFragments()
   const isVirtual = isVirtualUniodontoOperator(operatorFilters.operatorName)
   if (isVirtual) {
@@ -911,14 +989,14 @@ export async function fetchRegulatoryReport(operatorFilters = {}, peerFilters = 
         trimestre,
         periodo
         ${indicatorProjection ? `,\n        ${indicatorProjection}` : ''}
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       ${operatorWhereClause}
       ORDER BY ano DESC, trimestre DESC
       LIMIT 1
     ), peer_base AS (
       SELECT
         ${indicatorProjection}
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       ${peerWhere}
     ), peer_stats AS (
       SELECT
@@ -944,8 +1022,9 @@ export async function fetchRegulatoryReport(operatorFilters = {}, peerFilters = 
 }
 
 export async function fetchRegulatoryScoreForFilters(baseFilters = {}, peerFilters = {}) {
-  const indicatorProjection = buildRegulatoryIndicatorProjection().join(',\n        ')
-  const aggregateProjection = buildRegulatoryIndicatorProjection({ aggregate: true }).join(',\n        ')
+  const viewRef = resolveView({ mode: 'ans' })
+  const indicatorProjection = buildRegulatoryIndicatorProjection({ source: 'base' }).join(',\n        ')
+  const aggregateProjection = buildRegulatoryIndicatorProjection({ aggregate: true, source: 'base' }).join(',\n        ')
   const percentileFragments = buildRegulatoryPercentileFragments()
   const { whereClause: baseWhereClause } = buildFilterClauses(baseFilters, { latestOnlyDefault: false })
   const { whereClause: peerWhereClause } = buildFilterClauses(peerFilters, { latestOnlyDefault: false })
@@ -958,12 +1037,12 @@ export async function fetchRegulatoryScoreForFilters(baseFilters = {}, peerFilte
         CAST(NULL AS INT64) AS trimestre,
         CAST(NULL AS STRING) AS periodo
         ${aggregateProjection ? `,\n        ${aggregateProjection}` : ''}
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       ${baseWhereClause ?? ''}
     ), peer_base AS (
       SELECT
         ${indicatorProjection}
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       ${peerWhereClause ?? ''}
     ), peer_stats AS (
       SELECT
@@ -989,14 +1068,15 @@ export async function fetchRegulatoryScoreForFilters(baseFilters = {}, peerFilte
 }
 
 async function fetchRegulatoryPeerStats(filters = {}) {
-  const indicatorProjection = buildRegulatoryIndicatorProjection().join(',\n        ')
+  const viewRef = resolveView({ mode: 'ans' })
+  const indicatorProjection = buildRegulatoryIndicatorProjection({ source: 'base' }).join(',\n        ')
   const percentileFragments = buildRegulatoryPercentileFragments()
   const { whereClause } = buildFilterClauses(stripOperatorSelection(filters), { latestOnlyDefault: false })
   const query = `
     WITH peer_base AS (
       SELECT
         ${indicatorProjection}
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       ${whereClause ?? ''}
     )
     SELECT
@@ -1012,8 +1092,17 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
   if (metric === 'regulatory_score') {
     return fetchRegulatoryScoreTrend(filters, comparisonContext)
   }
-  const uniodontoMetric = getUniodontoMetricSql(metric)
-  const sqlMetric = uniodontoMetric ?? metricSql[metric ?? 'sinistralidade_pct'] ?? metricSql.sinistralidade_pct
+  const resolvedMetric = metric ?? 'sinistralidade_pct'
+  const mode = isUniodontoMetricId(resolvedMetric) ? 'uniodonto' : 'ans'
+  const viewRef = resolveView({ mode, metrics: [resolvedMetric] })
+  const sqlMetricBase =
+    resolveMetricExpression(resolvedMetric, { mode, source: 'base' }) ??
+    metricSql[resolvedMetric] ??
+    metricSql.sinistralidade_pct
+  const sqlMetricAggregate =
+    resolveMetricExpression(resolvedMetric, { mode, source: 'aggregate' }) ??
+    metricSql[resolvedMetric] ??
+    metricSql.sinistralidade_pct
   if (comparisonContext?.operatorName) {
     const sanitizedName = sanitizeSql(comparisonContext.operatorName)
     const isVirtual = isVirtualUniodontoOperator(comparisonContext.operatorName)
@@ -1028,12 +1117,12 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
     }
     const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\n        AND ')}` : ''
     if (isVirtual) {
-      const availableColumns = await getViewColumns()
+      const availableColumns = await getViewColumns(viewRef)
       const sumSelectList = buildCohortAggregateSelectList(COHORT_AGGREGATE_SUM_COLUMNS, availableColumns)
       const cohortQuery = `
         WITH operador_base AS (
           SELECT *
-          FROM ${DEFAULT_VIEW}
+          FROM ${viewRef}
           WHERE COALESCE(uniodonto, FALSE) IS TRUE
           ${operatorFilter ? ` AND ${operatorFilter}` : ''}
           ${operatorComparisonFilter ? ` AND (${operatorComparisonFilter})` : ''}
@@ -1047,7 +1136,7 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
           GROUP BY ano, trimestre, periodo
         ), pares_base AS (
           SELECT *
-          FROM ${DEFAULT_VIEW}
+          FROM ${viewRef}
           ${peerWhere}
           ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
         ), pares_agg AS (
@@ -1059,10 +1148,10 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
           FROM pares_base
           GROUP BY ano, trimestre, periodo
         ), operador AS (
-          SELECT ano, trimestre, periodo, ${sqlMetric} AS valor
+          SELECT ano, trimestre, periodo, ${sqlMetricAggregate} AS valor
           FROM operador_agg
         ), pares AS (
-          SELECT ano, trimestre, periodo, ${sqlMetric} AS valor
+          SELECT ano, trimestre, periodo, ${sqlMetricAggregate} AS valor
           FROM pares_agg
         )
         SELECT
@@ -1079,13 +1168,13 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
     }
     const query = `
       WITH operador AS (
-        SELECT ano, trimestre, periodo, ${sqlMetric} AS valor
-        FROM ${DEFAULT_VIEW}
+        SELECT ano, trimestre, periodo, ${sqlMetricBase} AS valor
+        FROM ${viewRef}
         WHERE nome_operadora = '${sanitizedName}'
         ${operatorFilter ? ` AND ${operatorFilter}` : ''}
       ), pares AS (
-        SELECT ano, trimestre, periodo, AVG(${sqlMetric}) AS valor
-        FROM ${DEFAULT_VIEW}
+        SELECT ano, trimestre, periodo, AVG(${sqlMetricBase}) AS valor
+        FROM ${viewRef}
         ${peerWhere}
         ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
         GROUP BY ano, trimestre, periodo
@@ -1116,13 +1205,13 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
     const comparisonWhereClause = buildWhereClause(periodScopedComparisonFilters)
     const query = `
       WITH base AS (
-        SELECT ano, trimestre, periodo, AVG(${sqlMetric}) AS valor
-        FROM ${DEFAULT_VIEW}
+        SELECT ano, trimestre, periodo, AVG(${sqlMetricBase}) AS valor
+        FROM ${viewRef}
         ${whereClause}
         GROUP BY ano, trimestre, periodo
       ), pares AS (
-        SELECT ano, trimestre, periodo, AVG(${sqlMetric}) AS valor
-        FROM ${DEFAULT_VIEW}
+        SELECT ano, trimestre, periodo, AVG(${sqlMetricBase}) AS valor
+        FROM ${viewRef}
         ${comparisonWhereClause}
         GROUP BY ano, trimestre, periodo
       )
@@ -1139,8 +1228,8 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
     return runQuery(query)
   }
   const query = `
-    SELECT ano, trimestre, periodo, AVG(${sqlMetric}) AS valor
-    FROM ${DEFAULT_VIEW}
+    SELECT ano, trimestre, periodo, AVG(${sqlMetricBase}) AS valor
+    FROM ${viewRef}
     ${whereClause}
     GROUP BY ano, trimestre, periodo
     ORDER BY ano, trimestre
@@ -1149,7 +1238,11 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
 }
 
 export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparisonContext = null) {
-  const entries = buildTrendMetricEntries(metrics)
+  const mode = isUniodontoMetricList(metrics) ? 'uniodonto' : 'ans'
+  const viewRef = resolveView({ mode, metrics })
+  const baseEntries = buildTrendMetricEntries(metrics, { mode, source: 'base' })
+  const aggregateEntries = buildTrendMetricEntries(metrics, { mode, source: 'aggregate' })
+  const entries = baseEntries
   const result = {}
 
   if (metrics?.includes('regulatory_score')) {
@@ -1171,25 +1264,25 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
     const operatorComparisonFilter = getWhereExpression(comparisonWithoutUniodonto)
 
     if (isVirtual) {
-      const availableColumns = await getViewColumns()
+      const availableColumns = await getViewColumns(viewRef)
       const sumSelectList = buildCohortAggregateSelectList(COHORT_AGGREGATE_SUM_COLUMNS, availableColumns)
-      const operatorMetricSelect = buildTrendMetricSelectList(entries)
-      const peerMetricSelect = buildTrendMetricSelectList(entries)
+      const operatorMetricSelect = buildTrendMetricSelectList(aggregateEntries)
+      const peerMetricSelect = buildTrendMetricSelectList(aggregateEntries)
       const peerWherePieces = ['COALESCE(uniodonto, FALSE) IS FALSE']
       if (comparisonFilter) {
         peerWherePieces.push(`(${comparisonFilter})`)
       }
       const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\n        AND ')}` : ''
       const aliasSelectList = [
-        ...entries.map(({ id }) => `operador.${quoteIdentifier(id)} AS ${quoteIdentifier(`operador_${id}`)}`),
-        ...entries.map(({ id }) => `pares.${quoteIdentifier(id)} AS ${quoteIdentifier(`pares_${id}`)}`),
+        ...aggregateEntries.map(({ id }) => `operador.${quoteIdentifier(id)} AS ${quoteIdentifier(`operador_${id}`)}`),
+        ...aggregateEntries.map(({ id }) => `pares.${quoteIdentifier(id)} AS ${quoteIdentifier(`pares_${id}`)}`),
       ]
         .filter(Boolean)
         .join(',\n      ')
       const query = `
         WITH operador_base AS (
           SELECT *
-          FROM ${DEFAULT_VIEW}
+          FROM ${viewRef}
           WHERE COALESCE(uniodonto, FALSE) IS TRUE
           ${operatorFilter ? ` AND ${operatorFilter}` : ''}
           ${operatorComparisonFilter ? ` AND (${operatorComparisonFilter})` : ''}
@@ -1210,7 +1303,7 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
           FROM operador_agg
         ), pares_base AS (
           SELECT *
-          FROM ${DEFAULT_VIEW}
+          FROM ${viewRef}
           ${peerWhere}
           ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
         ), pares_agg AS (
@@ -1239,7 +1332,7 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
         ORDER BY ano, trimestre
       `
       const rows = await runQuery(query)
-      entries.forEach(({ id }) => {
+      aggregateEntries.forEach(({ id }) => {
         result[id] = rows.map((row) => ({
           ano: row.ano,
           trimestre: row.trimestre,
@@ -1251,16 +1344,16 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
       return result
     }
 
-    const operatorMetricSelect = buildTrendMetricSelectList(entries)
-    const peerMetricSelect = buildTrendMetricSelectList(entries, { aggregate: true })
+    const operatorMetricSelect = buildTrendMetricSelectList(baseEntries)
+    const peerMetricSelect = buildTrendMetricSelectList(baseEntries, { aggregate: true })
     const peerWherePieces = [`nome_operadora <> '${sanitizedName}'`]
     if (comparisonFilter) {
       peerWherePieces.push(`(${comparisonFilter})`)
     }
     const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\n        AND ')}` : ''
     const aliasSelectList = [
-      ...entries.map(({ id }) => `operador.${quoteIdentifier(id)} AS ${quoteIdentifier(`operador_${id}`)}`),
-      ...entries.map(({ id }) => `pares.${quoteIdentifier(id)} AS ${quoteIdentifier(`pares_${id}`)}`),
+      ...baseEntries.map(({ id }) => `operador.${quoteIdentifier(id)} AS ${quoteIdentifier(`operador_${id}`)}`),
+      ...baseEntries.map(({ id }) => `pares.${quoteIdentifier(id)} AS ${quoteIdentifier(`pares_${id}`)}`),
     ]
       .filter(Boolean)
       .join(',\n      ')
@@ -1271,7 +1364,7 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
           trimestre,
           periodo
           ${operatorMetricSelect ? `,\n      ${operatorMetricSelect}` : ''}
-        FROM ${DEFAULT_VIEW}
+        FROM ${viewRef}
         WHERE nome_operadora = '${sanitizedName}'
         ${operatorFilter ? ` AND ${operatorFilter}` : ''}
       ), pares AS (
@@ -1280,7 +1373,7 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
           trimestre,
           periodo
           ${peerMetricSelect ? `,\n      ${peerMetricSelect}` : ''}
-        FROM ${DEFAULT_VIEW}
+        FROM ${viewRef}
         ${peerWhere}
         ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
         GROUP BY ano, trimestre, periodo
@@ -1295,7 +1388,7 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
       ORDER BY ano, trimestre
     `
     const rows = await runQuery(query)
-    entries.forEach(({ id }) => {
+    baseEntries.forEach(({ id }) => {
       result[id] = rows.map((row) => ({
         ano: row.ano,
         trimestre: row.trimestre,
@@ -1308,20 +1401,20 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
   }
 
   const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
-  const metricSelectList = buildTrendMetricSelectList(entries, { aggregate: true })
+  const metricSelectList = buildTrendMetricSelectList(baseEntries, { aggregate: true })
   const query = `
     SELECT
       ano,
       trimestre,
       periodo
       ${metricSelectList ? `,\n      ${metricSelectList}` : ''}
-    FROM ${DEFAULT_VIEW}
+    FROM ${viewRef}
     ${whereClause ?? ''}
     GROUP BY ano, trimestre, periodo
     ORDER BY ano, trimestre
   `
   const rows = await runQuery(query)
-  entries.forEach(({ id }) => {
+  baseEntries.forEach(({ id }) => {
     result[id] = rows.map((row) => ({
       ano: row.ano,
       trimestre: row.trimestre,
@@ -1333,22 +1426,24 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
 }
 
 async function fetchRegulatoryScoreTrend(filters, comparisonContext = null) {
+  const viewRef = resolveView({ mode: 'ans' })
   if (comparisonContext?.operatorName) {
     const sanitizedName = sanitizeSql(comparisonContext.operatorName)
     const isVirtual = isVirtualUniodontoOperator(comparisonContext.operatorName)
-    const indicatorProjection = buildRegulatoryIndicatorProjection().join(',\n        ')
-    const aggregateProjection = buildRegulatoryIndicatorProjection({ aggregate: true }).join(',\n        ')
+    const indicatorProjectionBase = buildRegulatoryIndicatorProjection({ source: 'base' }).join(',\n        ')
+    const indicatorProjectionAggregate = buildRegulatoryIndicatorProjection({ source: 'aggregate' }).join(',\n        ')
+    const aggregateProjection = buildRegulatoryIndicatorProjection({ aggregate: true, source: 'base' }).join(',\n        ')
     const baseFilter = buildWhereClause({ ...filters, search: '' })
     const operatorFilter = baseFilter ? baseFilter.replace(/^WHERE\s+/i, '') : ''
     if (isVirtual) {
-      const availableColumns = await getViewColumns()
+      const availableColumns = await getViewColumns(viewRef)
       const sumSelectList = buildCohortAggregateSelectList(COHORT_AGGREGATE_SUM_COLUMNS, availableColumns)
       const { uniodonto: _ignoredUniodonto, ...comparisonWithoutUniodonto } = comparisonContext.filters ?? {}
       const operatorComparisonFilter = getWhereExpression(comparisonWithoutUniodonto)
       const operatorQuery = `
         WITH operador_base AS (
           SELECT *
-          FROM ${DEFAULT_VIEW}
+          FROM ${viewRef}
           WHERE COALESCE(uniodonto, FALSE) IS TRUE
           ${operatorFilter ? ` AND ${operatorFilter}` : ''}
           ${operatorComparisonFilter ? ` AND (${operatorComparisonFilter})` : ''}
@@ -1365,7 +1460,7 @@ async function fetchRegulatoryScoreTrend(filters, comparisonContext = null) {
           ano,
           trimestre,
           periodo
-          ${indicatorProjection ? `,\n        ${indicatorProjection}` : ''}
+          ${indicatorProjectionAggregate ? `,\n        ${indicatorProjectionAggregate}` : ''}
         FROM operador_agg
         ORDER BY ano, trimestre
       `
@@ -1397,7 +1492,7 @@ async function fetchRegulatoryScoreTrend(filters, comparisonContext = null) {
       const peersQuery = `
         WITH pares_base AS (
           SELECT *
-          FROM ${DEFAULT_VIEW}
+          FROM ${viewRef}
           ${peerWhere}
           ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
         ), pares_agg AS (
@@ -1413,7 +1508,7 @@ async function fetchRegulatoryScoreTrend(filters, comparisonContext = null) {
           ano,
           trimestre,
           periodo
-          ${indicatorProjection ? `,\n        ${indicatorProjection}` : ''}
+          ${indicatorProjectionAggregate ? `,\n        ${indicatorProjectionAggregate}` : ''}
         FROM pares_agg
         ORDER BY ano, trimestre
       `
@@ -1480,8 +1575,8 @@ async function fetchRegulatoryScoreTrend(filters, comparisonContext = null) {
         ano,
         trimestre,
         periodo
-        ${indicatorProjection ? `,\n        ${indicatorProjection}` : ''}
-      FROM ${DEFAULT_VIEW}
+        ${indicatorProjectionBase ? `,\n        ${indicatorProjectionBase}` : ''}
+      FROM ${viewRef}
       WHERE nome_operadora = '${sanitizedName}'
       ${operatorFilter ? ` AND ${operatorFilter}` : ''}
       ORDER BY ano, trimestre
@@ -1508,7 +1603,7 @@ async function fetchRegulatoryScoreTrend(filters, comparisonContext = null) {
         trimestre,
         periodo
         ${aggregateProjection ? `,\n        ${aggregateProjection}` : ''}
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       ${comparisonWhereClause ?? ''}
       GROUP BY ano, trimestre, periodo
       ORDER BY ano, trimestre
@@ -1572,7 +1667,7 @@ async function fetchRegulatoryScoreTrend(filters, comparisonContext = null) {
       return a.ano - b.ano
     })
   }
-  const aggregateProjection = buildRegulatoryIndicatorProjection({ aggregate: true }).join(',\n        ')
+  const aggregateProjection = buildRegulatoryIndicatorProjection({ aggregate: true, source: 'base' }).join(',\n        ')
   const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
   const query = `
     SELECT
@@ -1580,7 +1675,7 @@ async function fetchRegulatoryScoreTrend(filters, comparisonContext = null) {
       trimestre,
       periodo
       ${aggregateProjection ? `,\n        ${aggregateProjection}` : ''}
-    FROM ${DEFAULT_VIEW}
+    FROM ${viewRef}
     ${whereClause ?? ''}
     GROUP BY ano, trimestre, periodo
     ORDER BY ano, trimestre
@@ -1611,10 +1706,11 @@ export async function fetchOperatorSnapshot(nomeOperadora, targetPeriod = {}, co
       selectedPeriod: null,
     }
   }
+  const viewRef = resolveView({ mode: 'ans' })
   if (isVirtualUniodontoOperator(nomeOperadora)) {
     const periods = await runQuery(`
       SELECT DISTINCT ano, trimestre, periodo
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       WHERE COALESCE(uniodonto, FALSE) IS TRUE
       ORDER BY ano DESC, trimestre DESC
     `)
@@ -1648,7 +1744,7 @@ export async function fetchOperatorSnapshot(nomeOperadora, targetPeriod = {}, co
   }
   const sanitizedName = sanitizeSql(nomeOperadora)
   const periods = await runQuery(
-    `SELECT ano, trimestre, periodo FROM ${DEFAULT_VIEW} WHERE nome_operadora = '${sanitizedName}' ORDER BY ano DESC, trimestre DESC`,
+    `SELECT ano, trimestre, periodo FROM ${viewRef} WHERE nome_operadora = '${sanitizedName}' ORDER BY ano DESC, trimestre DESC`,
   )
   if (!periods.length) {
     return {
@@ -1660,11 +1756,12 @@ export async function fetchOperatorSnapshot(nomeOperadora, targetPeriod = {}, co
   }
   const resolved =
     periods.find((item) => item.ano === targetPeriod?.ano && item.trimestre === targetPeriod?.trimestre) ?? periods[0]
+  const cardMetricColumnsSql = buildCardMetricSelectSql({ aggregate: false, source: 'base', mode: 'ans' })
   const operatorQuery = `
     SELECT
       base.*
       ${cardMetricColumnsSql ? `,\n      ${cardMetricColumnsSql}` : ''}
-    FROM ${DEFAULT_VIEW} base
+    FROM ${viewRef} base
     WHERE nome_operadora = '${sanitizedName}'
       AND ano = ${resolved.ano}
       AND trimestre = ${resolved.trimestre}
@@ -1683,13 +1780,17 @@ export async function fetchOperatorSnapshot(nomeOperadora, targetPeriod = {}, co
   }
   const peerMetricSelect = metricFormulas
     .filter((metric) => metric.showInCards)
-    .map((metric) => `AVG(${metricSql[metric.id].trim()}) AS ${metric.id}`)
+    .map((metric) => {
+      const expression = resolveMetricExpression(metric.id, { mode: 'ans', source: 'base' })
+      return expression ? `AVG(${expression.trim()}) AS ${metric.id}` : null
+    })
+    .filter(Boolean)
     .join(',\n        ')
   const peerQuery = `
     SELECT
       COUNT(DISTINCT nome_operadora) AS peer_count,
       ${peerMetricSelect}
-    FROM ${DEFAULT_VIEW}
+    FROM ${viewRef}
     WHERE ${wherePieces.join('\n        AND ')}
   `
   const peers = (await runQuery(peerQuery))[0] ?? null
@@ -1707,9 +1808,10 @@ export async function fetchOperatorLatestSnapshot(nomeOperadora) {
   if (isVirtualUniodontoOperator(nomeOperadora)) {
     return fetchVirtualCohortSnapshot({})
   }
+  const viewRef = resolveView({ mode: 'ans' })
   const query = `
     SELECT *
-    FROM ${DEFAULT_VIEW}
+    FROM ${viewRef}
     WHERE nome_operadora = '${sanitizeSql(nomeOperadora)}'
     ORDER BY ano DESC, trimestre DESC
     LIMIT 1
@@ -1720,18 +1822,23 @@ export async function fetchOperatorLatestSnapshot(nomeOperadora) {
 
 const rankingMetrics = metricFormulas.filter((metric) => metric.showInCards)
 const uniodontoRankingMetricIds = new Set(UNIODONTO_RANKING_METRICS.map((metric) => metric.id))
-const uniodontoRankingSelectList = UNIODONTO_RANKING_METRICS
-  .map((metric) => {
-    const expression = getUniodontoMetricSql(metric.id)
-    if (!expression) return null
-    return `${expression} AS ${quoteIdentifier(metric.id)}`
-  })
-  .filter(Boolean)
-  .join(',\n      ')
 
-function buildUniodontoRankingQuery(whereClause, metricId, order = 'DESC', limitClause = '') {
+function buildUniodontoRankingSelectList({ source = 'base' } = {}) {
+  return UNIODONTO_RANKING_METRICS
+    .map((metric) => {
+      const expression = resolveMetricExpression(metric.id, { mode: 'uniodonto', source })
+      if (!expression) return null
+      return `${expression} AS ${quoteIdentifier(metric.id)}`
+    })
+    .filter(Boolean)
+    .join(',\n      ')
+}
+
+function buildUniodontoRankingQuery(whereClause, metricId, order = 'DESC', limitClause = '', { viewRef, selectList } = {}) {
   const metricColumn = uniodontoRankingMetricIds.has(metricId) ? metricId : DEFAULT_UNIODONTO_RANKING_METRIC
   const metricIdentifier = quoteIdentifier(metricColumn)
+  const resolvedSelectList = selectList ?? buildUniodontoRankingSelectList()
+  const resolvedView = viewRef ?? DEFAULT_VIEW
   return {
     metricColumn,
     query: `
@@ -1742,8 +1849,8 @@ function buildUniodontoRankingQuery(whereClause, metricId, order = 'DESC', limit
         porte,
         modalidade,
         qt_beneficiarios,
-        ${uniodontoRankingSelectList}
-      FROM ${DEFAULT_VIEW}
+        ${resolvedSelectList}
+      FROM ${resolvedView}
       ${whereClause ?? ''}
     ), ranked AS (
       SELECT
@@ -1761,9 +1868,17 @@ function buildUniodontoRankingQuery(whereClause, metricId, order = 'DESC', limit
 }
 
 export async function fetchRanking(metric, filters, limit = null, order = 'DESC', options = {}) {
-  const sqlMetric = metricSql[metric] ?? metricSql.sinistralidade_pct
+  const viewRef = resolveView({ mode: 'ans' })
+  const sqlMetric =
+    resolveMetricExpression(metric, { mode: 'ans', source: 'base' }) ??
+    resolveMetricExpression('sinistralidade_pct', { mode: 'ans', source: 'base' }) ??
+    metricSql.sinistralidade_pct
   const metricSelectList = rankingMetrics
-    .map((item) => `${metricSql[item.id].trim()} AS ${item.id}`)
+    .map((item) => {
+      const expression = resolveMetricExpression(item.id, { mode: 'ans', source: 'base' })
+      return expression ? `${expression.trim()} AS ${item.id}` : null
+    })
+    .filter(Boolean)
     .join(',\n      ')
   const { whereClause } = buildFilterClauses(stripOperatorSelection(filters))
   const operatorName = options.operatorName ? sanitizeSql(options.operatorName) : null
@@ -1773,7 +1888,7 @@ export async function fetchRanking(metric, filters, limit = null, order = 'DESC'
       SELECT nome_operadora, reg_ans, porte, modalidade, qt_beneficiarios, ${sqlMetric} AS valor${
         metricSelectList ? `,\n      ${metricSelectList}` : ''
       }
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       ${whereClause}
     ), ranked AS (
       SELECT
@@ -1802,7 +1917,7 @@ export async function fetchRanking(metric, filters, limit = null, order = 'DESC'
     } else {
       const operatorQuery = `
         SELECT nome_operadora, reg_ans, porte, modalidade, qt_beneficiarios, ${sqlMetric} AS valor
-        FROM ${DEFAULT_VIEW}
+        FROM ${viewRef}
         WHERE nome_operadora = '${operatorName}'
         ${whereClause ? ` AND ${whereClause.replace(/^WHERE\s+/i, '')}` : ''}
         LIMIT 1
@@ -1822,10 +1937,15 @@ export async function fetchRanking(metric, filters, limit = null, order = 'DESC'
 }
 
 export async function fetchUniodontoRanking(metric, filters, limit = null, order = 'DESC', options = {}) {
+  const viewRef = resolveView({ mode: 'uniodonto' })
   const { whereClause } = buildFilterClauses(stripOperatorSelection(filters))
   const operatorName = options.operatorName ? sanitizeSql(options.operatorName) : null
   const limitClause = Number.isFinite(limit) && limit > 0 ? `LIMIT ${limit}` : ''
-  const { query, metricColumn } = buildUniodontoRankingQuery(whereClause, metric, order, limitClause)
+  const metricSelectList = buildUniodontoRankingSelectList({ source: 'base' })
+  const { query, metricColumn } = buildUniodontoRankingQuery(whereClause, metric, order, limitClause, {
+    viewRef,
+    selectList: metricSelectList,
+  })
   const rows = await runQuery(query)
   let operatorRow = null
   if (operatorName) {
@@ -1844,7 +1964,10 @@ export async function fetchUniodontoRanking(metric, filters, limit = null, order
     } else {
       const operatorFilters = { ...stripOperatorSelection(filters), operatorName }
       const { whereClause: operatorWhereClause } = buildFilterClauses(operatorFilters)
-      const operatorQuery = buildUniodontoRankingQuery(operatorWhereClause, metric, order, 'LIMIT 1')
+      const operatorQuery = buildUniodontoRankingQuery(operatorWhereClause, metric, order, 'LIMIT 1', {
+        viewRef,
+        selectList: metricSelectList,
+      })
       const result = await runQuery(operatorQuery.query)
       operatorRow = result[0] ?? null
     }
@@ -1909,6 +2032,7 @@ export async function fetchMonetaryRanking(metricColumn, filters, limit = null, 
   if (!monetaryRankingColumns.includes(metricKey)) {
     throw new Error(`Métrica monetária inválida: ${metricKey}`)
   }
+  const viewRef = resolveView({ mode: 'ans' })
   const { whereClause } = buildFilterClauses(stripOperatorSelection(filters))
   const operatorName = options.operatorName ? sanitizeSql(options.operatorName) : null
   const limitClause = Number.isFinite(limit) && limit > 0 ? `LIMIT ${limit}` : ''
@@ -1927,7 +2051,7 @@ export async function fetchMonetaryRanking(metricColumn, filters, limit = null, 
         qt_beneficiarios,
         ${valueExpr} AS valor
         ${monetarySelectList ? `,\n      ${monetarySelectList}` : ''}
-      FROM ${DEFAULT_VIEW} base
+      FROM ${viewRef} base
       ${whereClause}
     ), ranked AS (
       SELECT
@@ -1964,7 +2088,7 @@ export async function fetchMonetaryRanking(metricColumn, filters, limit = null, 
           qt_beneficiarios,
           COALESCE(${quoteIdentifier(metricKey)}, 0) AS valor
           ${monetaryRankingColumns.map((column) => `,\n          COALESCE(${quoteIdentifier(column)}, 0) AS ${quoteIdentifier(column)}`).join('')}
-        FROM ${DEFAULT_VIEW}
+        FROM ${viewRef}
         WHERE nome_operadora = '${operatorName}'
         ${whereClause ? ` AND ${whereClause.replace(/^WHERE\s+/i, '')}` : ''}
         LIMIT 1
@@ -1984,10 +2108,15 @@ export async function fetchMonetaryRanking(metricColumn, filters, limit = null, 
 }
 
 export async function fetchRegulatoryScoreRanking(filters, limit = null, order = 'DESC', options = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
   const metricSelectList = rankingMetrics
-    .map((item) => `${metricSql[item.id].trim()} AS ${item.id}`)
+    .map((item) => {
+      const expression = resolveMetricExpression(item.id, { mode: 'ans', source: 'base' })
+      return expression ? `${expression.trim()} AS ${item.id}` : null
+    })
+    .filter(Boolean)
     .join(',\n      ')
-  const indicatorProjection = buildRegulatoryIndicatorProjection().join(',\n      ')
+  const indicatorProjection = buildRegulatoryIndicatorProjection({ source: 'base' }).join(',\n      ')
   const { whereClause } = buildFilterClauses(stripOperatorSelection(filters), { latestOnlyDefault: false })
   const query = `
     SELECT
@@ -2002,7 +2131,7 @@ export async function fetchRegulatoryScoreRanking(filters, limit = null, order =
         metricSelectList ? `,\n      ${metricSelectList}` : ''
       }
       ${indicatorProjection ? `,\n      ${indicatorProjection}` : ''}
-    FROM ${DEFAULT_VIEW}
+    FROM ${viewRef}
     ${whereClause ?? ''}
   `
   const rows = await runQuery(query)
@@ -2069,11 +2198,12 @@ export async function fetchRegulatoryScoreRanking(filters, limit = null, order =
 }
 
 export async function fetchScatter(xMetric, yMetric, filters, limit = 200) {
+  const viewRef = resolveView({ mode: 'ans' })
   const { whereClause } = buildFilterClauses(filters)
   const query = `
     WITH base AS (
       SELECT *
-      FROM ${DEFAULT_VIEW}
+      FROM ${viewRef}
       ${whereClause}
     )
     SELECT
@@ -2095,6 +2225,7 @@ export async function fetchTableData(filters, options = {}) {
   const includeAllColumns = options.includeAllColumns === true
   const ignorePeriodFilters = options.ignorePeriodFilters === true
   const exactOperatorName = options.operatorName ?? null
+  const viewRef = resolveView({ mode: 'ans' })
 
   let effectiveFilters = { ...filters }
   if (ignorePeriodFilters) {
@@ -2122,7 +2253,7 @@ export async function fetchTableData(filters, options = {}) {
 
   let selectedFields = options.columns?.length ? options.columns : DETAIL_TABLE_FIELDS
   if (includeAllColumns) {
-    selectedFields = await getViewColumns()
+    selectedFields = await getViewColumns(viewRef)
   }
   if (!selectedFields || !selectedFields.length) {
     selectedFields = ['*']
@@ -2130,7 +2261,7 @@ export async function fetchTableData(filters, options = {}) {
 
   const projection = selectedFields
     .map((field) => {
-      const expression = metricSql[field]
+      const expression = resolveMetricExpression(field, { mode: 'ans', source: 'base' })
       if (expression) {
         return `(${expression.trim()}) AS ${field}`
       }
@@ -2141,7 +2272,7 @@ export async function fetchTableData(filters, options = {}) {
   const offset = options.offset ?? 0
   const query = `
     SELECT ${projection}
-    FROM ${DEFAULT_VIEW}
+    FROM ${viewRef}
     ${finalWhereClause ?? ''}
     ORDER BY ano DESC, trimestre DESC, nome_operadora
     LIMIT ${limit} OFFSET ${offset}
@@ -2154,7 +2285,7 @@ export async function fetchTableData(filters, options = {}) {
 }
 
 export async function fetchTableColumns() {
-  return getViewColumns()
+  return getViewColumns(resolveView({ mode: 'ans' }))
 }
 
 export function getMetricsCatalog() {

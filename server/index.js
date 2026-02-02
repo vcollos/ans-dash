@@ -14,6 +14,10 @@ const BQ_PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ??
 const BQ_DATASET = process.env.BQ_DATASET ?? 'datalake_ans'
 const BQ_LOCATION = process.env.BQ_LOCATION ?? 'US'
 const BQ_EXPORT_VIEW = process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? 'indicadores_curados_snapshot'
+const BQ_MART_ANS_TABLE = process.env.BQ_MART_ANS_TABLE ?? process.env.BQ_DATASET_VIEW_ANS ?? ''
+const BQ_MART_UNIODONTO_TABLE =
+  process.env.BQ_MART_UNIODONTO_TABLE ?? process.env.BQ_DATASET_VIEW_UNIODONTO ?? ''
+const BQ_MART_DATASET = process.env.BQ_MART_DATASET ?? BQ_DATASET
 const BQ_PRESTADORES_TABLE =
   process.env.BQ_PRESTADORES_TABLE ?? `${BQ_PROJECT_ID}.${BQ_DATASET}.prestadores_ativos_uniodonto_origem`
 const EXPORT_SQL_PATH = path.resolve(__dirname, '../db/export_indicadores.sql')
@@ -50,10 +54,22 @@ const ALLOWED_TABLES = (() => {
     RAW_ALLOWED_VIEWS.split(',').forEach(add)
   } else {
     add(BQ_EXPORT_VIEW)
+    add(BQ_MART_ANS_TABLE)
+    add(BQ_MART_UNIODONTO_TABLE)
     const normalizedExport = String(BQ_EXPORT_VIEW ?? '').replace(/^`|`$/g, '').replace(/^"|"$/g, '')
     if (normalizedExport && normalizedExport.split('.').length === 1) {
       add(`${BQ_DATASET}.${BQ_EXPORT_VIEW}`)
       add(`${BQ_PROJECT_ID}.${BQ_DATASET}.${BQ_EXPORT_VIEW}`)
+    }
+    const normalizedMartAns = String(BQ_MART_ANS_TABLE ?? '').replace(/^`|`$/g, '').replace(/^"|"$/g, '')
+    if (normalizedMartAns && normalizedMartAns.split('.').length === 1) {
+      add(`${BQ_MART_DATASET}.${BQ_MART_ANS_TABLE}`)
+      add(`${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_ANS_TABLE}`)
+    }
+    const normalizedMartUni = String(BQ_MART_UNIODONTO_TABLE ?? '').replace(/^`|`$/g, '').replace(/^"|"$/g, '')
+    if (normalizedMartUni && normalizedMartUni.split('.').length === 1) {
+      add(`${BQ_MART_DATASET}.${BQ_MART_UNIODONTO_TABLE}`)
+      add(`${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_UNIODONTO_TABLE}`)
     }
     add(BQ_PRESTADORES_TABLE)
   }

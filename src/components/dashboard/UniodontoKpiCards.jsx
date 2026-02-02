@@ -158,7 +158,21 @@ function UniodontoKpiCards({
   const peerCount = peerSummary?.peer_count ?? snapshot?.peerCount ?? snapshot?.peers?.peer_count ?? 0
 
   const operatorMetrics = operatorName ? computeUniodontoMetrics(snapshot?.operator ?? {}) : null
-  const peerMetrics = operatorName && peerSummary ? peerSummary.metrics ?? computeUniodontoMetrics(peerSummary) : null
+  const hasMetricKeys = (value) =>
+    Boolean(
+      value &&
+        UNIODONTO_INDICATORS.some((metric) =>
+          Object.prototype.hasOwnProperty.call(value, metric.id),
+        ),
+    )
+  const peerMetrics =
+    operatorName && peerSummary
+      ? hasMetricKeys(peerSummary?.metrics)
+        ? peerSummary.metrics
+        : hasMetricKeys(peerSummary)
+          ? peerSummary
+          : computeUniodontoMetrics(peerSummary)
+      : null
   const aggregateMetrics = !operatorName ? computeUniodontoMetrics(fallbackSummary ?? {}) : null
   const indicatorMap = Object.fromEntries(UNIODONTO_INDICATORS.map((metric) => [metric.id, metric]))
   const indicatorGroups = UNIODONTO_INDICATOR_GROUPS?.length
