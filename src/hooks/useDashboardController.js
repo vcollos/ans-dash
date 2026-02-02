@@ -117,6 +117,7 @@ export function useDashboardController() {
   const [comparisonFilters, setComparisonFilters] = useState(() => createDefaultComparisonFilters())
   const [comparisonFiltersDraft, setComparisonFiltersDraft] = useState(() => createDefaultComparisonFilters())
   const [operatorContext, setOperatorContext] = useState(null)
+  const lastAutoOperatorRef = useRef(null)
   const [operatorSnapshot, setOperatorSnapshot] = useState({
     operator: null,
     peers: null,
@@ -277,6 +278,20 @@ export function useDashboardController() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (operatorContext?.name) return
+    const normalized = (filters.search ?? '').trim().toLowerCase()
+    if (!normalized) {
+      lastAutoOperatorRef.current = null
+      return
+    }
+    if (lastAutoOperatorRef.current === normalized) return
+    const match = options.operadoras.find((option) => option?.toLowerCase() === normalized)
+    if (!match) return
+    lastAutoOperatorRef.current = normalized
+    applyOperatorSelection(match)
+  }, [filters.search, operatorContext?.name, options.operadoras, applyOperatorSelection])
 
   useEffect(() => {
     if (status !== 'ready') return

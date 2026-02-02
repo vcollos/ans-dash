@@ -1,5 +1,9 @@
 # Historico da conversa (agents)
 
+## 2026-02-02T14:59:31Z
+- User: reportou que selecionar uma operadora não estava filtrando os indicadores.
+- Agent: adicionou auto-seleção por busca exata no hook para garantir que a escolha por texto acione o contexto da operadora.
+
 ## 2026-02-02T14:07:03Z
 - User: reportou que a média filtrada não aparece no modo Uniodonto.
 - Agent: ajustou a leitura de métricas para aceitar payload aninhado ou flat em `UniodontoKpiCards` e passou a espalhar métricas no retorno de `fetchUniodontoPeerSummary`.
