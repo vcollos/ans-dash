@@ -1,5 +1,13 @@
 # Historico da conversa (agents)
 
+## 2026-02-05T19:12:42Z
+- User: mostrou que já existe gatilho do Cloud Build configurado com `cloudbuild.yaml` e pediu validação.
+- Agent: indicou validar se há erros no último build e se as variáveis/substituições e permissões da service account estão corretas.
+
+## 2026-02-05T19:20:32Z
+- User: trouxe logs de erro no deploy do Cloud Run por `--set-env-vars` com vírgulas.
+- Agent: ajustou `cloudbuild.yaml` para usar `--env-vars-file` com YAML gerado no build, evitando erro de escaping.
+
 ## 2026-02-05T19:06:10Z
 - User: mostrou tela de configuração do Cloud Build com build via Dockerfile e perguntou o que está configurado.
 - Agent: orientou selecionar "Arquivo de configuração do Cloud Build" e apontar para `/cloudbuild.yaml` para usar o pipeline do repo.

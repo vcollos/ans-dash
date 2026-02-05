@@ -31,6 +31,26 @@ steps:
       - push
       - gcr.io/$PROJECT_ID/ans-dashboard:$SHORT_SHA
 
+  - name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        cat > /workspace/cloudrun-env.yaml <<'ENVVARS'
+        NODE_ENV: "production"
+        SERVE_STATIC: "true"
+        BQ_PROJECT_ID: "${_BQ_PROJECT_ID}"
+        BQ_DATASET: "${_BQ_DATASET}"
+        BQ_DATASET_VIEW: "${_BQ_DATASET_VIEW}"
+        BQ_LOCATION: "${_BQ_LOCATION}"
+        BQ_MART_DATASET: "${_BQ_MART_DATASET}"
+        BQ_MART_ANS_TABLE: "${_BQ_MART_ANS_TABLE}"
+        BQ_MART_UNIODONTO_TABLE: "${_BQ_MART_UNIODONTO_TABLE}"
+        BQ_ALLOWED_VIEWS: "${_BQ_ALLOWED_VIEWS}"
+        BQ_PRESTADORES_TABLE: "${_BQ_PRESTADORES_TABLE}"
+        FIREBASE_PROJECT_ID: "${_FIREBASE_PROJECT_ID}"
+        ENVVARS
+
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
@@ -56,8 +76,8 @@ steps:
       - '3'
       - --timeout
       - '300s'
-      - --set-env-vars
-      - NODE_ENV=production,SERVE_STATIC=true,BQ_PROJECT_ID=${_BQ_PROJECT_ID},BQ_DATASET=${_BQ_DATASET},BQ_DATASET_VIEW=${_BQ_DATASET_VIEW},BQ_LOCATION=${_BQ_LOCATION},BQ_MART_DATASET=${_BQ_MART_DATASET},BQ_MART_ANS_TABLE=${_BQ_MART_ANS_TABLE},BQ_MART_UNIODONTO_TABLE=${_BQ_MART_UNIODONTO_TABLE},BQ_ALLOWED_VIEWS=${_BQ_ALLOWED_VIEWS},BQ_PRESTADORES_TABLE=${_BQ_PRESTADORES_TABLE},FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT_ID}
+      - --env-vars-file
+      - /workspace/cloudrun-env.yaml
 
 images:
   - gcr.io/$PROJECT_ID/ans-dashboard:$SHORT_SHA
