@@ -1274,10 +1274,46 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
   const mode = isUniodontoMetricList(metricList) ? 'uniodonto' : 'ans'
   const maxMetricsPerQuery = mode === 'uniodonto' ? (HAS_UNIODONTO_MART ? 24 : 10) : 24
 
+  function resolveMetricExpressionWithColumns(metricId, { source, availableColumns } = {}) {
+    if (!metricId) return null
+    if (source === 'base' && availableColumns?.includes?.(metricId)) {
+      return quoteIdentifier(metricId)
+    }
+    if (mode === 'uniodonto') {
+      return getUniodontoMetricSql(metricId) ?? metricSql[metricId] ?? null
+    }
+    return metricSql[metricId] ?? getUniodontoMetricSql(metricId) ?? null
+  }
+
+  function buildTrendMetricEntriesWithColumns(batchMetrics, { source, availableColumns } = {}) {
+    const unique = new Set()
+    return (batchMetrics ?? [])
+      .map((metricId) => {
+        if (!metricId || metricId === 'regulatory_score') return null
+        if (unique.has(metricId)) return null
+        const expression =
+          source === 'aggregate'
+            ? resolveMetricExpression(metricId, { mode, source })
+            : resolveMetricExpressionWithColumns(metricId, { source, availableColumns })
+        if (!expression) return null
+        unique.add(metricId)
+        return {
+          id: metricId,
+          expression: expression.trim(),
+        }
+      })
+      .filter(Boolean)
+  }
+
   async function runBatch(batchMetrics) {
     const viewRef = resolveView({ mode, metrics: batchMetrics })
-    const baseEntries = buildTrendMetricEntries(batchMetrics, { mode, source: 'base' })
-    const aggregateEntries = buildTrendMetricEntries(batchMetrics, { mode, source: 'aggregate' })
+    const availableColumns =
+      mode === 'uniodonto' && HAS_UNIODONTO_MART ? await getViewColumns(viewRef) : null
+    const baseEntries = buildTrendMetricEntriesWithColumns(batchMetrics, {
+      source: 'base',
+      availableColumns,
+    })
+    const aggregateEntries = buildTrendMetricEntriesWithColumns(batchMetrics, { source: 'aggregate' })
     const entries = baseEntries
     const result = {}
 

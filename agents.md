@@ -1,5 +1,9 @@
 # Historico da conversa (agents)
 
+## 2026-02-05T16:31:32Z
+- User: informou que ainda estava sem funcionar e recebeu erros 500 ao carregar séries históricas.
+- Agent: adicionou fallback para usar fórmulas quando as colunas precomputadas não existem na tabela mart, evitando falhas por schema desatualizado.
+
 ## 2026-02-05T15:12:29Z
 - User: reportou que os graficos "Evolução dos indicadores Uniodonto" estão sem dados.
 - Agent: adicionou divisão de lotes e fallback por split nas séries históricas para reduzir consultas grandes e permitir retorno parcial em caso de falha.
