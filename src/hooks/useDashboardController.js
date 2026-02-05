@@ -87,7 +87,7 @@ function computePorteFromBeneficiarios(value) {
 }
 
 
-export function useDashboardController() {
+export function useDashboardController({ activeTab = 'indicadores' } = {}) {
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState(null)
   const [filters, setFilters] = useState({ ...defaultFilters })
@@ -115,6 +115,7 @@ export function useDashboardController() {
   const [tableData, setTableData] = useState({ rows: [], columns: [] })
   const [isQuerying, setIsQuerying] = useState(false)
   const [regulatoryScore, setRegulatoryScore] = useState({ data: null, isLoading: false, error: null })
+  const queryCounterRef = useRef(0)
 
   const [comparisonFilters, setComparisonFilters] = useState(() => createDefaultComparisonFilters())
   const [comparisonFiltersDraft, setComparisonFiltersDraft] = useState(() => createDefaultComparisonFilters())
@@ -181,6 +182,10 @@ export function useDashboardController() {
     }
     return ['regulatory_score', ...rankingCatalog.map((metric) => metric.id)]
   }, [uniodontoMode])
+
+  const isIndicatorsTab = activeTab === 'indicadores'
+  const isRankingTab = activeTab === 'ranking'
+  const isHistoryTab = activeTab === 'historico'
 
   const resolvedFilters = useMemo(() => {
     let nextFilters = { ...filters }
@@ -296,8 +301,9 @@ export function useDashboardController() {
   }, [filters.search, operatorContext?.name, options.operadoras, applyOperatorSelection])
 
   useEffect(() => {
-    if (status !== 'ready') return
+    if (status !== 'ready' || !isIndicatorsTab) return
     let cancelled = false
+    queryCounterRef.current += 1
     setIsQuerying(true)
     async function runQueries() {
       try {
@@ -312,8 +318,6 @@ export function useDashboardController() {
               regAns: operatorContext?.regAns ? [operatorContext.regAns] : resolvedFilters.regAns,
             })
           : applyUniodontoModeFilters(applyComparisonFilters(comparisonPeriodFilters))
-        const baseRankingFilters = { ...resolvedFilters, search: '' }
-        const rankingFilters = applyUniodontoModeFilters(applyComparisonFilters(baseRankingFilters))
         const tableOptions = operatorContext?.name
           ? {
               includeAllColumns: true,
@@ -321,6 +325,52 @@ export function useDashboardController() {
               operatorName: operatorContext.name,
             }
           : {}
+        const [summary, table, monetary] = await Promise.all([
+          fetchKpiSummary(summaryFilters),
+          fetchTableData(applyUniodontoModeFilters(resolvedFilters), tableOptions),
+          fetchMonetarySummary(summaryFilters),
+        ])
+        if (cancelled) return
+        setKpis(summary)
+        setTableData(table)
+        setMonetarySummary(monetary)
+      } catch (err) {
+        if (cancelled) return
+        console.error('[Dashboard] Query error', err)
+        setError(err)
+      } finally {
+        if (!cancelled) {
+          queryCounterRef.current = Math.max(0, queryCounterRef.current - 1)
+          if (queryCounterRef.current === 0) {
+            setIsQuerying(false)
+          }
+        }
+      }
+    }
+    runQueries()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    status,
+    isIndicatorsTab,
+    resolvedFilters,
+    uniodontoMode,
+    applyComparisonFilters,
+    applyUniodontoModeFilters,
+    operatorContext?.name,
+    operatorContext?.regAns,
+  ])
+
+  useEffect(() => {
+    if (status !== 'ready' || !isRankingTab) return
+    let cancelled = false
+    queryCounterRef.current += 1
+    setIsQuerying(true)
+    async function runQueries() {
+      try {
+        const baseRankingFilters = { ...resolvedFilters, search: '' }
+        const rankingFilters = applyUniodontoModeFilters(applyComparisonFilters(baseRankingFilters))
         const rankingPromise = uniodontoMode
           ? fetchUniodontoRanking(uniodontoRankingMetric, rankingFilters, null, uniodontoRankingOrder, {
               operatorName: operatorContext?.name ?? null,
@@ -344,26 +394,20 @@ export function useDashboardController() {
           console.warn('[Dashboard] Falha ao carregar ranking monetário', err)
           return { rows: [], operatorRow: null }
         })
-        const [summary, ranking, table, monetary, monetaryRanking] = await Promise.all([
-          fetchKpiSummary(summaryFilters),
-          rankingPromise,
-          fetchTableData(applyUniodontoModeFilters(resolvedFilters), tableOptions),
-          fetchMonetarySummary(summaryFilters),
-          monetaryRankingPromise,
-        ])
+        const [ranking, monetaryRanking] = await Promise.all([rankingPromise, monetaryRankingPromise])
         if (cancelled) return
-        setKpis(summary)
         setRankingData(ranking)
         setMonetaryRankingData(monetaryRanking)
-        setTableData(table)
-        setMonetarySummary(monetary)
       } catch (err) {
         if (cancelled) return
         console.error('[Dashboard] Query error', err)
         setError(err)
       } finally {
         if (!cancelled) {
-          setIsQuerying(false)
+          queryCounterRef.current = Math.max(0, queryCounterRef.current - 1)
+          if (queryCounterRef.current === 0) {
+            setIsQuerying(false)
+          }
         }
       }
     }
@@ -373,6 +417,7 @@ export function useDashboardController() {
     }
   }, [
     status,
+    isRankingTab,
     resolvedFilters,
     rankingMetricState,
     rankingOrder,
@@ -384,11 +429,13 @@ export function useDashboardController() {
     applyComparisonFilters,
     applyUniodontoModeFilters,
     operatorContext?.name,
-    operatorContext?.regAns,
   ])
 
   useEffect(() => {
-    if (status !== 'ready') return
+    if (status !== 'ready' || !isHistoryTab) {
+      setIsTrendLoading(false)
+      return
+    }
     let cancelled = false
     setIsTrendLoading(true)
     async function loadAllTrends() {
@@ -413,7 +460,15 @@ export function useDashboardController() {
     return () => {
       cancelled = true
     }
-  }, [status, trendFilters, operatorContext?.name, comparisonFilterQuery, trendMetricList, applyUniodontoModeFilters])
+  }, [
+    status,
+    isHistoryTab,
+    trendFilters,
+    operatorContext?.name,
+    comparisonFilterQuery,
+    trendMetricList,
+    applyUniodontoModeFilters,
+  ])
 
   useEffect(() => {
     if (status !== 'ready') return

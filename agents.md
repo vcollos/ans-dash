@@ -1,5 +1,9 @@
 # Historico da conversa (agents)
 
+## 2026-02-05T16:41:41Z
+- User: pediu para dividir o carregamento em 3 abas (indicadores, ranking, gráficos históricos).
+- Agent: adicionou abas no dashboard e separou as consultas por aba com carregamento lazy.
+
 ## 2026-02-05T16:31:32Z
 - User: informou que ainda estava sem funcionar e recebeu erros 500 ao carregar séries históricas.
 - Agent: adicionou fallback para usar fórmulas quando as colunas precomputadas não existem na tabela mart, evitando falhas por schema desatualizado.

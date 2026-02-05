@@ -13,6 +13,7 @@ import MonetarySummary from './components/dashboard/MonetarySummary'
 import { Skeleton } from './components/ui/skeleton'
 import { Card, CardContent } from './components/ui/card'
 import { Button } from './components/ui/button'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from './components/ui/tabs'
 import { describeComparisonFilters } from './lib/comparisonModes'
 import DataLoadingIndicator from './components/dashboard/DataLoadingIndicator'
 import { AuthProvider } from './contexts/AuthProvider'
@@ -60,6 +61,7 @@ function ErrorState({ error, onRetry }) {
 
 function DashboardApp({ onLogout }) {
   const [filtersSidebarOpen, setFiltersSidebarOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState('indicadores')
   const {
     status,
     error,
@@ -96,7 +98,7 @@ function DashboardApp({ onLogout }) {
     resetComparisonFiltersState,
     monetarySummary,
     regulatoryScore,
-  } = useDashboardController()
+  } = useDashboardController({ activeTab })
 
   const comparisonLabel = useMemo(() => describeComparisonFilters(comparisonFilters), [comparisonFilters])
   const trendPrimaryLabel = operatorInsight?.operatorName ?? 'Média dos filtros'
@@ -184,65 +186,78 @@ function DashboardApp({ onLogout }) {
           </>
         ) : null}
         <div className="space-y-6 min-w-0">
-            {uniodontoMode ? (
-              <UniodontoKpiCards
-                snapshot={operatorInsight}
-                fallbackSummary={kpis}
-                peerSummary={uniodontoPeerSummary}
-                onPeriodChange={setOperatorPeriod}
-                period={operatorPeriod}
-                peerLabel={comparisonLabel}
-                fallbackPeriods={periodOptions}
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="w-fit">
+              <TabsTrigger value="indicadores">Indicadores</TabsTrigger>
+              <TabsTrigger value="ranking">Ranking</TabsTrigger>
+              <TabsTrigger value="historico">Gráficos históricos</TabsTrigger>
+            </TabsList>
+            <TabsContent value="indicadores" className="mt-6 space-y-6">
+              {uniodontoMode ? (
+                <UniodontoKpiCards
+                  snapshot={operatorInsight}
+                  fallbackSummary={kpis}
+                  peerSummary={uniodontoPeerSummary}
+                  onPeriodChange={setOperatorPeriod}
+                  period={operatorPeriod}
+                  peerLabel={comparisonLabel}
+                  fallbackPeriods={periodOptions}
+                />
+              ) : (
+                <KpiCards
+                  snapshot={operatorInsight}
+                  fallbackSummary={kpis}
+                  peerSummary={ansPeerSummary}
+                  onPeriodChange={setOperatorPeriod}
+                  period={operatorPeriod}
+                  peerLabel={comparisonLabel}
+                  fallbackPeriods={periodOptions}
+                  regulatoryScore={regulatoryScore}
+                />
+              )}
+              <MonetarySummary summary={monetarySummary} isLoading={isQuerying} className="h-full" />
+              <DataTable
+                rows={tableData.rows ?? []}
+                columns={tableData.columns ?? []}
+                isLoading={isQuerying}
+                maxHeightClass="max-h-[620px]"
               />
-            ) : (
-              <KpiCards
-                snapshot={operatorInsight}
-                fallbackSummary={kpis}
-                peerSummary={ansPeerSummary}
-                onPeriodChange={setOperatorPeriod}
-                period={operatorPeriod}
-                peerLabel={comparisonLabel}
-                fallbackPeriods={periodOptions}
-                regulatoryScore={regulatoryScore}
+            </TabsContent>
+            <TabsContent value="ranking" className="mt-6 space-y-6">
+              <RankingPanel
+                indicatorRanking={rankingData.rows}
+                operatorRow={rankingData.operatorRow}
+                operatorName={operatorInsight?.operatorName}
+                comparisonLabel={comparisonLabel}
+                indicatorMetric={rankingMetric}
+                onIndicatorMetricChange={setRankingMetric}
+                isUniodontoMode={uniodontoMode}
+                uniodontoMetric={uniodontoRankingMetric}
+                onUniodontoMetricChange={setUniodontoRankingMetric}
+                monetaryRanking={monetaryRankingData.rows}
+                monetaryOperatorRow={monetaryRankingData.operatorRow}
+                monetaryMetric={monetaryRankingMetric}
+                onMonetaryMetricChange={setMonetaryRankingMetric}
+                onOperatorClick={(row) => applyOperatorSelection(row.nome_operadora)}
               />
-            )}
-            <MonetarySummary summary={monetarySummary} isLoading={isQuerying} className="h-full" />
-            <RankingPanel
-              indicatorRanking={rankingData.rows}
-              operatorRow={rankingData.operatorRow}
-              operatorName={operatorInsight?.operatorName}
-              comparisonLabel={comparisonLabel}
-              indicatorMetric={rankingMetric}
-              onIndicatorMetricChange={setRankingMetric}
-              isUniodontoMode={uniodontoMode}
-              uniodontoMetric={uniodontoRankingMetric}
-              onUniodontoMetricChange={setUniodontoRankingMetric}
-              monetaryRanking={monetaryRankingData.rows}
-              monetaryOperatorRow={monetaryRankingData.operatorRow}
-              monetaryMetric={monetaryRankingMetric}
-              onMonetaryMetricChange={setMonetaryRankingMetric}
-              onOperatorClick={(row) => applyOperatorSelection(row.nome_operadora)}
-            />
-            <IndicatorTrendChart
-              dataByMetric={trendSeriesByMetric}
-              isLoading={isTrendLoading || isQuerying}
-              primaryLabel={trendPrimaryLabel}
-              comparisonLabel={comparisonLabel}
-              metrics={uniodontoMode ? UNIODONTO_INDICATORS : null}
-              title={uniodontoMode ? 'Evolução dos indicadores Uniodonto' : undefined}
-              description={
-                uniodontoMode
-                  ? 'Séries históricas dos indicadores exclusivos do sistema Uniodonto.'
-                  : undefined
-              }
-            />
-            <DataTable
-              rows={tableData.rows ?? []}
-              columns={tableData.columns ?? []}
-              isLoading={isQuerying}
-              maxHeightClass="max-h-[620px]"
-            />
-          </div>
+            </TabsContent>
+            <TabsContent value="historico" className="mt-6 space-y-6">
+              <IndicatorTrendChart
+                dataByMetric={trendSeriesByMetric}
+                isLoading={isTrendLoading || isQuerying}
+                primaryLabel={trendPrimaryLabel}
+                comparisonLabel={comparisonLabel}
+                metrics={uniodontoMode ? UNIODONTO_INDICATORS : null}
+                title={uniodontoMode ? 'Evolução dos indicadores Uniodonto' : undefined}
+                description={
+                  uniodontoMode
+                    ? 'Séries históricas dos indicadores exclusivos do sistema Uniodonto.'
+                    : undefined
+                }
+              />
+            </TabsContent>
+          </Tabs>
+        </div>
       </main>
     </div>
   )
