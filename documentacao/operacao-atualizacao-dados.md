@@ -2,6 +2,27 @@
 
 Este documento descreve o procedimento que o administrador deve seguir sempre que um novo periodo de dados for publicado (atualizacao trimestral).
 
+## Datasets e tabelas (novos e existentes)
+
+### 1) Dataset de origem (datalake)
+Projeto: `bigdata-467917`  
+Dataset: `datalake_ans`
+
+Principais objetos:
+- `indicadores_curados` (view base com as regras e ajustes de dados)
+- `indicadores_curados_snapshot` (tabela materializada por periodo)
+- `prestadores_ativos_uniodonto_origem` (origem de prestadores para o dashboard)
+
+### 2) Dataset do dashboard (novo)
+Projeto: `bigdata-467917`  
+Dataset: `dash_ans` (sem hifen; BigQuery nao permite `-` no ID do dataset)
+
+Marts usados pelo dashboard:
+- `indicadores_mart_ans` (pré-calculo dos indicadores RN 518)
+- `indicadores_mart_uniodonto` (pré-calculo dos indicadores Uniodonto)
+
+Observacao: o app usa as marts quando `VITE_MART_ANS_TABLE` e `VITE_MART_UNIODONTO_TABLE` estao configuradas.
+
 ## Visao geral do fluxo
 1) Ingestao/atualizacao dos dados brutos no BigQuery.
 2) Atualizacao da view base de indicadores (indicadores_curados) se houver mudancas de schema.
@@ -88,12 +109,12 @@ npm run data:materialize-bq-mart
 Exemplos de consultas:
 ```
 -- ultimo periodo disponivel
-SELECT MAX(periodo_id) AS ultimo_periodo FROM `bigdata-467917.datalake_ans.indicadores_mart_ans`;
-SELECT MAX(periodo_id) AS ultimo_periodo FROM `bigdata-467917.datalake_ans.indicadores_mart_uniodonto`;
+SELECT MAX(periodo_id) AS ultimo_periodo FROM `bigdata-467917.dash_ans.indicadores_mart_ans`;
+SELECT MAX(periodo_id) AS ultimo_periodo FROM `bigdata-467917.dash_ans.indicadores_mart_uniodonto`;
 
 -- total de operadoras no ultimo periodo
 SELECT periodo_id, COUNT(*) AS operadoras
-FROM `bigdata-467917.datalake_ans.indicadores_mart_ans`
+FROM `bigdata-467917.dash_ans.indicadores_mart_ans`
 GROUP BY periodo_id
 ORDER BY periodo_id DESC
 LIMIT 4;

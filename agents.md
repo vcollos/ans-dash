@@ -1,5 +1,13 @@
 # Historico da conversa (agents)
 
+## 2026-02-05T15:12:29Z
+- User: reportou que os graficos "Evolução dos indicadores Uniodonto" estão sem dados.
+- Agent: adicionou divisão de lotes e fallback por split nas séries históricas para reduzir consultas grandes e permitir retorno parcial em caso de falha.
+
+## 2026-02-02T16:11:41Z
+- User: pediu para documentar tudo, especialmente os novos bancos/datasets.
+- Agent: atualizou a documentacao de operacao com detalhes dos datasets/tabelas (datalake_ans e dash_ans) e exemplos de verificacao.
+
 ## 2026-02-02T15:33:11Z
 - User: reportou que a média filtrada não estava aparecendo em Uniodonto e ANS.
 - Agent: adicionou fetch dedicado de médias filtradas (ANS/Uniodonto) e fallback nos cards para usar o peer summary correto.

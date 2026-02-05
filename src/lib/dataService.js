@@ -1269,89 +1269,146 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
 }
 
 export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparisonContext = null) {
-  const mode = isUniodontoMetricList(metrics) ? 'uniodonto' : 'ans'
-  const viewRef = resolveView({ mode, metrics })
-  const baseEntries = buildTrendMetricEntries(metrics, { mode, source: 'base' })
-  const aggregateEntries = buildTrendMetricEntries(metrics, { mode, source: 'aggregate' })
-  const entries = baseEntries
-  const result = {}
+  const metricList = (metrics ?? []).filter((metric) => metric && metric !== 'regulatory_score')
+  const hasRegulatoryScore = Boolean(metrics?.includes?.('regulatory_score'))
+  const mode = isUniodontoMetricList(metricList) ? 'uniodonto' : 'ans'
+  const maxMetricsPerQuery = mode === 'uniodonto' ? (HAS_UNIODONTO_MART ? 24 : 10) : 24
 
-  if (metrics?.includes('regulatory_score')) {
-    result.regulatory_score = await fetchRegulatoryScoreTrend(filters, comparisonContext)
-  }
+  async function runBatch(batchMetrics) {
+    const viewRef = resolveView({ mode, metrics: batchMetrics })
+    const baseEntries = buildTrendMetricEntries(batchMetrics, { mode, source: 'base' })
+    const aggregateEntries = buildTrendMetricEntries(batchMetrics, { mode, source: 'aggregate' })
+    const entries = baseEntries
+    const result = {}
 
-  if (!entries.length) {
-    return result
-  }
+    if (!entries.length) {
+      return result
+    }
 
-  const isOperatorComparison = Boolean(comparisonContext?.operatorName)
-  if (isOperatorComparison) {
-    const sanitizedName = sanitizeSql(comparisonContext.operatorName)
-    const isVirtual = isVirtualUniodontoOperator(comparisonContext.operatorName)
-    const baseFilter = buildWhereClause({ ...filters, search: '' })
-    const operatorFilter = baseFilter ? baseFilter.replace(/^WHERE\s+/i, '') : ''
-    const comparisonFilter = getWhereExpression(comparisonContext.filters ?? {})
-    const { uniodonto: _ignoredUniodonto, ...comparisonWithoutUniodonto } = comparisonContext.filters ?? {}
-    const operatorComparisonFilter = getWhereExpression(comparisonWithoutUniodonto)
+    const isOperatorComparison = Boolean(comparisonContext?.operatorName)
+    if (isOperatorComparison) {
+      const sanitizedName = sanitizeSql(comparisonContext.operatorName)
+      const isVirtual = isVirtualUniodontoOperator(comparisonContext.operatorName)
+      const baseFilter = buildWhereClause({ ...filters, search: '' })
+      const operatorFilter = baseFilter ? baseFilter.replace(/^WHERE\s+/i, '') : ''
+      const comparisonFilter = getWhereExpression(comparisonContext.filters ?? {})
+      const { uniodonto: _ignoredUniodonto, ...comparisonWithoutUniodonto } = comparisonContext.filters ?? {}
+      const operatorComparisonFilter = getWhereExpression(comparisonWithoutUniodonto)
 
-    if (isVirtual) {
-      const availableColumns = await getViewColumns(viewRef)
-      const sumSelectList = buildCohortAggregateSelectList(COHORT_AGGREGATE_SUM_COLUMNS, availableColumns)
-      const operatorMetricSelect = buildTrendMetricSelectList(aggregateEntries)
-      const peerMetricSelect = buildTrendMetricSelectList(aggregateEntries)
-      const peerWherePieces = ['COALESCE(uniodonto, FALSE) IS FALSE']
+      if (isVirtual) {
+        const availableColumns = await getViewColumns(viewRef)
+        const sumSelectList = buildCohortAggregateSelectList(COHORT_AGGREGATE_SUM_COLUMNS, availableColumns)
+        const operatorMetricSelect = buildTrendMetricSelectList(aggregateEntries)
+        const peerMetricSelect = buildTrendMetricSelectList(aggregateEntries)
+        const peerWherePieces = ['COALESCE(uniodonto, FALSE) IS FALSE']
+        if (comparisonFilter) {
+          peerWherePieces.push(`(${comparisonFilter})`)
+        }
+        const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\n        AND ')}` : ''
+        const aliasSelectList = [
+          ...aggregateEntries.map(({ id }) => `operador.${quoteIdentifier(id)} AS ${quoteIdentifier(`operador_${id}`)}`),
+          ...aggregateEntries.map(({ id }) => `pares.${quoteIdentifier(id)} AS ${quoteIdentifier(`pares_${id}`)}`),
+        ]
+          .filter(Boolean)
+          .join(',\n      ')
+        const query = `
+          WITH operador_base AS (
+            SELECT *
+            FROM ${viewRef}
+            WHERE COALESCE(uniodonto, FALSE) IS TRUE
+            ${operatorFilter ? ` AND ${operatorFilter}` : ''}
+            ${operatorComparisonFilter ? ` AND (${operatorComparisonFilter})` : ''}
+          ), operador_agg AS (
+            SELECT
+              ano,
+              trimestre,
+              periodo
+              ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
+            FROM operador_base
+            GROUP BY ano, trimestre, periodo
+          ), operador AS (
+            SELECT
+              ano,
+              trimestre,
+              periodo
+              ${operatorMetricSelect ? `,\n      ${operatorMetricSelect}` : ''}
+            FROM operador_agg
+          ), pares_base AS (
+            SELECT *
+            FROM ${viewRef}
+            ${peerWhere}
+            ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
+          ), pares_agg AS (
+            SELECT
+              ano,
+              trimestre,
+              periodo
+              ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
+            FROM pares_base
+            GROUP BY ano, trimestre, periodo
+          ), pares AS (
+            SELECT
+              ano,
+              trimestre,
+              periodo
+              ${peerMetricSelect ? `,\n      ${peerMetricSelect}` : ''}
+            FROM pares_agg
+          )
+          SELECT
+            COALESCE(operador.ano, pares.ano) AS ano,
+            COALESCE(operador.trimestre, pares.trimestre) AS trimestre,
+            COALESCE(operador.periodo, pares.periodo) AS periodo
+            ${aliasSelectList ? `,\n      ${aliasSelectList}` : ''}
+          FROM operador
+          FULL OUTER JOIN pares ON operador.ano = pares.ano AND operador.trimestre = pares.trimestre
+          ORDER BY ano, trimestre
+        `
+        const rows = await runQuery(query)
+        aggregateEntries.forEach(({ id }) => {
+          result[id] = rows.map((row) => ({
+            ano: row.ano,
+            trimestre: row.trimestre,
+            periodo: row.periodo,
+            operador_valor: row[`operador_${id}`] ?? null,
+            pares_valor: row[`pares_${id}`] ?? null,
+          }))
+        })
+        return result
+      }
+
+      const operatorMetricSelect = buildTrendMetricSelectList(baseEntries)
+      const peerMetricSelect = buildTrendMetricSelectList(baseEntries, { aggregate: true })
+      const peerWherePieces = [`nome_operadora <> '${sanitizedName}'`]
       if (comparisonFilter) {
         peerWherePieces.push(`(${comparisonFilter})`)
       }
       const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\n        AND ')}` : ''
       const aliasSelectList = [
-        ...aggregateEntries.map(({ id }) => `operador.${quoteIdentifier(id)} AS ${quoteIdentifier(`operador_${id}`)}`),
-        ...aggregateEntries.map(({ id }) => `pares.${quoteIdentifier(id)} AS ${quoteIdentifier(`pares_${id}`)}`),
+        ...baseEntries.map(({ id }) => `operador.${quoteIdentifier(id)} AS ${quoteIdentifier(`operador_${id}`)}`),
+        ...baseEntries.map(({ id }) => `pares.${quoteIdentifier(id)} AS ${quoteIdentifier(`pares_${id}`)}`),
       ]
         .filter(Boolean)
         .join(',\n      ')
       const query = `
-        WITH operador_base AS (
-          SELECT *
-          FROM ${viewRef}
-          WHERE COALESCE(uniodonto, FALSE) IS TRUE
-          ${operatorFilter ? ` AND ${operatorFilter}` : ''}
-          ${operatorComparisonFilter ? ` AND (${operatorComparisonFilter})` : ''}
-        ), operador_agg AS (
-          SELECT
-            ano,
-            trimestre,
-            periodo
-            ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
-          FROM operador_base
-          GROUP BY ano, trimestre, periodo
-        ), operador AS (
+        WITH operador AS (
           SELECT
             ano,
             trimestre,
             periodo
             ${operatorMetricSelect ? `,\n      ${operatorMetricSelect}` : ''}
-          FROM operador_agg
-        ), pares_base AS (
-          SELECT *
           FROM ${viewRef}
-          ${peerWhere}
-          ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
-        ), pares_agg AS (
-          SELECT
-            ano,
-            trimestre,
-            periodo
-            ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
-          FROM pares_base
-          GROUP BY ano, trimestre, periodo
+          WHERE nome_operadora = '${sanitizedName}'
+          ${operatorFilter ? ` AND ${operatorFilter}` : ''}
         ), pares AS (
           SELECT
             ano,
             trimestre,
             periodo
             ${peerMetricSelect ? `,\n      ${peerMetricSelect}` : ''}
-          FROM pares_agg
+          FROM ${viewRef}
+          ${peerWhere}
+          ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
+          GROUP BY ano, trimestre, periodo
         )
         SELECT
           COALESCE(operador.ano, pares.ano) AS ano,
@@ -1363,7 +1420,7 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
         ORDER BY ano, trimestre
       `
       const rows = await runQuery(query)
-      aggregateEntries.forEach(({ id }) => {
+      baseEntries.forEach(({ id }) => {
         result[id] = rows.map((row) => ({
           ano: row.ano,
           trimestre: row.trimestre,
@@ -1375,47 +1432,17 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
       return result
     }
 
-    const operatorMetricSelect = buildTrendMetricSelectList(baseEntries)
-    const peerMetricSelect = buildTrendMetricSelectList(baseEntries, { aggregate: true })
-    const peerWherePieces = [`nome_operadora <> '${sanitizedName}'`]
-    if (comparisonFilter) {
-      peerWherePieces.push(`(${comparisonFilter})`)
-    }
-    const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\n        AND ')}` : ''
-    const aliasSelectList = [
-      ...baseEntries.map(({ id }) => `operador.${quoteIdentifier(id)} AS ${quoteIdentifier(`operador_${id}`)}`),
-      ...baseEntries.map(({ id }) => `pares.${quoteIdentifier(id)} AS ${quoteIdentifier(`pares_${id}`)}`),
-    ]
-      .filter(Boolean)
-      .join(',\n      ')
+    const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
+    const metricSelectList = buildTrendMetricSelectList(baseEntries, { aggregate: true })
     const query = `
-      WITH operador AS (
-        SELECT
-          ano,
-          trimestre,
-          periodo
-          ${operatorMetricSelect ? `,\n      ${operatorMetricSelect}` : ''}
-        FROM ${viewRef}
-        WHERE nome_operadora = '${sanitizedName}'
-        ${operatorFilter ? ` AND ${operatorFilter}` : ''}
-      ), pares AS (
-        SELECT
-          ano,
-          trimestre,
-          periodo
-          ${peerMetricSelect ? `,\n      ${peerMetricSelect}` : ''}
-        FROM ${viewRef}
-        ${peerWhere}
-        ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
-        GROUP BY ano, trimestre, periodo
-      )
       SELECT
-        COALESCE(operador.ano, pares.ano) AS ano,
-        COALESCE(operador.trimestre, pares.trimestre) AS trimestre,
-        COALESCE(operador.periodo, pares.periodo) AS periodo
-        ${aliasSelectList ? `,\n      ${aliasSelectList}` : ''}
-      FROM operador
-      FULL OUTER JOIN pares ON operador.ano = pares.ano AND operador.trimestre = pares.trimestre
+        ano,
+        trimestre,
+        periodo
+        ${metricSelectList ? `,\n      ${metricSelectList}` : ''}
+      FROM ${viewRef}
+      ${whereClause ?? ''}
+      GROUP BY ano, trimestre, periodo
       ORDER BY ano, trimestre
     `
     const rows = await runQuery(query)
@@ -1424,35 +1451,42 @@ export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparis
         ano: row.ano,
         trimestre: row.trimestre,
         periodo: row.periodo,
-        operador_valor: row[`operador_${id}`] ?? null,
-        pares_valor: row[`pares_${id}`] ?? null,
+        valor: row?.[id] ?? null,
       }))
     })
     return result
   }
 
-  const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
-  const metricSelectList = buildTrendMetricSelectList(baseEntries, { aggregate: true })
-  const query = `
-    SELECT
-      ano,
-      trimestre,
-      periodo
-      ${metricSelectList ? `,\n      ${metricSelectList}` : ''}
-    FROM ${viewRef}
-    ${whereClause ?? ''}
-    GROUP BY ano, trimestre, periodo
-    ORDER BY ano, trimestre
-  `
-  const rows = await runQuery(query)
-  baseEntries.forEach(({ id }) => {
-    result[id] = rows.map((row) => ({
-      ano: row.ano,
-      trimestre: row.trimestre,
-      periodo: row.periodo,
-      valor: row?.[id] ?? null,
-    }))
-  })
+  async function runBatchSafely(batchMetrics, depth = 0) {
+    if (!batchMetrics.length) return {}
+    if (batchMetrics.length > maxMetricsPerQuery) {
+      const chunks = []
+      for (let i = 0; i < batchMetrics.length; i += maxMetricsPerQuery) {
+        chunks.push(batchMetrics.slice(i, i + maxMetricsPerQuery))
+      }
+      const results = await Promise.all(chunks.map((chunk) => runBatchSafely(chunk, depth + 1)))
+      return Object.assign({}, ...results)
+    }
+    try {
+      return await runBatch(batchMetrics)
+    } catch (err) {
+      if (batchMetrics.length <= 1 || depth >= 4) {
+        console.warn('[Dashboard] Falha ao carregar séries históricas em lote', err)
+        return {}
+      }
+      const mid = Math.ceil(batchMetrics.length / 2)
+      const [left, right] = await Promise.all([
+        runBatchSafely(batchMetrics.slice(0, mid), depth + 1),
+        runBatchSafely(batchMetrics.slice(mid), depth + 1),
+      ])
+      return { ...left, ...right }
+    }
+  }
+
+  const result = await runBatchSafely(metricList)
+  if (hasRegulatoryScore) {
+    result.regulatory_score = await fetchRegulatoryScoreTrend(filters, comparisonContext)
+  }
   return result
 }
 
