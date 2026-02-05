@@ -1,5 +1,13 @@
 # Historico da conversa (agents)
 
+## 2026-02-05T19:06:10Z
+- User: mostrou tela de configuração do Cloud Build com build via Dockerfile e perguntou o que está configurado.
+- Agent: orientou selecionar "Arquivo de configuração do Cloud Build" e apontar para `/cloudbuild.yaml` para usar o pipeline do repo.
+
+## 2026-02-05T19:04:28Z
+- User: disse que o deploy no Cloud Run está configurado via atualização do GitHub e perguntou "?".
+- Agent: pediu confirmação do que deseja validar/ajustar no pipeline (gatilho, build ou deploy).
+
 ## 2026-02-05T16:41:41Z
 - User: pediu para dividir o carregamento em 3 abas (indicadores, ranking, gráficos históricos).
 - Agent: adicionou abas no dashboard e separou as consultas por aba com carregamento lazy.
