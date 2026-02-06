@@ -1,5 +1,13 @@
 # Historico da conversa (agents)
 
+## 2026-02-06T13:21:43Z
+- User: reportou que ao aplicar filtros o carregamento fica travado em 92% sem erro no console; perguntou se os indicadores são calculados toda vez no BigQuery ou se existe tabela pré-calculada, e sugeriu armazenar todos os indicadores + histórico para evitar recalcular fórmulas.
+- Agent: identificou que o 92% é o limite do indicador de progresso enquanto `isQuerying/isTrendLoading` estiverem ativos; corrigiu vazamento do contador de queries no `useDashboardController` (decremento não ocorria quando a effect era cancelada), evitando loading infinito; explicou que o app usa tabelas mart (`indicadores_mart_ans` e `indicadores_mart_uniodonto`) materializadas a partir do snapshot e que, quando configuradas, as consultas usam colunas pré-calculadas em vez de recalcular as fórmulas a cada filtro.
+
+## 2026-02-06T01:37:46Z
+- User: pediu um template (CSV ou formulário) para coleta mensal de demonstrações contábeis das operadoras Uniodonto, compatível com a estrutura ANS e com expansão para todas as contas.
+- Agent: mapeou o schema atual no BigQuery (padrão ANS) e as contas usadas nos indicadores; propôs um template CSV mensal com validações e sugestões de implementação.
+
 ## 2026-02-05T19:33:21Z
 - User: confirmou que o deploy passou.
 - Agent: encerrou a investigação.

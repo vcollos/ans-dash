@@ -339,11 +339,11 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
         console.error('[Dashboard] Query error', err)
         setError(err)
       } finally {
-        if (!cancelled) {
-          queryCounterRef.current = Math.max(0, queryCounterRef.current - 1)
-          if (queryCounterRef.current === 0) {
-            setIsQuerying(false)
-          }
+        // Always decrement, even when this effect is cancelled due to filter/tab changes.
+        // Otherwise the counter can "leak" and keep isQuerying=true forever.
+        queryCounterRef.current = Math.max(0, queryCounterRef.current - 1)
+        if (queryCounterRef.current === 0) {
+          setIsQuerying(false)
         }
       }
     }
@@ -403,11 +403,11 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
         console.error('[Dashboard] Query error', err)
         setError(err)
       } finally {
-        if (!cancelled) {
-          queryCounterRef.current = Math.max(0, queryCounterRef.current - 1)
-          if (queryCounterRef.current === 0) {
-            setIsQuerying(false)
-          }
+        // Always decrement, even when this effect is cancelled due to filter/tab changes.
+        // Otherwise the counter can "leak" and keep isQuerying=true forever.
+        queryCounterRef.current = Math.max(0, queryCounterRef.current - 1)
+        if (queryCounterRef.current === 0) {
+          setIsQuerying(false)
         }
       }
     }
