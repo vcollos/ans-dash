@@ -1,5 +1,13 @@
 # Historico da conversa (agents)
 
+## 2026-02-06T14:20:55Z
+- User: pediu para adicionar as recomendações de UX para a tabela larga do ranking.
+- Agent: adicionou colunas fixas à esquerda (#/Operadora/Nº ANS), sombras laterais indicando rolagem horizontal, botões de navegação horizontal (◀/▶), seletor de colunas visíveis (popover com busca e checkboxes) e scrollbars sempre visíveis no ranking; estendeu o componente `ScrollArea` para suportar `type` e `viewportRef`.
+
+## 2026-02-06T14:03:08Z
+- User: pediu melhoria de UX para tabela muito larga (ranking) devido a dificuldade de rolagem horizontal em mouse, comparando paginação (5-6 linhas) vs sticky header + rolagem horizontal.
+- Agent: implementou scrollbar horizontal visível via Radix `ScrollArea` com suporte a `scrollbars="both"` e aplicou no `RankingChart`; adicionou paginação opcional (6/10/20/50/tudo) mantendo header sticky e preservando estrutura/ordenação dos dados.
+
 ## 2026-02-06T13:21:43Z
 - User: reportou que ao aplicar filtros o carregamento fica travado em 92% sem erro no console; perguntou se os indicadores são calculados toda vez no BigQuery ou se existe tabela pré-calculada, e sugeriu armazenar todos os indicadores + histórico para evitar recalcular fórmulas.
 - Agent: identificou que o 92% é o limite do indicador de progresso enquanto `isQuerying/isTrendLoading` estiverem ativos; corrigiu vazamento do contador de queries no `useDashboardController` (decremento não ocorria quando a effect era cancelada), evitando loading infinito; explicou que o app usa tabelas mart (`indicadores_mart_ans` e `indicadores_mart_uniodonto`) materializadas a partir do snapshot e que, quando configuradas, as consultas usam colunas pré-calculadas em vez de recalcular as fórmulas a cada filtro.

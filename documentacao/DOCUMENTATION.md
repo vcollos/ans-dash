@@ -9,7 +9,7 @@ Fluxo resumido:
 1. Os dados são mantidos no BigQuery (views/tabelas curadas).
 2. A API Express executa consultas somente em views/tabelas permitidas.
 3. O frontend monta filtros e consulta o endpoint `/api/query`.
-4. Comentários IA podem ser gerados via OpenAI em endpoints dedicados.
+4. O frontend renderiza rankings e gráficos com navegação otimizada (ex.: tabelas largas com rolagem horizontal e cabeçalho fixo).
 
 ## 2. Estrutura de Diretórios Principal
 
@@ -98,6 +98,17 @@ Endpoints:
 ## 6. Frontend
 
 O frontend monta filtros e queries via `src/lib/dataService.js` e gerencia estado em `src/hooks/useDashboardController.js`. Não há upload de dataset nem fallback para CSV/Parquet local.
+
+### 6.1 Tabelas largas (ranking)
+
+Para melhorar a usabilidade em tabelas com muitas colunas (ex.: ranking), o UI inclui:
+- barra de rolagem horizontal visível (Radix ScrollArea)
+- cabeçalho fixo (sticky header)
+- colunas fixas à esquerda (ex.: `#`, `Operadora`, `Nº ANS`)
+- seletor de colunas visíveis (com busca)
+- botões de navegação horizontal (◀/▶)
+
+Implementação principal: `src/components/dashboard/RankingChart.jsx`.
 
 ## 7. Scripts
 

@@ -5,6 +5,14 @@
 - As colunas são indicadores econômico-financeiros da ANS (DM, DA, DC, DOP, COMB, LC, CT/PL, PMCR, PMPE, MLL, ROE, IRF etc.).
 - A primeira coluna `#` é a posição no ranking para o indicador escolhido.
 
+## Como navegar na tabela (quando há muitas colunas)
+- **Rolagem horizontal visível:** use a barra de rolagem horizontal (arrastando o “thumb”) para ver colunas à direita.
+- **Botões ◀/▶:** use os botões de navegação horizontal para “pular” colunas sem depender de mouse com scroll lateral.
+- **Cabeçalho fixo:** ao rolar para baixo, os nomes das colunas continuam visíveis (sticky header).
+- **Colunas fixas à esquerda:** `#`, `Operadora` e `Nº ANS` permanecem visíveis mesmo rolando horizontalmente.
+- **Seletor de colunas:** o botão **Colunas** permite mostrar/ocultar métricas e buscar pelo nome da coluna.
+- **Paginação (opcional):** ajuste **Linhas por página** (ex.: 6/10/20/50) para facilitar leitura; ou use **Tudo** para ver todas as operadoras de uma vez.
+
 ## Como o cálculo é feito
 - **Fonte dos dados:** view/tabela `indicadores_curados_snapshot` no BigQuery (ou a definida em `VITE_DATASET_VIEW`). Cada linha já traz os valores dos indicadores para `reg_ans`, `ano`, `trimestre`.
 - **Filtros aplicados:** Modalidade, Porte, Uniodonto, Ativa, Ano, Trimestre, busca por nome. O ranking só considera as operadoras que passam pelos filtros ativos.
