@@ -440,7 +440,7 @@ function RankingChart({
               <thead className="sticky top-0 z-20 bg-card/95 text-xs uppercase text-muted-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/80">
                 <tr>
                   <th
-                    className="sm:sticky sm:left-0 z-40 px-3 py-2 text-left bg-card/95 border-r border-border/70"
+                    className="sm:sticky sm:left-0 z-40 px-3 py-2 text-left bg-card border-r border-border/70"
                     style={{ left: 0, width: PINNED_RANK_WIDTH, minWidth: PINNED_RANK_WIDTH }}
                   >
                     <button
@@ -453,7 +453,7 @@ function RankingChart({
                     </button>
                   </th>
                   <th
-                    className="sm:sticky z-40 px-3 py-2 text-left bg-card/95"
+                    className="sm:sticky z-40 px-3 py-2 text-left bg-card"
                     style={{
                       left: PINNED_OPERATOR_LEFT,
                       width: PINNED_OPERATOR_WIDTH,
@@ -470,7 +470,7 @@ function RankingChart({
                     </button>
                   </th>
                   <th
-                    className="sm:sticky z-40 px-3 py-2 text-left bg-card/95 border-r border-border/70"
+                    className="sm:sticky z-40 px-3 py-2 text-left bg-card border-r border-border/70"
                     style={{ left: PINNED_ANS_LEFT, width: PINNED_ANS_WIDTH, minWidth: PINNED_ANS_WIDTH }}
                   >
                     <button
@@ -512,8 +512,8 @@ function RankingChart({
                     >
                       <td
                         className={cn(
-                          'sm:sticky sm:left-0 z-20 px-3 py-2 text-left text-xs text-muted-foreground bg-card group-hover:bg-muted/60 border-r border-border/70',
-                          isOperator && 'bg-primary/5',
+                          'sm:sticky sm:left-0 z-20 px-3 py-2 text-left text-xs text-muted-foreground bg-card group-hover:bg-muted border-r border-border/70',
+                          isOperator && 'bg-secondary',
                         )}
                         style={{ left: 0, width: PINNED_RANK_WIDTH, minWidth: PINNED_RANK_WIDTH }}
                       >
@@ -521,8 +521,8 @@ function RankingChart({
                       </td>
                       <td
                         className={cn(
-                          'sm:sticky z-20 px-3 py-2 text-left font-medium bg-card group-hover:bg-muted/60',
-                          isOperator && 'bg-primary/5',
+                          'sm:sticky z-20 px-3 py-2 text-left font-medium bg-card group-hover:bg-muted',
+                          isOperator && 'bg-secondary',
                         )}
                         style={{
                           left: PINNED_OPERATOR_LEFT,
@@ -534,8 +534,8 @@ function RankingChart({
                       </td>
                       <td
                         className={cn(
-                          'sm:sticky z-20 px-3 py-2 text-left text-xs text-muted-foreground bg-card group-hover:bg-muted/60 border-r border-border/70',
-                          isOperator && 'bg-primary/5',
+                          'sm:sticky z-20 px-3 py-2 text-left text-xs text-muted-foreground bg-card group-hover:bg-muted border-r border-border/70',
+                          isOperator && 'bg-secondary',
                         )}
                         style={{ left: PINNED_ANS_LEFT, width: PINNED_ANS_WIDTH, minWidth: PINNED_ANS_WIDTH }}
                       >

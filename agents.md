@@ -1,5 +1,9 @@
 # Historico da conversa (agents)
 
+## 2026-02-06T16:00:31Z
+- User: pediu para remover a transparência das colunas fixas à esquerda no ranking, pois ao rolar horizontalmente ficava difícil de ler.
+- Agent: tornou o fundo das colunas fixas (#/Operadora/Nº ANS) 100% opaco (incluindo hover e destaque da operadora), evitando “vazamento” visual das colunas ao fundo.
+
 ## 2026-02-06T14:20:55Z
 - User: pediu para adicionar as recomendações de UX para a tabela larga do ranking.
 - Agent: adicionou colunas fixas à esquerda (#/Operadora/Nº ANS), sombras laterais indicando rolagem horizontal, botões de navegação horizontal (◀/▶), seletor de colunas visíveis (popover com busca e checkboxes) e scrollbars sempre visíveis no ranking; estendeu o componente `ScrollArea` para suportar `type` e `viewportRef`.
