@@ -110,6 +110,14 @@ Para melhorar a usabilidade em tabelas com muitas colunas (ex.: ranking), o UI i
 
 Implementação principal: `src/components/dashboard/RankingChart.jsx`.
 
+### 6.2 Série Per Capita Uniodonto
+
+A aba de histórico em modo Uniodonto inclui o gráfico **Contraprestações e eventos per capita por modalidade de pagamento**, com comparação entre operadora selecionada e média filtrada.
+
+- componente: `src/components/dashboard/UniodontoPerCapitaChart.jsx`
+- query: `fetchUniodontoPerCapitaSeries` em `src/lib/dataService.js`
+- regras e SQL detalhados: `documentacao/contraprestacoes-eventos-per-capita-uniodonto.md`
+
 ## 7. Scripts
 
 | Script | Função |

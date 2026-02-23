@@ -11,6 +11,7 @@
     "dev:server": "node server/index.js",
     "build": "vite build",
     "lint": "eslint .",
+    "test": "node --test",
     "preview": "vite preview",
     "data:export-bq": "node scripts/export_indicadores_bq.js",
     "data:create-bq-view": "node scripts/create_bq_view.js",

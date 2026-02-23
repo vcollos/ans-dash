@@ -1,5 +1,9 @@
 # Historico da conversa (agents)
 
+## 2026-02-23T13:37:45Z
+- User: pediu implementar no modo Uniodonto um gráfico de "Contraprestações e eventos per capita por modalidade de pagamento", com comparação entre operadora selecionada e média dos filtros.
+- Agent: adicionou módulo de domínio da feature (`uniodontoPerCapita`), query dedicada em `dataService` com fallback para modalidade de pagamento (coluna dedicada ou regra por `vr_contraprestacoes_pre`), novo componente `UniodontoPerCapitaChart` na aba de históricos Uniodonto, integração no `useDashboardController`, documentação técnica da query/contas e testes unitários para regras de filtro/SQL.
+
 ## 2026-02-06T16:00:31Z
 - User: pediu para remover a transparência das colunas fixas à esquerda no ranking, pois ao rolar horizontalmente ficava difícil de ler.
 - Agent: tornou o fundo das colunas fixas (#/Operadora/Nº ANS) 100% opaco (incluindo hover e destaque da operadora), evitando “vazamento” visual das colunas ao fundo.

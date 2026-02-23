@@ -8,6 +8,7 @@ import KpiCards from './components/dashboard/KpiCards'
 import UniodontoKpiCards from './components/dashboard/UniodontoKpiCards'
 import RankingPanel from './components/dashboard/RankingPanel'
 import IndicatorTrendChart from './components/dashboard/IndicatorTrendChart'
+import UniodontoPerCapitaChart from './components/dashboard/UniodontoPerCapitaChart'
 import DataTable from './components/dashboard/DataTable'
 import MonetarySummary from './components/dashboard/MonetarySummary'
 import { Skeleton } from './components/ui/skeleton'
@@ -83,6 +84,10 @@ function DashboardApp({ onLogout }) {
     monetaryRankingData,
     trendSeriesByMetric,
     isTrendLoading,
+    uniodontoPerCapitaFilters,
+    updateUniodontoPerCapitaFilters,
+    uniodontoPerCapitaSeries,
+    isUniodontoPerCapitaLoading,
     tableData,
     isQuerying,
     updateFilters,
@@ -242,6 +247,17 @@ function DashboardApp({ onLogout }) {
               />
             </TabsContent>
             <TabsContent value="historico" className="mt-6 space-y-6">
+              {uniodontoMode ? (
+                <UniodontoPerCapitaChart
+                  series={uniodontoPerCapitaSeries}
+                  filters={uniodontoPerCapitaFilters}
+                  onFiltersChange={updateUniodontoPerCapitaFilters}
+                  isLoading={isUniodontoPerCapitaLoading || isQuerying}
+                  primaryLabel={trendPrimaryLabel}
+                  comparisonLabel={comparisonLabel}
+                  hasOperatorComparison={Boolean(operatorInsight?.operatorName)}
+                />
+              ) : null}
               <IndicatorTrendChart
                 dataByMetric={trendSeriesByMetric}
                 isLoading={isTrendLoading || isQuerying}

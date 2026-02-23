@@ -21,6 +21,11 @@ import {
   getUniodontoMetricSql,
   computeUniodontoMetrics,
 } from './uniodontoMetrics'
+import {
+  buildPaymentModalityWhereClause,
+  buildRevenueBaseExpression,
+  sanitizeUniodontoPerCapitaFilters,
+} from './uniodontoPerCapita'
 
 export const VIRTUAL_OPERATOR_UNIODONTO = 'Sistema Uniodonto'
 
@@ -475,6 +480,15 @@ function buildMonetarySelectList(alias, prefix = '') {
   return monetaryIndicatorPhysicalColumns
     .map((column) => `${alias}.${quoteIdentifier(column)} AS ${quoteIdentifier(`${prefix}${column}`)}`)
     .join(',\n      ')
+}
+
+function buildSafeRatioSql(numeratorExpression, denominatorExpression) {
+  return `
+    CASE
+      WHEN (${denominatorExpression}) IS NULL OR (${denominatorExpression}) = 0 THEN NULL
+      ELSE (${numeratorExpression}) / (${denominatorExpression})
+    END
+  `.trim()
 }
 
 const computeDeltaPercent = (current, previous) => {
@@ -1266,6 +1280,171 @@ export async function fetchTrendSeries(metric, filters, comparisonContext = null
     ORDER BY ano, trimestre
   `
   return runQuery(query)
+}
+
+function appendWhereClause(baseWhereClause, extraExpression) {
+  if (!extraExpression) return baseWhereClause ?? ''
+  if (!baseWhereClause) return `WHERE ${extraExpression}`
+  return `${baseWhereClause} AND (${extraExpression})`
+}
+
+function mapUniodontoPerCapitaRows(rows = [], { withComparison = false } = {}) {
+  return (rows ?? []).map((row) => ({
+    ano: row?.ano ?? null,
+    trimestre: row?.trimestre ?? null,
+    periodo: row?.periodo ?? (row?.ano && row?.trimestre ? `${row.ano}T${row.trimestre}` : null),
+    primaryRevenuePerCapita: withComparison ? row?.operador_receita_per_capita ?? null : row?.receita_per_capita ?? null,
+    primaryEventsPerCapita: withComparison ? row?.operador_eventos_per_capita ?? null : row?.eventos_per_capita ?? null,
+    comparisonRevenuePerCapita: withComparison ? row?.pares_receita_per_capita ?? null : null,
+    comparisonEventsPerCapita: withComparison ? row?.pares_eventos_per_capita ?? null : null,
+  }))
+}
+
+export async function fetchUniodontoPerCapitaSeries(filters = {}, perCapitaFilters = {}, comparisonContext = null) {
+  const viewRef = resolveView({ mode: 'uniodonto' })
+  const resolvedChartFilters = sanitizeUniodontoPerCapitaFilters(perCapitaFilters)
+  const availableColumns = await getViewColumns(viewRef)
+  const paymentWhereExpression = buildPaymentModalityWhereClause(resolvedChartFilters.paymentModality, {
+    availableColumns,
+  })
+  const revenueExpression = buildRevenueBaseExpression(resolvedChartFilters.revenueBase)
+  const beneficiariesTotalExpression = 'SUM(COALESCE(qt_beneficiarios, 0))'
+  const revenuePerCapitaExpression = buildSafeRatioSql(`SUM(${revenueExpression})`, beneficiariesTotalExpression)
+  const eventsPerCapitaExpression = buildSafeRatioSql('SUM(COALESCE(vr_eventos_liquidos, 0))', beneficiariesTotalExpression)
+
+  if (comparisonContext?.operatorName) {
+    const sanitizedName = sanitizeSql(comparisonContext.operatorName)
+    const isVirtual = isVirtualUniodontoOperator(comparisonContext.operatorName)
+    const baseFilter = buildWhereClause({ ...filters, search: '' })
+    const operatorFilter = baseFilter ? baseFilter.replace(/^WHERE\s+/i, '') : ''
+    const comparisonFilter = getWhereExpression(comparisonContext.filters ?? {})
+
+    if (isVirtual) {
+      const { uniodonto: _ignoredUniodonto, ...comparisonWithoutUniodonto } = comparisonContext.filters ?? {}
+      const operatorComparisonFilter = getWhereExpression(comparisonWithoutUniodonto)
+      const operatorWhere = [
+        'COALESCE(uniodonto, FALSE) IS TRUE',
+        operatorFilter,
+        operatorComparisonFilter ? `(${operatorComparisonFilter})` : '',
+        paymentWhereExpression,
+      ]
+        .filter(Boolean)
+        .join('\n      AND ')
+      const peerWhere = [
+        'COALESCE(uniodonto, FALSE) IS FALSE',
+        operatorFilter,
+        comparisonFilter ? `(${comparisonFilter})` : '',
+        paymentWhereExpression,
+      ]
+        .filter(Boolean)
+        .join('\n      AND ')
+      const query = `
+        WITH operador AS (
+          SELECT
+            ano,
+            trimestre,
+            periodo,
+            ${revenuePerCapitaExpression} AS operador_receita_per_capita,
+            ${eventsPerCapitaExpression} AS operador_eventos_per_capita
+          FROM ${viewRef}
+          WHERE ${operatorWhere}
+          GROUP BY ano, trimestre, periodo
+        ), pares AS (
+          SELECT
+            ano,
+            trimestre,
+            periodo,
+            ${revenuePerCapitaExpression} AS pares_receita_per_capita,
+            ${eventsPerCapitaExpression} AS pares_eventos_per_capita
+          FROM ${viewRef}
+          WHERE ${peerWhere}
+          GROUP BY ano, trimestre, periodo
+        )
+        SELECT
+          COALESCE(operador.ano, pares.ano) AS ano,
+          COALESCE(operador.trimestre, pares.trimestre) AS trimestre,
+          COALESCE(operador.periodo, pares.periodo) AS periodo,
+          operador.operador_receita_per_capita,
+          operador.operador_eventos_per_capita,
+          pares.pares_receita_per_capita,
+          pares.pares_eventos_per_capita
+        FROM operador
+        FULL OUTER JOIN pares ON operador.ano = pares.ano AND operador.trimestre = pares.trimestre
+        ORDER BY ano, trimestre
+      `
+      const rows = await runQuery(query)
+      return mapUniodontoPerCapitaRows(rows, { withComparison: true })
+    }
+
+    const operatorWhere = [
+      `nome_operadora = '${sanitizedName}'`,
+      operatorFilter,
+      paymentWhereExpression,
+    ]
+      .filter(Boolean)
+      .join('\n      AND ')
+    const peerWhere = [
+      `nome_operadora <> '${sanitizedName}'`,
+      operatorFilter,
+      comparisonFilter ? `(${comparisonFilter})` : '',
+      paymentWhereExpression,
+    ]
+      .filter(Boolean)
+      .join('\n      AND ')
+    const query = `
+      WITH operador AS (
+        SELECT
+          ano,
+          trimestre,
+          periodo,
+          ${revenuePerCapitaExpression} AS operador_receita_per_capita,
+          ${eventsPerCapitaExpression} AS operador_eventos_per_capita
+        FROM ${viewRef}
+        WHERE ${operatorWhere}
+        GROUP BY ano, trimestre, periodo
+      ), pares AS (
+        SELECT
+          ano,
+          trimestre,
+          periodo,
+          ${revenuePerCapitaExpression} AS pares_receita_per_capita,
+          ${eventsPerCapitaExpression} AS pares_eventos_per_capita
+        FROM ${viewRef}
+        WHERE ${peerWhere}
+        GROUP BY ano, trimestre, periodo
+      )
+      SELECT
+        COALESCE(operador.ano, pares.ano) AS ano,
+        COALESCE(operador.trimestre, pares.trimestre) AS trimestre,
+        COALESCE(operador.periodo, pares.periodo) AS periodo,
+        operador.operador_receita_per_capita,
+        operador.operador_eventos_per_capita,
+        pares.pares_receita_per_capita,
+        pares.pares_eventos_per_capita
+      FROM operador
+      FULL OUTER JOIN pares ON operador.ano = pares.ano AND operador.trimestre = pares.trimestre
+      ORDER BY ano, trimestre
+    `
+    const rows = await runQuery(query)
+    return mapUniodontoPerCapitaRows(rows, { withComparison: true })
+  }
+
+  const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
+  const finalWhereClause = appendWhereClause(whereClause, paymentWhereExpression)
+  const query = `
+    SELECT
+      ano,
+      trimestre,
+      periodo,
+      ${revenuePerCapitaExpression} AS receita_per_capita,
+      ${eventsPerCapitaExpression} AS eventos_per_capita
+    FROM ${viewRef}
+    ${finalWhereClause ?? ''}
+    GROUP BY ano, trimestre, periodo
+    ORDER BY ano, trimestre
+  `
+  const rows = await runQuery(query)
+  return mapUniodontoPerCapitaRows(rows)
 }
 
 export async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparisonContext = null) {

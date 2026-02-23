@@ -12,6 +12,7 @@ import {
   fetchAnsPeerSummary,
   fetchUniodontoPeerSummary,
   fetchUniodontoRanking,
+  fetchUniodontoPerCapitaSeries,
   fetchTrendSeriesBatch,
   fetchTableData,
   fetchAvailablePeriods,
@@ -23,6 +24,10 @@ import { DEFAULT_COMPARISON_FILTERS, comparisonFiltersToQuery, sanitizeCompariso
 import { metricFormulas } from '../lib/metricFormulas.js'
 import { evaluateRegulatoryScore } from '../lib/regulatoryScore'
 import { DEFAULT_UNIODONTO_RANKING_METRIC, UNIODONTO_INDICATORS, UNIODONTO_RANKING_METRICS } from '../lib/uniodontoMetrics'
+import {
+  UNIODONTO_PER_CAPITA_DEFAULT_FILTERS,
+  sanitizeUniodontoPerCapitaFilters,
+} from '../lib/uniodontoPerCapita'
 
 const rankingCatalog = metricFormulas.filter((metric) => metric.showInCards)
 const uniodontoRankingCatalog = UNIODONTO_RANKING_METRICS
@@ -76,6 +81,8 @@ const defaultOptions = {
 }
 
 const createDefaultComparisonFilters = () => sanitizeComparisonFilters(DEFAULT_COMPARISON_FILTERS)
+const createDefaultUniodontoPerCapitaFilters = () =>
+  sanitizeUniodontoPerCapitaFilters(UNIODONTO_PER_CAPITA_DEFAULT_FILTERS)
 
 
 function computePorteFromBeneficiarios(value) {
@@ -112,6 +119,9 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
   const [uniodontoPeerSummary, setUniodontoPeerSummary] = useState(null)
   const [trendSeriesByMetric, setTrendSeriesByMetric] = useState({})
   const [isTrendLoading, setIsTrendLoading] = useState(false)
+  const [uniodontoPerCapitaFilters, setUniodontoPerCapitaFilters] = useState(() => createDefaultUniodontoPerCapitaFilters())
+  const [uniodontoPerCapitaSeries, setUniodontoPerCapitaSeries] = useState([])
+  const [isUniodontoPerCapitaLoading, setIsUniodontoPerCapitaLoading] = useState(false)
   const [tableData, setTableData] = useState({ rows: [], columns: [] })
   const [isQuerying, setIsQuerying] = useState(false)
   const [regulatoryScore, setRegulatoryScore] = useState({ data: null, isLoading: false, error: null })
@@ -471,6 +481,55 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
   ])
 
   useEffect(() => {
+    if (status !== 'ready' || !isHistoryTab || !uniodontoMode) {
+      setIsUniodontoPerCapitaLoading(false)
+      if (!uniodontoMode) {
+        setUniodontoPerCapitaSeries([])
+      }
+      return
+    }
+    let cancelled = false
+    setIsUniodontoPerCapitaLoading(true)
+    async function loadPerCapitaSeries() {
+      try {
+        const comparisonContext = operatorContext?.name
+          ? {
+              operatorName: operatorContext.name,
+              filters: applyUniodontoModeFilters(comparisonFilterQuery),
+            }
+          : null
+        const rows = await fetchUniodontoPerCapitaSeries(
+          trendFilters,
+          uniodontoPerCapitaFilters,
+          comparisonContext,
+        )
+        if (cancelled) return
+        setUniodontoPerCapitaSeries(rows ?? [])
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[Dashboard] Falha ao carregar série de contraprestações/eventos per capita', err)
+          setUniodontoPerCapitaSeries([])
+        }
+      } finally {
+        if (!cancelled) setIsUniodontoPerCapitaLoading(false)
+      }
+    }
+    loadPerCapitaSeries()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    status,
+    isHistoryTab,
+    uniodontoMode,
+    trendFilters,
+    operatorContext?.name,
+    comparisonFilterQuery,
+    uniodontoPerCapitaFilters,
+    applyUniodontoModeFilters,
+  ])
+
+  useEffect(() => {
     if (status !== 'ready') return
     if (uniodontoMode) {
       setRegulatoryScore({ data: null, isLoading: false, error: null })
@@ -720,6 +779,15 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
     setMonetaryRankingOrder(getMonetaryMetricOrder(nextMetric))
   }, [])
 
+  const updateUniodontoPerCapitaFilters = useCallback((partialFilters = {}) => {
+    setUniodontoPerCapitaFilters((prev) =>
+      sanitizeUniodontoPerCapitaFilters({
+        ...prev,
+        ...partialFilters,
+      }),
+    )
+  }, [])
+
   function updateFilters(partial) {
     setFilters((prev) => ({
       ...prev,
@@ -771,6 +839,10 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
     monetaryRankingData,
     trendSeriesByMetric,
     isTrendLoading,
+    uniodontoPerCapitaFilters,
+    updateUniodontoPerCapitaFilters,
+    uniodontoPerCapitaSeries,
+    isUniodontoPerCapitaLoading,
     tableData,
     isQuerying,
     updateFilters,
