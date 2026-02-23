@@ -9,8 +9,8 @@ Adicionar no dashboard Uniodonto um gráfico histórico comparativo entre:
 
 com duas séries per capita:
 
-- receita per capita (base configurável)
-- eventos per capita
+- receita per capita 12m (base configurável)
+- eventos per capita 12m
 
 ## Estrutura de dados contábil ANS usada
 
@@ -31,6 +31,10 @@ Bases de receita disponíveis:
 Eventos per capita:
 
 - `COALESCE(vr_eventos_liquidos, 0)`
+
+Regra de diluição temporal aplicada no componente:
+
+- ambos os cálculos são divididos por `12` meses (`/ 12`) após a divisão por beneficiários.
 
 ## Filtros de modalidade de pagamento
 
@@ -59,11 +63,11 @@ WITH operador AS (
     periodo,
     CASE
       WHEN SUM(COALESCE(qt_beneficiarios, 0)) = 0 THEN NULL
-      ELSE SUM(<BASE_RECEITA_SQL>) / SUM(COALESCE(qt_beneficiarios, 0))
+      ELSE SUM(<BASE_RECEITA_SQL>) / (SUM(COALESCE(qt_beneficiarios, 0)) * 12)
     END AS operador_receita_per_capita,
     CASE
       WHEN SUM(COALESCE(qt_beneficiarios, 0)) = 0 THEN NULL
-      ELSE SUM(COALESCE(vr_eventos_liquidos, 0)) / SUM(COALESCE(qt_beneficiarios, 0))
+      ELSE SUM(COALESCE(vr_eventos_liquidos, 0)) / (SUM(COALESCE(qt_beneficiarios, 0)) * 12)
     END AS operador_eventos_per_capita
   FROM `<VIEW_UNIODONTO>`
   WHERE nome_operadora = '<OPERADORA>'
@@ -78,11 +82,11 @@ pares AS (
     periodo,
     CASE
       WHEN SUM(COALESCE(qt_beneficiarios, 0)) = 0 THEN NULL
-      ELSE SUM(<BASE_RECEITA_SQL>) / SUM(COALESCE(qt_beneficiarios, 0))
+      ELSE SUM(<BASE_RECEITA_SQL>) / (SUM(COALESCE(qt_beneficiarios, 0)) * 12)
     END AS pares_receita_per_capita,
     CASE
       WHEN SUM(COALESCE(qt_beneficiarios, 0)) = 0 THEN NULL
-      ELSE SUM(COALESCE(vr_eventos_liquidos, 0)) / SUM(COALESCE(qt_beneficiarios, 0))
+      ELSE SUM(COALESCE(vr_eventos_liquidos, 0)) / (SUM(COALESCE(qt_beneficiarios, 0)) * 12)
     END AS pares_eventos_per_capita
   FROM `<VIEW_UNIODONTO>`
   WHERE nome_operadora <> '<OPERADORA>'
@@ -112,11 +116,11 @@ SELECT
   periodo,
   CASE
     WHEN SUM(COALESCE(qt_beneficiarios, 0)) = 0 THEN NULL
-    ELSE SUM(<BASE_RECEITA_SQL>) / SUM(COALESCE(qt_beneficiarios, 0))
+    ELSE SUM(<BASE_RECEITA_SQL>) / (SUM(COALESCE(qt_beneficiarios, 0)) * 12)
   END AS receita_per_capita,
   CASE
     WHEN SUM(COALESCE(qt_beneficiarios, 0)) = 0 THEN NULL
-    ELSE SUM(COALESCE(vr_eventos_liquidos, 0)) / SUM(COALESCE(qt_beneficiarios, 0))
+    ELSE SUM(COALESCE(vr_eventos_liquidos, 0)) / (SUM(COALESCE(qt_beneficiarios, 0)) * 12)
   END AS eventos_per_capita
 FROM `<VIEW_UNIODONTO>`
 WHERE <FILTROS_ATIVOS>

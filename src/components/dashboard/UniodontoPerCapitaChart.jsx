@@ -56,19 +56,19 @@ function UniodontoPerCapitaChart({
   const chartConfig = useMemo(
     () => ({
       primaryRevenue: {
-        label: `${primaryLabel ?? 'Seleção'} • ${revenueShortLabel} per capita`,
+        label: `${primaryLabel ?? 'Seleção'} • ${revenueShortLabel} per capita (12m)`,
         color: PRIMARY_REVENUE_COLOR,
       },
       primaryEvents: {
-        label: `${primaryLabel ?? 'Seleção'} • Eventos per capita`,
+        label: `${primaryLabel ?? 'Seleção'} • Eventos per capita (12m)`,
         color: PRIMARY_EVENTS_COLOR,
       },
       comparisonRevenue: {
-        label: `${comparisonLabel ?? 'Média filtrada'} • ${revenueShortLabel} per capita`,
+        label: `${comparisonLabel ?? 'Média filtrada'} • ${revenueShortLabel} per capita (12m)`,
         color: COMPARISON_REVENUE_COLOR,
       },
       comparisonEvents: {
-        label: `${comparisonLabel ?? 'Média filtrada'} • Eventos per capita`,
+        label: `${comparisonLabel ?? 'Média filtrada'} • Eventos per capita (12m)`,
         color: COMPARISON_EVENTS_COLOR,
       },
     }),
@@ -93,7 +93,7 @@ function UniodontoPerCapitaChart({
         <div>
           <CardTitle className="text-lg">Contraprestações e eventos per capita por modalidade de pagamento</CardTitle>
           <CardDescription>
-            Compara a operadora selecionada com a média filtrada, usando base de receita configurável para o cálculo per capita.
+            Compara a operadora selecionada com a média filtrada, usando base de receita configurável no cálculo per capita de 12 meses.
           </CardDescription>
         </div>
         <div className="grid gap-3 md:grid-cols-2">

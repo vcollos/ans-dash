@@ -1309,8 +1309,12 @@ export async function fetchUniodontoPerCapitaSeries(filters = {}, perCapitaFilte
   })
   const revenueExpression = buildRevenueBaseExpression(resolvedChartFilters.revenueBase)
   const beneficiariesTotalExpression = 'SUM(COALESCE(qt_beneficiarios, 0))'
-  const revenuePerCapitaExpression = buildSafeRatioSql(`SUM(${revenueExpression})`, beneficiariesTotalExpression)
-  const eventsPerCapitaExpression = buildSafeRatioSql('SUM(COALESCE(vr_eventos_liquidos, 0))', beneficiariesTotalExpression)
+  const perCapita12mDenominatorExpression = `(${beneficiariesTotalExpression}) * 12`
+  const revenuePerCapitaExpression = buildSafeRatioSql(`SUM(${revenueExpression})`, perCapita12mDenominatorExpression)
+  const eventsPerCapitaExpression = buildSafeRatioSql(
+    'SUM(COALESCE(vr_eventos_liquidos, 0))',
+    perCapita12mDenominatorExpression,
+  )
 
   if (comparisonContext?.operatorName) {
     const sanitizedName = sanitizeSql(comparisonContext.operatorName)
