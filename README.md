@@ -26,6 +26,40 @@ npm run dev:local
 ```
 O script lê `.env.local.server` (opcional) e aplica defaults compatíveis com o projeto.
 
+### Desenvolvimento local com Docker
+
+Para rodar em ambiente controlado (sem mudar o deploy do Cloud Run), use:
+
+```bash
+npm run env:init
+# edite .env.local e .env.local.server com seus valores
+# coloque a credencial do BigQuery em .cert/*.json (fora do Git)
+npm run docker:dev:up
+```
+
+Esse fluxo sobe o mesmo app (Vite + API), com hot reload:
+- Frontend: `http://localhost:5173`
+- API: `http://localhost:4000`
+
+Comandos úteis:
+
+```bash
+npm run docker:dev:logs
+npm run docker:dev:down
+```
+
+Arquivos de referência:
+- `docker-compose.dev.yml` (somente desenvolvimento)
+- `Dockerfile.dev` (imagem de desenvolvimento)
+- `env/.env.local.example` e `env/.env.local.server.example` (templates versionados)
+
+### Importação de dados da Singular (tabela auxiliar)
+
+- O botão **“Atualize seus dados”** aparece no header quando a operadora selecionada contém `Singular`.
+- O upload aceita `CSV`, `XLS` e `XLSX`.
+- Os dados enviados **não** são gravados na tabela original da ANS.
+- O backend grava em uma tabela auxiliar e mantém views auxiliares para consumo/controladoria.
+
 ### Variáveis essenciais (local)
 
 **BigQuery (API):**
@@ -36,6 +70,13 @@ O script lê `.env.local.server` (opcional) e aplica defaults compatíveis com o
 - `BQ_LOCATION` (ex.: `US`)
 - `BQ_ALLOWED_VIEWS` (opcional): lista de views/tabelas permitidas no `/api/query` (ex.: `indicadores_curados_snapshot,bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem`).
 - `BQ_PRESTADORES_TABLE` (opcional): tabela de prestadores usada na complementação de dados.
+- `BQ_AUX_DATASET` (opcional): dataset da tabela auxiliar de importação (default: `BQ_MART_DATASET` ou `BQ_DATASET`).
+- `BQ_AUX_DEMONSTRACOES_TABLE` (opcional): tabela auxiliar de importação (default: `demonstracoes_contabeis_auxiliar`).
+- `BQ_AUX_DEMONSTRACOES_LATEST_VIEW` (opcional): view com última versão por chave da importação (default: `vw_demonstracoes_contabeis_auxiliar_latest`).
+- `BQ_BASE_DEMONSTRACOES_TABLE` (opcional): tabela original ANS usada para view consolidada (default: `${BQ_PROJECT_ID}.${BQ_DATASET}.demonstracoes_contabeis`).
+- `BQ_CONSOLIDATED_DEMONSTRACOES_VIEW` (opcional): view consolidada (base ANS + auxiliar) (default: `${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.vw_demonstracoes_contabeis_consolidada`).
+- `BQ_REFRESH_CONSOLIDATED_VIEW` (opcional): `true|false` para atualizar a view consolidada ao final do upload (default: `true`).
+- `DEMONSTRACOES_MAX_UPLOAD_ROWS` (opcional): limite de linhas por arquivo (default: `10000`).
 - `QUERY_CACHE_TTL_MS` (opcional): cache em ms para `/api/query` (default 60000).
 - `QUERY_CACHE_MAX_ENTRIES` (opcional): tamanho máximo do cache (default 250).
 - `SERVER_PORT` ou `PORT` (opcional): porta da API (default 4000 em dev).
@@ -85,10 +126,20 @@ gcloud builds submit --config cloudbuild.yaml
 
 A imagem é construída com as variáveis `VITE_FIREBASE_*` e `VITE_DATASET_VIEW`, e o serviço do Cloud Run recebe `BQ_*` e `FIREBASE_PROJECT_ID`.
 
+O fluxo Docker local **não altera** o deploy automático: o Cloud Build usa `cloudbuild.yaml` + `Dockerfile` (produção), não o `docker-compose.dev.yml`.
+
+Para evitar deploy acidental ao subir para o GitHub:
+- trabalhe em branch de feature (não em `main`);
+- abra PR e faça merge quando quiser publicar;
+- confirme no Cloud Build Trigger que o regex de branch está restrito ao branch de deploy (ex.: `^main$`).
+
 ## Endpoints principais
 
 - `POST /api/query` – proxy de consultas (somente SELECT/WITH e tabelas permitidas).
 - `GET /api/indicadores.csv` – export CSV via BigQuery.
+- `GET /api/import/demonstracoes/template.csv` – template CSV da importação.
+- `GET /api/import/demonstracoes/exemplo.csv` – exemplo CSV preenchido.
+- `POST /api/import/singular-demonstracoes` – upload de demonstrações para tabela auxiliar.
 - `GET /api/health` – healthcheck BigQuery.
 - `GET /api/auth/status` – status do auth.
 

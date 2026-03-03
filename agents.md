@@ -1,5 +1,17 @@
 # Historico da conversa (agents)
 
+## 2026-03-03T21:57:23Z
+- User: pediu atualizar o GitHub com a versão mais recente local, com commit e push.
+- Agent: validou o estado do repositório, registrou a interação no histórico e enviou todas as alterações pendentes para o remoto com commit e push.
+
+## 2026-03-03T14:36:30Z
+- User: pediu listar as tabelas BigQuery usadas no projeto e iniciar melhoria com botão "Atualize seus dados" para importação de demonstrações contábeis da Singular, armazenando em tabela auxiliar (sem sujar base ANS) e usando view.
+- Agent: mapeou as tabelas/views BigQuery de runtime e scripts, implementou fluxo de importação Singular (CSV/XLS/XLSX) com modal no frontend, endpoints de template/exemplo e upload no backend, persistência em `demonstracoes_contabeis_auxiliar`, criação/atualização de view auxiliar latest e tentativa de view consolidada (base ANS + auxiliar), além de documentação e novas envs.
+
+## 2026-03-03T12:48:05Z
+- User: pediu para rodar o app em Docker em ambiente controlado para desenvolvimento em outros computadores, sem abandonar Cloud Run/BigQuery e sem quebrar o deploy automático ao devolver para o GitHub.
+- Agent: adicionou fluxo de desenvolvimento Docker isolado (`Dockerfile.dev`, `docker-compose.dev.yml`), scripts (`env:init`, `docker:dev:*`), templates versionados de env em `env/`, proteção de secrets no `.dockerignore` e documentação no README explicando uso local e como evitar deploy acidental (branch/trigger).
+
 ## 2026-02-23T13:37:45Z
 - User: pediu implementar no modo Uniodonto um gráfico de "Contraprestações e eventos per capita por modalidade de pagamento", com comparação entre operadora selecionada e média dos filtros.
 - Agent: adicionou módulo de domínio da feature (`uniodontoPerCapita`), query dedicada em `dataService` com fallback para modalidade de pagamento (coluna dedicada ou regra por `vr_contraprestacoes_pre`), novo componente `UniodontoPerCapitaChart` na aba de históricos Uniodonto, integração no `useDashboardController`, documentação técnica da query/contas e testes unitários para regras de filtro/SQL.

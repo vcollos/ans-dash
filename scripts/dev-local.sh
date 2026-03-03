@@ -27,6 +27,14 @@ set -a
 : "${BQ_ALLOWED_VIEWS:=${BQ_PROJECT_ID}.${BQ_DATASET}.${BQ_EXPORT_VIEW},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_ANS_TABLE},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_UNIODONTO_TABLE},${BQ_PROJECT_ID}.${BQ_DATASET}.prestadores_ativos_uniodonto_origem}"
 set +a
 
+if [[ ! -f "${GOOGLE_APPLICATION_CREDENTIALS}" ]] && [[ -f "/.dockerenv" ]]; then
+  docker_cred_candidate="$(find "${ROOT_DIR}/.cert" -maxdepth 1 -type f -name '*.json' | head -n1 || true)"
+  if [[ -n "${docker_cred_candidate}" ]]; then
+    export GOOGLE_APPLICATION_CREDENTIALS="${docker_cred_candidate}"
+    echo "[dev-local] usando credencial BigQuery encontrada em ${GOOGLE_APPLICATION_CREDENTIALS}"
+  fi
+fi
+
 if [[ ! -f "${GOOGLE_APPLICATION_CREDENTIALS}" ]]; then
   echo "[dev-local] GOOGLE_APPLICATION_CREDENTIALS nao encontrado: ${GOOGLE_APPLICATION_CREDENTIALS}" >&2
   echo "[dev-local] Defina a variavel ou crie .env.local.server com o caminho correto." >&2

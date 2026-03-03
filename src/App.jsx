@@ -9,6 +9,7 @@ import UniodontoKpiCards from './components/dashboard/UniodontoKpiCards'
 import RankingPanel from './components/dashboard/RankingPanel'
 import IndicatorTrendChart from './components/dashboard/IndicatorTrendChart'
 import UniodontoPerCapitaChart from './components/dashboard/UniodontoPerCapitaChart'
+import SingularDataImportDialog from './components/dashboard/SingularDataImportDialog'
 import DataTable from './components/dashboard/DataTable'
 import MonetarySummary from './components/dashboard/MonetarySummary'
 import { Skeleton } from './components/ui/skeleton'
@@ -63,6 +64,7 @@ function ErrorState({ error, onRetry }) {
 function DashboardApp({ onLogout }) {
   const [filtersSidebarOpen, setFiltersSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('indicadores')
+  const [isDataImportOpen, setIsDataImportOpen] = useState(false)
   const {
     status,
     error,
@@ -94,6 +96,7 @@ function DashboardApp({ onLogout }) {
     resetFilters,
     applyOperatorSelection,
     operatorInsight,
+    operatorContext,
     operatorPeriod,
     setOperatorPeriod,
     comparisonFilters,
@@ -108,6 +111,7 @@ function DashboardApp({ onLogout }) {
   const comparisonLabel = useMemo(() => describeComparisonFilters(comparisonFilters), [comparisonFilters])
   const trendPrimaryLabel = operatorInsight?.operatorName ?? 'Média dos filtros'
   const isRefreshingData = isQuerying || isTrendLoading
+  const canOpenDataImport = /\bsingular\b/i.test(String(operatorInsight?.operatorName ?? ''))
 
   if (status === 'loading') {
     return (
@@ -134,6 +138,8 @@ function DashboardApp({ onLogout }) {
           onLogout={onLogout}
           uniodontoMode={uniodontoMode}
           onUniodontoModeChange={setUniodontoMode}
+          onOpenDataImport={() => setIsDataImportOpen(true)}
+          canOpenDataImport={canOpenDataImport}
         />
         <DataLoadingIndicator
           isActive={isRefreshingData}
@@ -274,6 +280,12 @@ function DashboardApp({ onLogout }) {
             </TabsContent>
           </Tabs>
         </div>
+        <SingularDataImportDialog
+          open={isDataImportOpen}
+          onOpenChange={setIsDataImportOpen}
+          operatorName={operatorInsight?.operatorName ?? null}
+          operatorRegAns={operatorContext?.regAns ?? null}
+        />
       </main>
     </div>
   )

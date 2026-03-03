@@ -7,6 +7,10 @@
     "dev": "concurrently -k -n \"client,api\" -c \"magenta,cyan\" \"npm:dev:client\" \"npm:dev:server\"",
     "dev:local": "bash scripts/dev-local.sh",
     "dev:reload": "bash scripts/reload-dev.sh",
+    "docker:dev:up": "docker compose -f docker-compose.dev.yml up --build",
+    "docker:dev:down": "docker compose -f docker-compose.dev.yml down",
+    "docker:dev:logs": "docker compose -f docker-compose.dev.yml logs -f",
+    "env:init": "bash scripts/init-local-env.sh",
     "dev:client": "vite",
     "dev:server": "node server/index.js",
     "build": "vite build",
@@ -50,6 +54,7 @@
     "recharts": "^2.15.4",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
+    "xlsx": "^0.18.5",
     "zod": "^4.1.12"
   },
   "devDependencies": {

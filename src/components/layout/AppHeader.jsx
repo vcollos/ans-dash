@@ -17,6 +17,8 @@ function AppHeader({
   onLogout,
   uniodontoMode = false,
   onUniodontoModeChange,
+  onOpenDataImport,
+  canOpenDataImport = false,
 }) {
   const operadorasValue = formatInteger(summary?.operadoras)
   const beneficiariosValue = formatInteger(summary?.beneficiarios)
@@ -59,6 +61,21 @@ function AppHeader({
               className="rounded-md border border-border bg-secondary px-3 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:bg-secondary/80"
             >
               Abrir filtros
+            </button>
+          ) : null}
+          {onOpenDataImport ? (
+            <button
+              type="button"
+              onClick={onOpenDataImport}
+              disabled={!canOpenDataImport}
+              title={
+                canOpenDataImport
+                  ? 'Importar demonstrações contábeis da operadora Singular selecionada'
+                  : 'Selecione uma operadora Singular para habilitar este botão'
+              }
+              className="rounded-md border border-border bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Atualize seus dados
             </button>
           ) : null}
           {onLogout ? (
