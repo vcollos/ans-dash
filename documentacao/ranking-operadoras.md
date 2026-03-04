@@ -14,7 +14,7 @@
 - **Paginação (opcional):** ajuste **Linhas por página** (ex.: 6/10/20/50) para facilitar leitura; ou use **Tudo** para ver todas as operadoras de uma vez.
 
 ## Como o cálculo é feito
-- **Fonte dos dados:** view/tabela `indicadores_curados_snapshot` no BigQuery (ou a definida em `VITE_DATASET_VIEW`). Cada linha já traz os valores dos indicadores para `reg_ans`, `ano`, `trimestre`.
+- **Fonte dos dados:** view/tabela `dash_ans.indicadores_curados_snapshot` no BigQuery (ou a definida em `VITE_DATASET_VIEW`). Cada linha já traz os valores dos indicadores para `reg_ans`, `ano`, `trimestre`.
 - **Filtros aplicados:** Modalidade, Porte, Uniodonto, Ativa, Ano, Trimestre, busca por nome. O ranking só considera as operadoras que passam pelos filtros ativos.
 - **Ordenação:** definida pela tendência do indicador:
   - Indicadores em que “mais é melhor” (ex.: MLL, ROE, LC, IRF) ordenam em ordem decrescente.

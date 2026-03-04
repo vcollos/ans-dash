@@ -31,11 +31,12 @@ Fluxo resumido:
 | Variável | Descrição | Exemplo |
 |---|---|---|
 | `BQ_PROJECT_ID` | Projeto GCP | `bigdata-467917` |
-| `BQ_DATASET` | Dataset BigQuery | `datalake_ans` |
-| `BQ_DATASET_VIEW` / `BQ_EXPORT_VIEW` | View/tabela principal | `indicadores_curados_snapshot` |
+| `BQ_DATASET` | Dataset de origem (ANS bruto/original) | `datalake_ans` |
+| `BQ_MART_DATASET` | Dataset de artefatos derivados do dashboard | `dash_ans` |
+| `BQ_DATASET_VIEW` / `BQ_EXPORT_VIEW` | View/tabela principal do dashboard | `dash_ans.indicadores_curados_snapshot` |
 | `BQ_LOCATION` | Localização | `US` |
-| `BQ_ALLOWED_VIEWS` (opcional) | Lista de views/tabelas permitidas no `/api/query` | `indicadores_curados_snapshot,bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem` |
-| `BQ_PRESTADORES_TABLE` (opcional) | Tabela de prestadores usada na complementação | `bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem` |
+| `BQ_ALLOWED_VIEWS` (opcional) | Lista de views/tabelas permitidas no `/api/query` | `bigdata-467917.dash_ans.indicadores_curados_snapshot,bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem` |
+| `BQ_PRESTADORES_TABLE` (opcional) | Tabela de prestadores usada na complementação | `bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem` |
 | `FIREBASE_PROJECT_ID` | Projeto Firebase | `bigdata-467917` |
 | `QUERY_CACHE_TTL_MS` | Cache do `/api/query` em ms (opcional) | `60000` |
 | `QUERY_CACHE_MAX_ENTRIES` | Máx. entradas no cache (opcional) | `250` |
@@ -53,7 +54,7 @@ Fluxo resumido:
 | `VITE_FIREBASE_STORAGE_BUCKET` | Firebase Web config |
 | `VITE_FIREBASE_MESSAGING_SENDER_ID` | Firebase Web config |
 | `VITE_FIREBASE_MEASUREMENT_ID` | Firebase Web config |
-| `VITE_DATASET_VIEW` | View principal do BigQuery (default: `indicadores_curados_snapshot`) |
+| `VITE_DATASET_VIEW` | View principal do BigQuery (default: `dash_ans.indicadores_curados_snapshot`) |
 | `VITE_PRESTADORES_TABLE` (opcional) | Tabela de prestadores para complementar dados |
 | `VITE_PRESTADORES_ORIGEM` (opcional) | Origem usada na tabela de prestadores (default `PRÓPRIA`) |
 | `VITE_PRESTADORES_CACHE_TTL_MS` (opcional) | Cache local de prestadores (ms) |
@@ -71,7 +72,7 @@ A view/tabela principal deve expor:
 
 ### 4.2 Snapshot recomendado
 
-Para reduzir custo e latência, recomenda-se materializar `indicadores_curados_snapshot`.
+Para reduzir custo e latência, recomenda-se materializar `dash_ans.indicadores_curados_snapshot`.
 
 ```
 npm run data:materialize-bq-snapshot

@@ -91,13 +91,13 @@ substitutions:
   _RUN_SERVICE_ACCOUNT: ans-dashboard-run@bigdata-467917.iam.gserviceaccount.com
   _BQ_PROJECT_ID: bigdata-467917
   _BQ_DATASET: datalake_ans
-  _BQ_DATASET_VIEW: indicadores_curados_snapshot
+  _BQ_DATASET_VIEW: dash_ans.indicadores_curados_snapshot
   _BQ_LOCATION: US
   _BQ_MART_DATASET: dash_ans
   _BQ_MART_ANS_TABLE: indicadores_mart_ans
   _BQ_MART_UNIODONTO_TABLE: indicadores_mart_uniodonto
-  _BQ_ALLOWED_VIEWS: "bigdata-467917.datalake_ans.indicadores_curados_snapshot,bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem,bigdata-467917.dash_ans.indicadores_mart_ans,bigdata-467917.dash_ans.indicadores_mart_uniodonto"
-  _BQ_PRESTADORES_TABLE: "bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem"
+  _BQ_ALLOWED_VIEWS: "bigdata-467917.dash_ans.indicadores_curados_snapshot,bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem,bigdata-467917.dash_ans.indicadores_mart_ans,bigdata-467917.dash_ans.indicadores_mart_uniodonto"
+  _BQ_PRESTADORES_TABLE: "bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem"
   _FIREBASE_PROJECT_ID: bigdata-467917
   _VITE_FIREBASE_API_KEY: "AIzaSyDGszlkE1Jo_guXMs_QUGow8EK4pYgrp4Y"
   _VITE_FIREBASE_AUTH_DOMAIN: "bigdata-467917.firebaseapp.com"
@@ -106,6 +106,6 @@ substitutions:
   _VITE_FIREBASE_STORAGE_BUCKET: "bigdata-467917.firebasestorage.app"
   _VITE_FIREBASE_MESSAGING_SENDER_ID: "565810349046"
   _VITE_FIREBASE_MEASUREMENT_ID: "G-12MS8R4KQS"
-  _VITE_DATASET_VIEW: "indicadores_curados_snapshot"
+  _VITE_DATASET_VIEW: "bigdata-467917.dash_ans.indicadores_curados_snapshot"
   _VITE_MART_ANS_TABLE: "bigdata-467917.dash_ans.indicadores_mart_ans"
   _VITE_MART_UNIODONTO_TABLE: "bigdata-467917.dash_ans.indicadores_mart_uniodonto"

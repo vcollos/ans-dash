@@ -12,7 +12,7 @@ _Data da análise: 31/01/2026_
 ### 1. `/api/query` expõe SQL (mesmo com allowlist)
 - O endpoint agora bloqueia tabelas fora do allowlist (`BQ_ALLOWED_VIEWS`).
 - **Risco residual:** se o allowlist for configurado de forma ampla, ainda permite leitura não intencional.
-- **Ação recomendada:** manter `BQ_ALLOWED_VIEWS` restrito apenas às views necessárias (ex.: `indicadores_curados_snapshot` e `prestadores_ativos_uniodonto_origem`).
+- **Ação recomendada:** manter `BQ_ALLOWED_VIEWS` restrito apenas às views necessárias (ex.: `dash_ans.indicadores_curados_snapshot` e `dash_ans.prestadores_ativos_uniodonto_origem`).
 
 ### 2. Credenciais locais no repositório
 - Arquivos de service account **não** devem estar versionados.
@@ -26,7 +26,7 @@ _Data da análise: 31/01/2026_
 
 ### 4. Custos de BigQuery
 - Consultas amplas podem aumentar custo.
-- **Ação recomendada:** usar snapshot (`indicadores_curados_snapshot`) e filtros por `periodo_id`.
+- **Ação recomendada:** usar snapshot (`dash_ans.indicadores_curados_snapshot`) e filtros por `periodo_id`.
 
 ## Gaps funcionais
 

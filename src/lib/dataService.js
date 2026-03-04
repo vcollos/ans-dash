@@ -70,7 +70,7 @@ const formatTableRef = (value) => {
   return `\`${trimmed}\``
 }
 
-const BASE_VIEW_RAW = import.meta.env?.VITE_DATASET_VIEW ?? 'indicadores_curados_snapshot'
+const BASE_VIEW_RAW = import.meta.env?.VITE_DATASET_VIEW ?? 'dash_ans.indicadores_curados_snapshot'
 const MART_ANS_VIEW_RAW =
   import.meta.env?.VITE_MART_ANS_TABLE ?? import.meta.env?.VITE_DATASET_VIEW_ANS ?? ''
 const MART_UNIODONTO_VIEW_RAW =
@@ -84,7 +84,7 @@ const HAS_UNIODONTO_MART = Boolean(MART_UNIODONTO_VIEW_RAW || import.meta.env?.V
 const viewColumnsCache = new Map()
 
 const PRESTADORES_TABLE_RAW =
-  import.meta.env?.VITE_PRESTADORES_TABLE ?? 'bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem'
+  import.meta.env?.VITE_PRESTADORES_TABLE ?? 'dash_ans.prestadores_ativos_uniodonto_origem'
 const PRESTADORES_TABLE = PRESTADORES_TABLE_RAW.replace(/`/g, '')
 const PRESTADORES_ORIGEM = import.meta.env?.VITE_PRESTADORES_ORIGEM ?? 'PRÓPRIA'
 const PRESTADORES_CACHE_TTL_MS = Number(import.meta.env?.VITE_PRESTADORES_CACHE_TTL_MS ?? 12 * 60 * 60 * 1000)

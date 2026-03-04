@@ -8,16 +8,18 @@ Este documento descreve o procedimento que o administrador deve seguir sempre qu
 Projeto: `bigdata-467917`  
 Dataset: `datalake_ans`
 
-Principais objetos:
-- `indicadores_curados` (view base com as regras e ajustes de dados)
-- `indicadores_curados_snapshot` (tabela materializada por periodo)
-- `prestadores_ativos_uniodonto_origem` (origem de prestadores para o dashboard)
+Objetos esperados:
+- tabelas originais publicadas pela ANS (ex.: `demonstracoes_contabeis`).
+- sem views/tabelas derivadas do dashboard.
 
 ### 2) Dataset do dashboard (novo)
 Projeto: `bigdata-467917`  
 Dataset: `dash_ans` (sem hifen; BigQuery nao permite `-` no ID do dataset)
 
-Marts usados pelo dashboard:
+Objetos derivados usados pelo dashboard:
+- `indicadores_curados` (view base com regras e ajustes do projeto)
+- `indicadores_curados_snapshot` (tabela materializada por periodo)
+- `prestadores_ativos_uniodonto_origem` (tabela usada para complementar prestadores no dashboard)
 - `indicadores_mart_ans` (pré-calculo dos indicadores RN 518)
 - `indicadores_mart_uniodonto` (pré-calculo dos indicadores Uniodonto)
 
@@ -46,19 +48,19 @@ Arquivo recomendado: `.env.local.server`
 ```
 BQ_PROJECT_ID=bigdata-467917
 BQ_DATASET=datalake_ans
-BQ_EXPORT_VIEW=indicadores_curados_snapshot
-BQ_SOURCE_TABLE=bigdata-467917.datalake_ans.indicadores_curados_snapshot
+BQ_EXPORT_VIEW=dash_ans.indicadores_curados_snapshot
+BQ_SOURCE_TABLE=bigdata-467917.dash_ans.indicadores_curados_snapshot
 BQ_MART_ANS_TABLE=indicadores_mart_ans
 BQ_MART_UNIODONTO_TABLE=indicadores_mart_uniodonto
 BQ_MART_DATASET=dash_ans
-BQ_ALLOWED_VIEWS=bigdata-467917.datalake_ans.indicadores_curados_snapshot,bigdata-467917.dash_ans.indicadores_mart_ans,bigdata-467917.dash_ans.indicadores_mart_uniodonto,bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem
+BQ_ALLOWED_VIEWS=bigdata-467917.dash_ans.indicadores_curados_snapshot,bigdata-467917.dash_ans.indicadores_mart_ans,bigdata-467917.dash_ans.indicadores_mart_uniodonto,bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem
 BQ_LOCATION=US
 GOOGLE_APPLICATION_CREDENTIALS=/Users/vitor/Documents/Dev/ans-dash/.cert/bigdata-467917-16c1318c138a.json
 ```
 
 Variaveis front-end (Vite) em `.env.local`:
 ```
-VITE_DATASET_VIEW=bigdata-467917.datalake_ans.indicadores_curados_snapshot
+VITE_DATASET_VIEW=bigdata-467917.dash_ans.indicadores_curados_snapshot
 VITE_MART_ANS_TABLE=bigdata-467917.dash_ans.indicadores_mart_ans
 VITE_MART_UNIODONTO_TABLE=bigdata-467917.dash_ans.indicadores_mart_uniodonto
 ```
@@ -66,7 +68,7 @@ VITE_MART_UNIODONTO_TABLE=bigdata-467917.dash_ans.indicadores_mart_uniodonto
 ## Passo a passo (novo periodo)
 
 ### 0) Dataset dedicado para o dashboard (recomendado)
-Recomenda-se isolar as tabelas do dashboard em um dataset separado (ex.: `dash_ans`). Isso evita misturar marts do dashboard com o datalake principal.
+O projeto usa `dash_ans` como dataset dedicado para artefatos derivados do dashboard. Isso evita misturar estruturas de aplicação com o datalake principal.
 
 Passos:
 - Crie o dataset `dash_ans` no mesmo projeto.
@@ -136,4 +138,4 @@ LIMIT 4;
 ## Observacoes
 - O app agora tenta usar as tabelas mart quando `VITE_MART_ANS_TABLE` e `VITE_MART_UNIODONTO_TABLE` estao definidas.
 - Caso nao estejam definidas, o sistema volta a usar a view base e calcula as formulas sob demanda.
-- Se aparecer erro 403 em `/api/query`, confirme que `BQ_ALLOWED_VIEWS` inclui as tabelas mart, o snapshot e `prestadores_ativos_uniodonto_origem`.
+- Se aparecer erro 403 em `/api/query`, confirme que `BQ_ALLOWED_VIEWS` inclui as tabelas mart, o snapshot e `dash_ans.prestadores_ativos_uniodonto_origem`.

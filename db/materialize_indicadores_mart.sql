@@ -1,8 +1,8 @@
 -- Gerado automaticamente a partir das formulas em src/lib/metricFormulas.js e src/lib/metricFormulasModoUniodonto.js
 -- Placeholders:
---   {{SOURCE_TABLE}} => tabela/view base (ex: `bigdata-467917.datalake_ans.indicadores_curados_snapshot`)
---   {{ANS_TABLE}} => tabela destino ANS (ex: `bigdata-467917.datalake_ans.indicadores_mart_ans`)
---   {{UNIODONTO_TABLE}} => tabela destino Uniodonto (ex: `bigdata-467917.datalake_ans.indicadores_mart_uniodonto`)
+--   {{SOURCE_TABLE}} => tabela/view base (ex: `bigdata-467917.dash_ans.indicadores_curados_snapshot`)
+--   {{ANS_TABLE}} => tabela destino ANS (ex: `bigdata-467917.dash_ans.indicadores_mart_ans`)
+--   {{UNIODONTO_TABLE}} => tabela destino Uniodonto (ex: `bigdata-467917.dash_ans.indicadores_mart_uniodonto`)
 --   {{PARTITION_EXPR}} => campo de particao (default: periodo_raw)
 --   {{CLUSTER_FIELDS}} => campos de cluster (default: periodo_id,reg_ans,modalidade,uniodonto)
 

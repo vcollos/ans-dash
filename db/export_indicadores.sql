@@ -2,11 +2,11 @@ WITH prestadores AS (
   SELECT
     CAST(reg_ans AS STRING) AS reg_ans_join,
     COUNT(DISTINCT ID_ESTABELECIMENTO_SAUDE) AS qt_prestadores_proprios
-  FROM prestadores_ativos_uniodonto_origem
+  FROM {{PRESTADORES_TABLE}}
   WHERE origem = 'PRÓPRIA'
     AND COMPETENCIA = (
       SELECT MAX(COMPETENCIA)
-      FROM prestadores_ativos_uniodonto_origem
+      FROM {{PRESTADORES_TABLE}}
     )
   GROUP BY reg_ans_join
 )

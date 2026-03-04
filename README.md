@@ -65,12 +65,13 @@ Arquivos de referência:
 **BigQuery (API):**
 - `GOOGLE_APPLICATION_CREDENTIALS` (caminho do JSON da service account) **ou** `gcloud auth application-default login`.
 - `BQ_PROJECT_ID` (ex.: `bigdata-467917`)
-- `BQ_DATASET` (ex.: `datalake_ans`)
-- `BQ_DATASET_VIEW` ou `BQ_EXPORT_VIEW` (ex.: `indicadores_curados_snapshot`)
+- `BQ_DATASET` (ex.: `datalake_ans`) para tabelas originais ANS.
+- `BQ_MART_DATASET` (ex.: `dash_ans`) para tabelas/views derivadas do dashboard.
+- `BQ_DATASET_VIEW` ou `BQ_EXPORT_VIEW` (ex.: `dash_ans.indicadores_curados_snapshot`)
 - `BQ_LOCATION` (ex.: `US`)
-- `BQ_ALLOWED_VIEWS` (opcional): lista de views/tabelas permitidas no `/api/query` (ex.: `indicadores_curados_snapshot,bigdata-467917.datalake_ans.prestadores_ativos_uniodonto_origem`).
+- `BQ_ALLOWED_VIEWS` (opcional): lista de views/tabelas permitidas no `/api/query` (ex.: `bigdata-467917.dash_ans.indicadores_curados_snapshot,bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem`).
 - `BQ_PRESTADORES_TABLE` (opcional): tabela de prestadores usada na complementação de dados.
-- `BQ_AUX_DATASET` (opcional): dataset da tabela auxiliar de importação (default: `BQ_MART_DATASET` ou `BQ_DATASET`).
+- `BQ_AUX_DATASET` (opcional): dataset da tabela auxiliar de importação (default: `BQ_MART_DATASET`).
 - `BQ_AUX_DEMONSTRACOES_TABLE` (opcional): tabela auxiliar de importação (default: `demonstracoes_contabeis_auxiliar`).
 - `BQ_AUX_DEMONSTRACOES_LATEST_VIEW` (opcional): view com última versão por chave da importação (default: `vw_demonstracoes_contabeis_auxiliar_latest`).
 - `BQ_BASE_DEMONSTRACOES_TABLE` (opcional): tabela original ANS usada para view consolidada (default: `${BQ_PROJECT_ID}.${BQ_DATASET}.demonstracoes_contabeis`).
@@ -112,9 +113,9 @@ Para **login por link**, o app envia um link para o email informado. Ao abrir o 
 
 ## Dados (BigQuery)
 
-- O frontend consulta a view definida em `VITE_DATASET_VIEW` (default: `indicadores_curados_snapshot`).
+- O frontend consulta a view definida em `VITE_DATASET_VIEW` (default: `dash_ans.indicadores_curados_snapshot`).
 - O backend usa `BQ_DATASET_VIEW`/`BQ_EXPORT_VIEW` para `/api/indicadores.csv`.
-- Para reduzir custo, materialize uma tabela snapshot (`indicadores_curados_snapshot`) e use-a como view principal.
+- Para reduzir custo, materialize uma tabela snapshot (`dash_ans.indicadores_curados_snapshot`) e use-a como view principal.
 
 ## Deploy no Google Cloud Run
 

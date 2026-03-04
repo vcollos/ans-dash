@@ -2,8 +2,9 @@ import { BigQuery } from '@google-cloud/bigquery'
 
 const PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
 const DATASET_ID = process.env.BQ_DATASET ?? 'datalake_ans'
-const SOURCE_VIEW = process.env.BQ_SOURCE_VIEW ?? 'indicadores_curados'
-const TARGET_TABLE = process.env.BQ_SNAPSHOT_TABLE ?? 'indicadores_curados_snapshot'
+const MART_DATASET_ID = process.env.BQ_MART_DATASET ?? 'dash_ans'
+const SOURCE_VIEW = process.env.BQ_SOURCE_VIEW ?? `${MART_DATASET_ID}.indicadores_curados`
+const TARGET_TABLE = process.env.BQ_SNAPSHOT_TABLE ?? `${MART_DATASET_ID}.indicadores_curados_snapshot`
 const LOCATION = process.env.BQ_LOCATION ?? 'US'
 const PARTITION_EXPR = process.env.BQ_PARTITION_EXPR ?? process.env.BQ_PARTITION_FIELD ?? 'periodo_raw'
 const CLUSTER_FIELDS = (process.env.BQ_CLUSTER_FIELDS ?? 'periodo_id,reg_ans,modalidade,uniodonto')
@@ -12,19 +13,19 @@ const CLUSTER_FIELDS = (process.env.BQ_CLUSTER_FIELDS ?? 'periodo_id,reg_ans,mod
   .filter(Boolean)
   .slice(0, 4)
 
-function qualify(name) {
+function qualify(name, datasetId = DATASET_ID) {
   if (!name) {
     throw new Error('Tabela de origem/destino não informada.')
   }
   if (name.includes('`')) return name
   if (name.includes('.')) return `\`${name}\``
-  return `\`${PROJECT_ID}.${DATASET_ID}.${name}\``
+  return `\`${PROJECT_ID}.${datasetId}.${name}\``
 }
 
 async function materializeSnapshot() {
   const bigquery = new BigQuery({ projectId: PROJECT_ID })
-  const source = qualify(SOURCE_VIEW)
-  const target = qualify(TARGET_TABLE)
+  const source = qualify(SOURCE_VIEW, MART_DATASET_ID)
+  const target = qualify(TARGET_TABLE, MART_DATASET_ID)
   const clusterClause = CLUSTER_FIELDS.length ? `\nCLUSTER BY ${CLUSTER_FIELDS.join(', ')}` : ''
   const query = `
 CREATE OR REPLACE TABLE ${target}

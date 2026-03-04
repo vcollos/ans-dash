@@ -1,7 +1,8 @@
 import { BigQuery } from '@google-cloud/bigquery'
 
 const PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
-const DATASET_ID = process.env.BQ_DATASET ?? 'datalake_ans'
+const SOURCE_DATASET_ID = process.env.BQ_DATASET ?? 'datalake_ans'
+const DERIVED_DATASET_ID = process.env.BQ_MART_DATASET ?? 'dash_ans'
 const FULL_VIEW = process.env.BQ_FULL_VIEW ?? 'vw_demonstracoes_contabeis_full'
 const FULL_SOURCE_TABLE = process.env.BQ_FULL_SOURCE_TABLE ?? 'demonstracoes_contabeis'
 const RAW_TABLE = process.env.BQ_RAW_TABLE ?? 'demonstracoes_contabeis_raw'
@@ -10,8 +11,27 @@ const TARGET_VIEW = process.env.BQ_VIEW ?? 'indicadores_curados'
 const LOCATION = process.env.BQ_LOCATION ?? 'US'
 const SHOULD_CREATE_FULL_VIEW = (process.env.BQ_CREATE_FULL_VIEW ?? 'false').toLowerCase() === 'true'
 
-function qualified(name) {
-  return `\`${PROJECT_ID}.${DATASET_ID}.${name}\``
+function parseTableRef(name, defaultDataset = DERIVED_DATASET_ID) {
+  const normalized = String(name ?? '')
+    .trim()
+    .replace(/^`|`$/g, '')
+    .replace(/^"|"$/g, '')
+  if (!normalized) {
+    throw new Error('Nome de tabela/view vazio.')
+  }
+  const parts = normalized.split('.').filter(Boolean)
+  if (parts.length === 1) {
+    return { projectId: PROJECT_ID, datasetId: defaultDataset, objectId: parts[0] }
+  }
+  if (parts.length === 2) {
+    return { projectId: PROJECT_ID, datasetId: parts[0], objectId: parts[1] }
+  }
+  return { projectId: parts[0], datasetId: parts[1], objectId: parts[2] }
+}
+
+function qualified(name, defaultDataset = DERIVED_DATASET_ID) {
+  const ref = parseTableRef(name, defaultDataset)
+  return `\`${ref.projectId}.${ref.datasetId}.${ref.objectId}\``
 }
 
 function safeFloat(expr) {
@@ -23,12 +43,12 @@ function safeInt(expr) {
 }
 
 function buildFullViewSql(sourceTableName, mode) {
-  const target = qualified(FULL_VIEW)
-  const source = qualified(sourceTableName)
-  const obm = qualified('operadoras_beneficiarios_modalidade')
-  const prestadores = qualified('prestadores_proprios')
-  const operadoras = qualified('operadoras')
-  const uniodontosAtivas = qualified('uniodontos_ativas')
+  const target = qualified(FULL_VIEW, DERIVED_DATASET_ID)
+  const source = qualified(sourceTableName, SOURCE_DATASET_ID)
+  const obm = qualified('operadoras_beneficiarios_modalidade', SOURCE_DATASET_ID)
+  const prestadores = qualified('prestadores_proprios', SOURCE_DATASET_ID)
+  const operadoras = qualified('operadoras', SOURCE_DATASET_ID)
+  const uniodontosAtivas = qualified('uniodontos_ativas', SOURCE_DATASET_ID)
 
   let dcSelect = ''
   if (mode === 'raw_uppercase') {
@@ -207,8 +227,8 @@ LEFT JOIN prestadores_dim pp
 }
 
 function buildViewSql() {
-  const source = qualified(SOURCE_TABLE)
-  const target = qualified(TARGET_VIEW)
+  const source = qualified(SOURCE_TABLE, DERIVED_DATASET_ID)
+  const target = qualified(TARGET_VIEW, DERIVED_DATASET_ID)
   return `
 CREATE OR REPLACE VIEW ${target} AS
 WITH base AS (
@@ -382,14 +402,15 @@ async function main() {
   const bigquery = new BigQuery({ projectId: PROJECT_ID })
   if (SHOULD_CREATE_FULL_VIEW) {
     const sourceTable = FULL_SOURCE_TABLE || RAW_TABLE
+    const sourceTableRef = parseTableRef(sourceTable, SOURCE_DATASET_ID)
     const [columns] = await bigquery.query({
       query: `
         SELECT LOWER(column_name) AS column_name
-        FROM \`${PROJECT_ID}.${DATASET_ID}.INFORMATION_SCHEMA.COLUMNS\`
+        FROM \`${sourceTableRef.projectId}.${sourceTableRef.datasetId}.INFORMATION_SCHEMA.COLUMNS\`
         WHERE table_name = @tableName
       `,
       location: LOCATION,
-      params: { tableName: sourceTable },
+      params: { tableName: sourceTableRef.objectId },
     })
     const colSet = new Set(columns.map((row) => row.column_name))
     const mode = (() => {
@@ -402,19 +423,29 @@ async function main() {
     })()
     if (!mode) {
       throw new Error(
-        `Não consegui inferir o schema de ${PROJECT_ID}.${DATASET_ID}.${sourceTable}. Colunas: ${[...colSet].sort().join(', ')}`,
+        `Não consegui inferir o schema de ${sourceTableRef.projectId}.${sourceTableRef.datasetId}.${sourceTableRef.objectId}. Colunas: ${[...colSet].sort().join(', ')}`,
       )
     }
     const fullSql = buildFullViewSql(sourceTable, mode)
-    console.log(`[bq-view] Garantindo view base ${PROJECT_ID}.${DATASET_ID}.${FULL_VIEW} a partir de ${sourceTable} (mode=${mode})...`)
+    console.log(
+      `[bq-view] Garantindo view base ${PROJECT_ID}.${DERIVED_DATASET_ID}.${FULL_VIEW} a partir de ${sourceTableRef.projectId}.${sourceTableRef.datasetId}.${sourceTableRef.objectId} (mode=${mode})...`,
+    )
     await bigquery.query({ query: fullSql, location: LOCATION })
   }
   const sql = buildViewSql()
-  console.log(`[bq-view] Criando view ${PROJECT_ID}.${DATASET_ID}.${TARGET_VIEW} a partir de ${SOURCE_TABLE}...`)
+  const sourceRef = parseTableRef(SOURCE_TABLE, DERIVED_DATASET_ID)
+  const targetRef = parseTableRef(TARGET_VIEW, DERIVED_DATASET_ID)
+  console.log(
+    `[bq-view] Criando view ${targetRef.projectId}.${targetRef.datasetId}.${targetRef.objectId} a partir de ${sourceRef.projectId}.${sourceRef.datasetId}.${sourceRef.objectId}...`,
+  )
   await bigquery.query({ query: sql, location: LOCATION })
   if (TARGET_VIEW !== 'indicadores_metricas') {
-    const aliasSql = `CREATE OR REPLACE VIEW ${qualified('indicadores_metricas')} AS SELECT * FROM ${qualified(TARGET_VIEW)}`
-    console.log(`[bq-view] Garantindo alias ${PROJECT_ID}.${DATASET_ID}.indicadores_metricas -> ${TARGET_VIEW}...`)
+    const aliasSql =
+      `CREATE OR REPLACE VIEW ${qualified('indicadores_metricas', DERIVED_DATASET_ID)} ` +
+      `AS SELECT * FROM ${qualified(TARGET_VIEW, DERIVED_DATASET_ID)}`
+    console.log(
+      `[bq-view] Garantindo alias ${PROJECT_ID}.${DERIVED_DATASET_ID}.indicadores_metricas -> ${targetRef.objectId}...`,
+    )
     await bigquery.query({ query: aliasSql, location: LOCATION })
   }
   console.log('[bq-view] View criada/atualizada com sucesso.')

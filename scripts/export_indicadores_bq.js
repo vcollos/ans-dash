@@ -8,8 +8,12 @@ const __dirname = path.dirname(__filename)
 
 const PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
 const DATASET_ID = process.env.BQ_DATASET ?? 'datalake_ans'
+const MART_DATASET_ID = process.env.BQ_MART_DATASET ?? 'dash_ans'
 const LOCATION = process.env.BQ_LOCATION ?? 'US'
-const BQ_EXPORT_VIEW = process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? 'indicadores_curados_snapshot'
+const BQ_EXPORT_VIEW =
+  process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? `${MART_DATASET_ID}.indicadores_curados_snapshot`
+const BQ_PRESTADORES_TABLE =
+  process.env.BQ_PRESTADORES_TABLE ?? `${PROJECT_ID}.${MART_DATASET_ID}.prestadores_ativos_uniodonto_origem`
 
 const QUERY_PATH = process.env.EXPORT_SQL_PATH
   ? path.resolve(process.cwd(), process.env.EXPORT_SQL_PATH)
@@ -23,6 +27,24 @@ function formatTableRef(name) {
   if (!name) return name
   if (name.includes('`')) return name
   return `\`${name}\``
+}
+
+function resolveTableRef(name, defaultDataset = MART_DATASET_ID) {
+  const normalized = String(name ?? '')
+    .trim()
+    .replace(/^`|`$/g, '')
+    .replace(/^"|"$/g, '')
+  if (!normalized) {
+    throw new Error('Referencia de tabela/view vazia para exportacao.')
+  }
+  const parts = normalized.split('.').filter(Boolean)
+  if (parts.length === 1) {
+    return `${PROJECT_ID}.${defaultDataset}.${parts[0]}`
+  }
+  if (parts.length === 2) {
+    return `${PROJECT_ID}.${parts[0]}.${parts[1]}`
+  }
+  return `${parts[0]}.${parts[1]}.${parts[2]}`
 }
 
 function formatCsvValue(value) {
@@ -73,7 +95,11 @@ function normalizeBigQueryScalar(value) {
 
 async function main() {
   const queryTemplate = fs.readFileSync(QUERY_PATH, 'utf8').trim().replace(/;[\s]*$/, '')
-  const queryText = queryTemplate.replaceAll('{{DATASET_VIEW}}', formatTableRef(BQ_EXPORT_VIEW))
+  const exportViewRef = resolveTableRef(BQ_EXPORT_VIEW, MART_DATASET_ID)
+  const prestadoresTableRef = resolveTableRef(BQ_PRESTADORES_TABLE, MART_DATASET_ID)
+  const queryText = queryTemplate
+    .replaceAll('{{DATASET_VIEW}}', formatTableRef(exportViewRef))
+    .replaceAll('{{PRESTADORES_TABLE}}', formatTableRef(prestadoresTableRef))
   const bigquery = new BigQuery({ projectId: PROJECT_ID })
   console.log(`[export-bq] Exportando indicadores via BigQuery -> ${OUTPUT_PATH}`)
   const [rows] = await bigquery.query({

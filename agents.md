@@ -1,5 +1,9 @@
 # Historico da conversa (agents)
 
+## 2026-03-04T12:55:41Z
+- User: pediu centralizar tabelas/views derivadas do projeto no dataset `dash_ans`, mantendo `datalake_ans` apenas com dados originais da ANS, e solicitou abertura de branch para teste.
+- Agent: criou branch de trabalho, ajustou defaults de runtime/scripts/deploy para usar objetos derivados em `dash_ans` (snapshot, marts, prestadores e export), manteve base original em `datalake_ans`, atualizou envs/documentação e validou com lint/testes.
+
 ## 2026-03-03T21:57:23Z
 - User: pediu atualizar o GitHub com a versão mais recente local, com commit e push.
 - Agent: validou o estado do repositório, registrou a interação no histórico e enviou todas as alterações pendentes para o remoto com commit e push.

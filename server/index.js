@@ -12,14 +12,15 @@ const __dirname = path.dirname(__filename)
 const PORT = process.env.SERVER_PORT ?? process.env.PORT ?? 4000
 const BQ_PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
 const BQ_DATASET = process.env.BQ_DATASET ?? 'datalake_ans'
+const BQ_MART_DATASET = process.env.BQ_MART_DATASET ?? 'dash_ans'
 const BQ_LOCATION = process.env.BQ_LOCATION ?? 'US'
-const BQ_EXPORT_VIEW = process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? 'indicadores_curados_snapshot'
+const BQ_EXPORT_VIEW =
+  process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? `${BQ_MART_DATASET}.indicadores_curados_snapshot`
 const BQ_MART_ANS_TABLE = process.env.BQ_MART_ANS_TABLE ?? process.env.BQ_DATASET_VIEW_ANS ?? ''
 const BQ_MART_UNIODONTO_TABLE =
   process.env.BQ_MART_UNIODONTO_TABLE ?? process.env.BQ_DATASET_VIEW_UNIODONTO ?? ''
-const BQ_MART_DATASET = process.env.BQ_MART_DATASET ?? BQ_DATASET
 const BQ_PRESTADORES_TABLE =
-  process.env.BQ_PRESTADORES_TABLE ?? `${BQ_PROJECT_ID}.${BQ_DATASET}.prestadores_ativos_uniodonto_origem`
+  process.env.BQ_PRESTADORES_TABLE ?? `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.prestadores_ativos_uniodonto_origem`
 const EXPORT_SQL_PATH = path.resolve(__dirname, '../db/export_indicadores.sql')
 const DIST_DIR = path.resolve(__dirname, '../dist')
 const DEMONSTRACOES_TEMPLATE_CSV = `competencia;reg_ans;cnpj;cd_conta_contabil;vl_saldo_final;descricao;vl_saldo_inicial;vl_debitos;vl_creditos;moeda;status_fechamento;tipo_envio;versao_envio;dt_envio;sistema_origem;responsavel_nome;responsavel_email;qt_beneficiarios;qt_prestadores;modalidade;porte;observacoes`
@@ -29,7 +30,7 @@ const DEMONSTRACOES_EXAMPLE_CSV = `competencia;reg_ans;cnpj;cd_conta_contabil;vl
 2026-01;123456;12345678000190;46;180000.00;DESPESAS ADMINISTRATIVAS;;;;BRL;FECHADO;NORMAL;1;2026-02-05T18:22:10Z;ERP-EXEMPLO;Maria Silva;maria@operadora.com.br;18234;542;Cooperativa odontologica;Medio Porte;
 2026-01;123456;12345678000190;12;800000.00;ATIVO CIRCULANTE;;;;BRL;FECHADO;NORMAL;1;2026-02-05T18:22:10Z;ERP-EXEMPLO;Maria Silva;maria@operadora.com.br;18234;542;Cooperativa odontologica;Medio Porte;
 2026-01;123456;12345678000190;21;500000.00;PASSIVO CIRCULANTE;;;;BRL;FECHADO;NORMAL;1;2026-02-05T18:22:10Z;ERP-EXEMPLO;Maria Silva;maria@operadora.com.br;18234;542;Cooperativa odontologica;Medio Porte;`
-const BQ_AUX_DATASET = process.env.BQ_AUX_DATASET ?? process.env.BQ_MART_DATASET ?? BQ_DATASET
+const BQ_AUX_DATASET = process.env.BQ_AUX_DATASET ?? process.env.BQ_MART_DATASET ?? BQ_MART_DATASET
 const BQ_AUX_DEMONSTRACOES_TABLE = process.env.BQ_AUX_DEMONSTRACOES_TABLE ?? 'demonstracoes_contabeis_auxiliar'
 const BQ_AUX_DEMONSTRACOES_LATEST_VIEW =
   process.env.BQ_AUX_DEMONSTRACOES_LATEST_VIEW ?? 'vw_demonstracoes_contabeis_auxiliar_latest'
@@ -79,6 +80,7 @@ const AUX_DEMONSTRACOES_TABLE_REF = parseTableRef(BQ_AUX_DEMONSTRACOES_TABLE, BQ
 const AUX_DEMONSTRACOES_LATEST_VIEW_REF = parseTableRef(BQ_AUX_DEMONSTRACOES_LATEST_VIEW, BQ_AUX_DATASET)
 const BASE_DEMONSTRACOES_TABLE_REF = parseTableRef(BQ_BASE_DEMONSTRACOES_TABLE, BQ_DATASET)
 const CONSOLIDATED_DEMONSTRACOES_VIEW_REF = parseTableRef(BQ_CONSOLIDATED_DEMONSTRACOES_VIEW, BQ_AUX_DATASET)
+const EXPORT_VIEW_REF = parseTableRef(BQ_EXPORT_VIEW, BQ_MART_DATASET)
 
 const bigquery = new BigQuery({
   projectId: BQ_PROJECT_ID,
@@ -110,14 +112,9 @@ const ALLOWED_TABLES = (() => {
   if (RAW_ALLOWED_VIEWS) {
     RAW_ALLOWED_VIEWS.split(',').forEach(add)
   } else {
-    add(BQ_EXPORT_VIEW)
+    add(EXPORT_VIEW_REF.fqn)
     add(BQ_MART_ANS_TABLE)
     add(BQ_MART_UNIODONTO_TABLE)
-    const normalizedExport = String(BQ_EXPORT_VIEW ?? '').replace(/^`|`$/g, '').replace(/^"|"$/g, '')
-    if (normalizedExport && normalizedExport.split('.').length === 1) {
-      add(`${BQ_DATASET}.${BQ_EXPORT_VIEW}`)
-      add(`${BQ_PROJECT_ID}.${BQ_DATASET}.${BQ_EXPORT_VIEW}`)
-    }
     const normalizedMartAns = String(BQ_MART_ANS_TABLE ?? '').replace(/^`|`$/g, '').replace(/^"|"$/g, '')
     if (normalizedMartAns && normalizedMartAns.split('.').length === 1) {
       add(`${BQ_MART_DATASET}.${BQ_MART_ANS_TABLE}`)
@@ -246,7 +243,9 @@ function formatTableRef(name) {
 }
 
 const exportQueryTemplate = fs.readFileSync(EXPORT_SQL_PATH, 'utf8').trim().replace(/;[\s]*$/, '')
-const exportQuery = exportQueryTemplate.replaceAll('{{DATASET_VIEW}}', formatTableRef(BQ_EXPORT_VIEW))
+const exportQuery = exportQueryTemplate
+  .replaceAll('{{DATASET_VIEW}}', formatTableRef(EXPORT_VIEW_REF.fqn))
+  .replaceAll('{{PRESTADORES_TABLE}}', formatTableRef(BQ_PRESTADORES_TABLE))
 
 function formatCsvValue(value) {
   if (value === null || value === undefined) return ''
