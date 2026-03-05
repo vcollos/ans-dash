@@ -13,7 +13,7 @@ fi
 
 set -a
 : "${BQ_PROJECT_ID:=bigdata-467917}"
-: "${BQ_DATASET:=datalake_ans}"
+: "${BQ_DATASET:=dash_ans}"
 : "${BQ_EXPORT_VIEW:=indicadores_curados_snapshot}"
 : "${BQ_MART_DATASET:=dash_ans}"
 : "${BQ_SOURCE_TABLE:=${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_EXPORT_VIEW}}"

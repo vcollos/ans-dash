@@ -11,7 +11,7 @@ const __dirname = path.dirname(__filename)
 
 const PORT = process.env.SERVER_PORT ?? process.env.PORT ?? 4000
 const BQ_PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
-const BQ_DATASET = process.env.BQ_DATASET ?? 'datalake_ans'
+const BQ_DATASET = process.env.BQ_DATASET ?? 'dash_ans'
 const BQ_MART_DATASET = process.env.BQ_MART_DATASET ?? 'dash_ans'
 const BQ_LOCATION = process.env.BQ_LOCATION ?? 'US'
 const BQ_EXPORT_VIEW =
@@ -35,7 +35,7 @@ const BQ_AUX_DEMONSTRACOES_TABLE = process.env.BQ_AUX_DEMONSTRACOES_TABLE ?? 'de
 const BQ_AUX_DEMONSTRACOES_LATEST_VIEW =
   process.env.BQ_AUX_DEMONSTRACOES_LATEST_VIEW ?? 'vw_demonstracoes_contabeis_auxiliar_latest'
 const BQ_BASE_DEMONSTRACOES_TABLE =
-  process.env.BQ_BASE_DEMONSTRACOES_TABLE ?? `${BQ_PROJECT_ID}.${BQ_DATASET}.demonstracoes_contabeis`
+  process.env.BQ_BASE_DEMONSTRACOES_TABLE ?? `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.demonstracoes_contabeis`
 const BQ_CONSOLIDATED_DEMONSTRACOES_VIEW =
   process.env.BQ_CONSOLIDATED_DEMONSTRACOES_VIEW ??
   `${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.vw_demonstracoes_contabeis_consolidada`
@@ -136,11 +136,38 @@ const SERVER_BOOT_ID = process.env.K_REVISION ?? crypto.randomBytes(8).toString(
 
 const FIREBASE_PROJECT_ID =
   process.env.FIREBASE_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT
+const FIREBASE_SERVICE_ACCOUNT_PATH = String(process.env.FIREBASE_SERVICE_ACCOUNT_PATH ?? '').trim()
+
+function buildFirebaseAdminOptions() {
+  const options = {}
+  if (FIREBASE_PROJECT_ID) {
+    options.projectId = FIREBASE_PROJECT_ID
+  }
+
+  if (!FIREBASE_SERVICE_ACCOUNT_PATH) {
+    return options
+  }
+
+  try {
+    const raw = fs.readFileSync(path.resolve(FIREBASE_SERVICE_ACCOUNT_PATH), 'utf8')
+    const serviceAccount = JSON.parse(raw)
+    options.credential = admin.credential.cert(serviceAccount)
+    if (!options.projectId && serviceAccount?.project_id) {
+      options.projectId = serviceAccount.project_id
+    }
+    console.log(`[server] Firebase Admin usando chave em ${FIREBASE_SERVICE_ACCOUNT_PATH}`)
+    return options
+  } catch (err) {
+    console.error(
+      `[server] Falha ao carregar FIREBASE_SERVICE_ACCOUNT_PATH (${FIREBASE_SERVICE_ACCOUNT_PATH}):`,
+      err?.message ?? err,
+    )
+    throw err
+  }
+}
 
 if (!admin.apps.length) {
-  admin.initializeApp({
-    projectId: FIREBASE_PROJECT_ID,
-  })
+  admin.initializeApp(buildFirebaseAdminOptions())
 }
 
 const AUTH_PUBLIC_PATHS = new Set(['/api/health', '/api/auth/status'])

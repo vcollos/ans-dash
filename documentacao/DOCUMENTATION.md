@@ -31,7 +31,7 @@ Fluxo resumido:
 | Variável | Descrição | Exemplo |
 |---|---|---|
 | `BQ_PROJECT_ID` | Projeto GCP | `bigdata-467917` |
-| `BQ_DATASET` | Dataset de origem (ANS bruto/original) | `datalake_ans` |
+| `BQ_DATASET` | Dataset padrão das tabelas/views usadas no projeto | `dash_ans` |
 | `BQ_MART_DATASET` | Dataset de artefatos derivados do dashboard | `dash_ans` |
 | `BQ_DATASET_VIEW` / `BQ_EXPORT_VIEW` | View/tabela principal do dashboard | `dash_ans.indicadores_curados_snapshot` |
 | `BQ_LOCATION` | Localização | `US` |

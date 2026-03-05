@@ -1,5 +1,33 @@
 # Historico da conversa (agents)
 
+## 2026-03-05T18:08:25Z
+- User: pediu manter todas as tabelas do projeto em `bigdata-467917.dash_ans` e perguntou se era possível criar as tabelas.
+- Agent: copiou para `dash_ans` as tabelas base que ainda estavam em `datalake_ans` (`demonstracoes_contabeis`, `demonstracoes_contabeis_raw`, `operadoras`, `operadoras_beneficiarios_modalidade`, `prestadores_proprios`, `uniodontos_ativas`), recriou `vw_demonstracoes_contabeis_full`, `indicadores_curados`, `indicadores_metricas`, materializou `indicadores_curados_snapshot` e marts em `dash_ans`, além de atualizar defaults de runtime/scripts/env/docs para `BQ_DATASET=dash_ans` e validar Docker/API (`/api/health` ok).
+
+## 2026-03-05T17:43:27Z
+- User: reportou erro Firebase `auth/api-key-not-valid`.
+- Agent: diagnosticou `.env.local` com placeholders (`change-me`), buscou a configuração oficial do Web App via Firebase Management API do projeto `bigdata-467917` (com `x-goog-user-project`), atualizou `VITE_FIREBASE_*` no `.env.local`, reiniciou o Docker dev e validou serviços (`/api/health` ok, Vite 200).
+
+## 2026-03-05T17:38:24Z
+- User: informou a disponibilidade da chave de serviço Firebase em `.cert/bigdata-467917-firebase-adminsdk-fbsvc-e80e825190.json`.
+- Agent: separou credenciais de BigQuery e Firebase no fluxo dev; adicionou `FIREBASE_SERVICE_ACCOUNT_PATH` com autodetecção de `*firebase-adminsdk*.json` em `.cert`, atualizou backend (`firebase-admin`) para carregar a chave dedicada sem impactar ADC/BigQuery, atualizou documentação/templates e validou logs com “Firebase Admin usando chave...” + healthcheck `ok`.
+
+## 2026-03-05T17:30:43Z
+- User: reportou erro Vite de import (`Failed to resolve import "xlsx"`) no `SingularDataImportDialog.jsx`.
+- Agent: diagnosticou que `xlsx` estava no `package.json/package-lock`, mas ausente no `node_modules` do volume Docker; adicionou sincronização automática de dependências no `scripts/dev-local.sh` (roda `npm ci` quando `node_modules` está ausente/desalinhado com `package-lock`) e validou `xlsx@0.18.5` resolvendo no container + app saudável (`/api/health` ok).
+
+## 2026-03-05T17:28:35Z
+- User: pediu para rodar os comandos e garantir conexão no projeto correto `bigdata-467917`.
+- Agent: executou `gcloud config set project bigdata-467917` + `gcloud auth application-default set-quota-project bigdata-467917`, recriou o ambiente com `docker compose -f docker-compose.dev.yml up -d --build` e validou container ativo, logs com ADC (`/root/.config/gcloud/application_default_credentials.json`) e healthcheck `ok`.
+
+## 2026-03-05T17:12:52Z
+- User: perguntou se a conexao com Google Cloud poderia ser feita por login CLI em vez de depender de `.cert`.
+- Agent: implementou suporte direto a ADC no fluxo Docker de desenvolvimento (montagem `${HOME}/.config/gcloud` no `docker-compose.dev.yml` + fallback no `scripts/dev-local.sh` para `application_default_credentials.json`), atualizou README/env de exemplo e validou o app subindo sem `.cert`, com healthcheck `ok`.
+
+## 2026-03-05T17:11:06Z
+- User: pediu para validar se o sistema estava dockerizado (compose e env de exemplo) e subir a versão de desenvolvimento local para iniciar melhorias.
+- Agent: confirmou `Dockerfile`/`Dockerfile.dev`, `docker-compose.dev.yml` e templates `env/.env.local.example` + `env/.env.local.server.example`; inicializou `.env` com `npm run env:init`, ajustou credencial local em `.cert/` usando ADC e subiu o ambiente com `docker compose -f docker-compose.dev.yml up -d --build`, validando o container ativo e portas `5173`/`4000`.
+
 ## 2026-03-04T12:55:41Z
 - User: pediu centralizar tabelas/views derivadas do projeto no dataset `dash_ans`, mantendo `datalake_ans` apenas com dados originais da ANS, e solicitou abertura de branch para teste.
 - Agent: criou branch de trabalho, ajustou defaults de runtime/scripts/deploy para usar objetos derivados em `dash_ans` (snapshot, marts, prestadores e export), manteve base original em `datalake_ans`, atualizou envs/documentação e validou com lint/testes.

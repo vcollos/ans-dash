@@ -33,7 +33,8 @@ Para rodar em ambiente controlado (sem mudar o deploy do Cloud Run), use:
 ```bash
 npm run env:init
 # edite .env.local e .env.local.server com seus valores
-# coloque a credencial do BigQuery em .cert/*.json (fora do Git)
+# autentique no Google Cloud CLI (ADC) ou use .cert/*.json (fora do Git)
+# gcloud auth application-default login
 npm run docker:dev:up
 ```
 
@@ -52,6 +53,7 @@ Arquivos de referência:
 - `docker-compose.dev.yml` (somente desenvolvimento)
 - `Dockerfile.dev` (imagem de desenvolvimento)
 - `env/.env.local.example` e `env/.env.local.server.example` (templates versionados)
+- o compose monta `${HOME}/.config/gcloud` em `/root/.config/gcloud` para usar ADC no container
 
 ### Importação de dados da Singular (tabela auxiliar)
 
@@ -65,8 +67,8 @@ Arquivos de referência:
 **BigQuery (API):**
 - `GOOGLE_APPLICATION_CREDENTIALS` (caminho do JSON da service account) **ou** `gcloud auth application-default login`.
 - `BQ_PROJECT_ID` (ex.: `bigdata-467917`)
-- `BQ_DATASET` (ex.: `datalake_ans`) para tabelas originais ANS.
-- `BQ_MART_DATASET` (ex.: `dash_ans`) para tabelas/views derivadas do dashboard.
+- `BQ_DATASET` (ex.: `dash_ans`) dataset padrão das tabelas/views usadas pelo projeto.
+- `BQ_MART_DATASET` (ex.: `dash_ans`) dataset dos artefatos derivados do dashboard.
 - `BQ_DATASET_VIEW` ou `BQ_EXPORT_VIEW` (ex.: `dash_ans.indicadores_curados_snapshot`)
 - `BQ_LOCATION` (ex.: `US`)
 - `BQ_ALLOWED_VIEWS` (opcional): lista de views/tabelas permitidas no `/api/query` (ex.: `bigdata-467917.dash_ans.indicadores_curados_snapshot,bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem`).
@@ -74,7 +76,7 @@ Arquivos de referência:
 - `BQ_AUX_DATASET` (opcional): dataset da tabela auxiliar de importação (default: `BQ_MART_DATASET`).
 - `BQ_AUX_DEMONSTRACOES_TABLE` (opcional): tabela auxiliar de importação (default: `demonstracoes_contabeis_auxiliar`).
 - `BQ_AUX_DEMONSTRACOES_LATEST_VIEW` (opcional): view com última versão por chave da importação (default: `vw_demonstracoes_contabeis_auxiliar_latest`).
-- `BQ_BASE_DEMONSTRACOES_TABLE` (opcional): tabela original ANS usada para view consolidada (default: `${BQ_PROJECT_ID}.${BQ_DATASET}.demonstracoes_contabeis`).
+- `BQ_BASE_DEMONSTRACOES_TABLE` (opcional): tabela base usada para view consolidada (default: `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.demonstracoes_contabeis`).
 - `BQ_CONSOLIDATED_DEMONSTRACOES_VIEW` (opcional): view consolidada (base ANS + auxiliar) (default: `${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.vw_demonstracoes_contabeis_consolidada`).
 - `BQ_REFRESH_CONSOLIDATED_VIEW` (opcional): `true|false` para atualizar a view consolidada ao final do upload (default: `true`).
 - `DEMONSTRACOES_MAX_UPLOAD_ROWS` (opcional): limite de linhas por arquivo (default: `10000`).
@@ -104,6 +106,9 @@ Outras variáveis Vite (opcionais):
 
 **Firebase (API):**
 - `FIREBASE_PROJECT_ID` (normalmente o mesmo do GCP)
+- `FIREBASE_SERVICE_ACCOUNT_PATH` (opcional, recomendado quando a validação de token exigir chave dedicada do Firebase Admin, ex.: `.cert/bigdata-467917-firebase-adminsdk-*.json`)
+
+No Docker dev, o `scripts/dev-local.sh` detecta automaticamente um arquivo `*firebase-adminsdk*.json` em `.cert/` e exporta `FIREBASE_SERVICE_ACCOUNT_PATH`.
 
 ## Autenticação
 

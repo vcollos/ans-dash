@@ -4,24 +4,21 @@ Este documento descreve o procedimento que o administrador deve seguir sempre qu
 
 ## Datasets e tabelas (novos e existentes)
 
-### 1) Dataset de origem (datalake)
+### 1) Dataset principal do projeto
+Projeto: `bigdata-467917`  
+Dataset: `dash_ans`
+
+Objetos esperados:
+- tabelas base e derivadas usadas pelo dashboard.
+- ex.: `demonstracoes_contabeis`, `indicadores_curados`, `indicadores_curados_snapshot`, `indicadores_mart_*`.
+
+### 2) Dataset legado opcional (datalake)
 Projeto: `bigdata-467917`  
 Dataset: `datalake_ans`
 
-Objetos esperados:
-- tabelas originais publicadas pela ANS (ex.: `demonstracoes_contabeis`).
-- sem views/tabelas derivadas do dashboard.
-
-### 2) Dataset do dashboard (novo)
-Projeto: `bigdata-467917`  
-Dataset: `dash_ans` (sem hifen; BigQuery nao permite `-` no ID do dataset)
-
-Objetos derivados usados pelo dashboard:
-- `indicadores_curados` (view base com regras e ajustes do projeto)
-- `indicadores_curados_snapshot` (tabela materializada por periodo)
-- `prestadores_ativos_uniodonto_origem` (tabela usada para complementar prestadores no dashboard)
-- `indicadores_mart_ans` (pré-calculo dos indicadores RN 518)
-- `indicadores_mart_uniodonto` (pré-calculo dos indicadores Uniodonto)
+Uso recomendado:
+- manter apenas fontes externas/legadas que ainda nao foram migradas.
+- evitar criar novos artefatos de projeto nesse dataset.
 
 Observacao: o app usa as marts quando `VITE_MART_ANS_TABLE` e `VITE_MART_UNIODONTO_TABLE` estao configuradas.
 
@@ -47,7 +44,7 @@ Arquivo recomendado: `.env.local.server`
 
 ```
 BQ_PROJECT_ID=bigdata-467917
-BQ_DATASET=datalake_ans
+BQ_DATASET=dash_ans
 BQ_EXPORT_VIEW=dash_ans.indicadores_curados_snapshot
 BQ_SOURCE_TABLE=bigdata-467917.dash_ans.indicadores_curados_snapshot
 BQ_MART_ANS_TABLE=indicadores_mart_ans
@@ -81,7 +78,7 @@ bq --location=US mk --dataset bigdata-467917:dash_ans
 
 
 ### 1) Atualizar os dados brutos
-- Carregue os novos dados no dataset de origem.
+- Carregue os novos dados no dataset adotado pelo projeto (`dash_ans`).
 - Se houver mudancas de colunas, atualize o script/view base.
 
 ### 2) Atualizar a view base (se necessario)

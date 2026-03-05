@@ -1,7 +1,7 @@
 import { BigQuery } from '@google-cloud/bigquery'
 
 const PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
-const DATASET_ID = process.env.BQ_DATASET ?? 'datalake_ans'
+const DATASET_ID = process.env.BQ_DATASET ?? 'dash_ans'
 const MART_DATASET_ID = process.env.BQ_MART_DATASET ?? 'dash_ans'
 const SOURCE_VIEW = process.env.BQ_SOURCE_VIEW ?? `${MART_DATASET_ID}.indicadores_curados`
 const TARGET_TABLE = process.env.BQ_SNAPSHOT_TABLE ?? `${MART_DATASET_ID}.indicadores_curados_snapshot`
