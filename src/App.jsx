@@ -9,7 +9,7 @@ import UniodontoKpiCards from './components/dashboard/UniodontoKpiCards'
 import RankingPanel from './components/dashboard/RankingPanel'
 import IndicatorTrendChart from './components/dashboard/IndicatorTrendChart'
 import UniodontoPerCapitaChart from './components/dashboard/UniodontoPerCapitaChart'
-import SingularDataImportDialog from './components/dashboard/SingularDataImportDialog'
+import OperadoraDataImportDialog from './components/dashboard/OperadoraDataImportDialog'
 import DataTable from './components/dashboard/DataTable'
 import MonetarySummary from './components/dashboard/MonetarySummary'
 import { Skeleton } from './components/ui/skeleton'
@@ -21,6 +21,7 @@ import DataLoadingIndicator from './components/dashboard/DataLoadingIndicator'
 import { AuthProvider } from './contexts/AuthProvider'
 import { useAuth } from './contexts/useAuth'
 import { UNIODONTO_INDICATORS } from './lib/uniodontoMetrics'
+import { fetchAccessProfile } from './lib/accessProfile'
 
 function LoadingState() {
   return (
@@ -61,7 +62,26 @@ function ErrorState({ error, onRetry }) {
   )
 }
 
-function DashboardApp({ onLogout }) {
+function AccessBlockedState({ onLogout }) {
+  return (
+    <Card className="border-amber-400/50 bg-amber-50">
+      <CardContent className="flex flex-col items-start gap-4 p-6 text-amber-900">
+        <div className="space-y-1">
+          <p className="text-lg font-semibold">Acesso pendente para operadora</p>
+          <p className="text-sm">
+            Seu usuário autenticou com sucesso, mas ainda não possui vínculo ativo com nenhuma Operadora Uniodonto.
+          </p>
+          <p className="text-sm">Solicite ao administrador o cadastro do seu `reg_ans` na tabela de acessos do sistema.</p>
+        </div>
+        <Button variant="outline" onClick={onLogout}>
+          Sair
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+function DashboardApp({ onLogout, accessProfile }) {
   const [filtersSidebarOpen, setFiltersSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('indicadores')
   const [isDataImportOpen, setIsDataImportOpen] = useState(false)
@@ -111,7 +131,18 @@ function DashboardApp({ onLogout }) {
   const comparisonLabel = useMemo(() => describeComparisonFilters(comparisonFilters), [comparisonFilters])
   const trendPrimaryLabel = operatorInsight?.operatorName ?? 'Média dos filtros'
   const isRefreshingData = isQuerying || isTrendLoading
-  const canOpenDataImport = /\bsingular\b/i.test(String(operatorInsight?.operatorName ?? ''))
+  const uploadOperators = useMemo(
+    () =>
+      (accessProfile?.operators ?? [])
+        .filter((item) => item?.canUpload)
+        .map((item) => ({
+          regAns: String(item.regAns ?? '').trim(),
+          operatorName: item.operatorName ?? null,
+        }))
+        .filter((item) => item.regAns),
+    [accessProfile?.operators],
+  )
+  const canOpenDataImport = uploadOperators.length > 0
 
   if (status === 'loading') {
     return (
@@ -280,11 +311,12 @@ function DashboardApp({ onLogout }) {
             </TabsContent>
           </Tabs>
         </div>
-        <SingularDataImportDialog
+        <OperadoraDataImportDialog
           open={isDataImportOpen}
           onOpenChange={setIsDataImportOpen}
-          operatorName={operatorInsight?.operatorName ?? null}
-          operatorRegAns={operatorContext?.regAns ?? null}
+          allowedOperators={uploadOperators}
+          defaultOperatorName={operatorInsight?.operatorName ?? null}
+          defaultOperatorRegAns={operatorContext?.regAns ?? null}
         />
       </main>
     </div>
@@ -307,6 +339,9 @@ function AppContent() {
   const [authMessage, setAuthMessage] = useState(null)
   const [isAuthLoading, setIsAuthLoading] = useState(false)
   const [isEmailLinkFlow, setIsEmailLinkFlow] = useState(false)
+  const [accessProfile, setAccessProfile] = useState(null)
+  const [isAccessProfileLoading, setIsAccessProfileLoading] = useState(false)
+  const [accessProfileError, setAccessProfileError] = useState(null)
   const allowSignUp = import.meta.env?.VITE_ALLOW_SIGNUP !== 'false'
 
   useEffect(() => {
@@ -324,6 +359,34 @@ function AppContent() {
       setIsAuthLoading(false)
     }
   }, [isLoading])
+
+  useEffect(() => {
+    if (!user) {
+      setAccessProfile(null)
+      setAccessProfileError(null)
+      setIsAccessProfileLoading(false)
+      return
+    }
+    let cancelled = false
+    setIsAccessProfileLoading(true)
+    setAccessProfileError(null)
+    fetchAccessProfile()
+      .then((profile) => {
+        if (cancelled) return
+        setAccessProfile(profile)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setAccessProfileError(err)
+      })
+      .finally(() => {
+        if (cancelled) return
+        setIsAccessProfileLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user?.uid, user?.email])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -426,7 +489,31 @@ function AppContent() {
     )
   }
 
-  return <DashboardApp onLogout={signOut} />
+  if (isAccessProfileLoading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-muted/20 px-4 py-12 text-sm text-muted-foreground">
+        Carregando perfil de acesso...
+      </main>
+    )
+  }
+
+  if (accessProfileError) {
+    return (
+      <main className="flex min-h-screen w-full flex-col justify-center px-[3vw] py-[3vh]">
+        <ErrorState error={accessProfileError} onRetry={() => window.location.reload()} />
+      </main>
+    )
+  }
+
+  if (accessProfile?.noAccess) {
+    return (
+      <main className="flex min-h-screen w-full flex-col justify-center px-[3vw] py-[3vh]">
+        <AccessBlockedState onLogout={signOut} />
+      </main>
+    )
+  }
+
+  return <DashboardApp onLogout={signOut} accessProfile={accessProfile} />
 }
 
 export default function App() {

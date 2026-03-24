@@ -8,10 +8,25 @@ services:
     environment:
       CHOKIDAR_USEPOLLING: "true"
       WATCHPACK_POLLING: "true"
-      VITE_API_PROXY: "http://localhost:4000"
+      SERVER_HOST: "${SERVER_HOST:-0.0.0.0}"
+      SERVER_PORT: "${SERVER_PORT:-4000}"
+      VITE_HOST: "${VITE_HOST:-0.0.0.0}"
+      VITE_PORT: "${VITE_PORT:-5173}"
+      VITE_ALLOWED_HOSTS: "${VITE_ALLOWED_HOSTS:-localhost,127.0.0.1,0.0.0.0,dash.collos.com.br,backdash.collos.com.br}"
+      VITE_API_PROXY: "http://localhost:${SERVER_PORT:-4000}"
     ports:
-      - "5173:5173"
-      - "4000:4000"
+      - "${VITE_PORT:-5173}:${VITE_PORT:-5173}"
+      - "${SERVER_PORT:-4000}:${SERVER_PORT:-4000}"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:' + (process.env.SERVER_PORT || '4000') + '/api/health').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     volumes:
       - .:/app
       - node_modules:/app/node_modules

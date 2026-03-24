@@ -4,6 +4,8 @@
 
 O **ans-dashboard** é um painel interativo em **Vite + React** que consome indicadores financeiros da ANS diretamente do **BigQuery**. A API Express atua como proxy de consultas (`/api/query`) e exportação CSV (`/api/indicadores.csv`). A autenticação é feita via **Firebase Auth** e validada no backend com o Admin SDK. O deploy de produção roda no **Google Cloud Run**.
 
+Política operacional do repositório: [politica-operacional-sandbox.md](/Volumes/SSD/Collos/ans-dash/documentacao/politica-operacional-sandbox.md)
+
 Fluxo resumido:
 
 1. Os dados são mantidos no BigQuery (views/tabelas curadas).
@@ -25,6 +27,13 @@ Fluxo resumido:
 ```
 
 ## 3. Ambiente e Variáveis
+
+### 3.0 Diretriz operacional
+
+- Não usar banco de dados local neste projeto.
+- O ambiente padrão de execução local é Docker.
+- Persistência e autenticação devem usar apenas serviços remotos oficiais do projeto.
+- Publicação deve seguir fluxo com commit, push e CI/CD quando houver solicitação de deploy.
 
 ### Backend (API)
 

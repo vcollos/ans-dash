@@ -24,7 +24,7 @@ export async function fetchWithAuth(url, options = {}) {
     headers.set('Authorization', `Bearer ${token}`)
   }
   const response = await fetch(url, { ...options, headers })
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401) {
     try {
       await signOut(auth)
     } catch (err) {

@@ -1,5 +1,9 @@
 # Historico da conversa (agents)
 
+## 2026-03-05T19:36:38Z
+- User: pediu abrir uma branch e criar formulário para envio de dados pelas Operadoras, com ajuste de cadastro para restringir acesso de cada usuário à sua(s) própria(s) Operadora(s) Uniodonto.
+- Agent: criou branch `codex/form-operadora-acl`; implementou ACL por operadora no backend via tabela `user_operadora_acessos` (perfil em `/api/auth/profile`, escopo por `reg_ans` no `/api/query` e no upload, suporte a múltiplas operadoras e permissão de envio), generalizou o endpoint para `/api/import/operadora-demonstracoes` (mantendo alias legado), substituiu o modal por formulário de upload com seleção de operadoras autorizadas no frontend, adicionou bloqueio para usuário sem vínculo e atualizou envs/docs/script SQL de criação da tabela de acesso.
+
 ## 2026-03-05T18:08:25Z
 - User: pediu manter todas as tabelas do projeto em `bigdata-467917.dash_ans` e perguntou se era possível criar as tabelas.
 - Agent: copiou para `dash_ans` as tabelas base que ainda estavam em `datalake_ans` (`demonstracoes_contabeis`, `demonstracoes_contabeis_raw`, `operadoras`, `operadoras_beneficiarios_modalidade`, `prestadores_proprios`, `uniodontos_ativas`), recriou `vw_demonstracoes_contabeis_full`, `indicadores_curados`, `indicadores_metricas`, materializou `indicadores_curados_snapshot` e marts em `dash_ans`, além de atualizar defaults de runtime/scripts/env/docs para `BQ_DATASET=dash_ans` e validar Docker/API (`/api/health` ok).

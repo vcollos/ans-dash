@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertCircle, CheckCircle2, Download, FileUp, Loader2 } from 'lucide-react'
 import { fetchWithAuth } from '../../lib/auth'
 import { Button } from '../ui/button'
@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '../ui/dialog'
 import { Input } from '../ui/input'
+import { Label } from '../ui/label'
 
 const REQUIRED_FIELDS = ['competencia', 'reg_ans', 'cd_conta_contabil', 'vl_saldo_final']
 const ALLOWED_FIELDS = [
@@ -45,6 +46,12 @@ function normalizeHeaderName(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
+}
+
+function normalizeRegAns(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/\D+/g, '')
 }
 
 function toNullableString(value) {
@@ -92,31 +99,81 @@ async function downloadCsv(endpoint, fallbackFileName) {
   URL.revokeObjectURL(href)
 }
 
-export default function SingularDataImportDialog({
+function normalizeOperatorList(values = []) {
+  const map = new Map()
+  values.forEach((item) => {
+    const regAns = normalizeRegAns(item?.regAns)
+    if (!regAns) return
+    const current = map.get(regAns)
+    const next = {
+      regAns,
+      operatorName: String(item?.operatorName ?? '').trim() || null,
+      canUpload: item?.canUpload === false ? false : true,
+    }
+    if (!current) {
+      map.set(regAns, next)
+      return
+    }
+    map.set(regAns, {
+      regAns,
+      operatorName: current.operatorName ?? next.operatorName,
+      canUpload: current.canUpload || next.canUpload,
+    })
+  })
+  return [...map.values()].sort((a, b) => {
+    const aLabel = a.operatorName ?? a.regAns
+    const bLabel = b.operatorName ?? b.regAns
+    return aLabel.localeCompare(bLabel)
+  })
+}
+
+export default function OperadoraDataImportDialog({
   open,
   onOpenChange,
-  operatorName,
-  operatorRegAns,
+  allowedOperators = [],
+  defaultOperatorName = null,
+  defaultOperatorRegAns = null,
   onUploadSuccess,
 }) {
   const [selectedFile, setSelectedFile] = useState(null)
+  const [selectedRegAns, setSelectedRegAns] = useState('')
   const [parsedRows, setParsedRows] = useState([])
   const [parseError, setParseError] = useState(null)
   const [uploadResult, setUploadResult] = useState(null)
   const [isParsing, setIsParsing] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false)
-  const isSingularOperator = useMemo(() => /\bsingular\b/i.test(String(operatorName ?? '')), [operatorName])
-  const canSubmit = parsedRows.length > 0 && !isSubmitting && isSingularOperator
+
+  const uploadOperators = useMemo(() => normalizeOperatorList(allowedOperators).filter((item) => item.canUpload), [allowedOperators])
+  const selectedOperator = useMemo(
+    () => uploadOperators.find((item) => item.regAns === selectedRegAns) ?? null,
+    [selectedRegAns, uploadOperators],
+  )
+  const canSubmit = parsedRows.length > 0 && !isSubmitting && Boolean(selectedOperator)
+
+  useEffect(() => {
+    if (!open) return
+    if (!uploadOperators.length) {
+      setSelectedRegAns('')
+      return
+    }
+    const normalizedDefaultRegAns = normalizeRegAns(defaultOperatorRegAns)
+    const byRegAns = uploadOperators.find((item) => item.regAns === normalizedDefaultRegAns)
+    const normalizedDefaultName = String(defaultOperatorName ?? '').trim().toLowerCase()
+    const byName = uploadOperators.find((item) => String(item.operatorName ?? '').trim().toLowerCase() === normalizedDefaultName)
+    const preferred = byRegAns?.regAns ?? byName?.regAns ?? uploadOperators[0]?.regAns ?? ''
+    setSelectedRegAns((current) => {
+      if (current && uploadOperators.some((item) => item.regAns === current)) return current
+      return preferred
+    })
+  }, [defaultOperatorName, defaultOperatorRegAns, open, uploadOperators])
 
   async function handleTemplateDownload(kind) {
     setIsDownloadingTemplate(true)
     setParseError(null)
     try {
-      const endpoint =
-        kind === 'exemplo' ? '/api/import/demonstracoes/exemplo.csv' : '/api/import/demonstracoes/template.csv'
-      const fallbackFileName =
-        kind === 'exemplo' ? 'demonstracoes_contabeis_exemplo.csv' : 'demonstracoes_contabeis_template.csv'
+      const endpoint = kind === 'exemplo' ? '/api/import/demonstracoes/exemplo.csv' : '/api/import/demonstracoes/template.csv'
+      const fallbackFileName = kind === 'exemplo' ? 'demonstracoes_contabeis_exemplo.csv' : 'demonstracoes_contabeis_template.csv'
       await downloadCsv(endpoint, fallbackFileName)
     } catch (err) {
       setParseError(err?.message ?? 'Falha ao baixar o arquivo de referência.')
@@ -159,9 +216,7 @@ export default function SingularDataImportDialog({
         throw new Error('Nenhuma linha válida foi encontrada no arquivo.')
       }
 
-      const missingRequiredFields = REQUIRED_FIELDS.filter((field) =>
-        normalizedRows.every((row) => toNullableString(row[field]) === ''),
-      )
+      const missingRequiredFields = REQUIRED_FIELDS.filter((field) => normalizedRows.every((row) => toNullableString(row[field]) === ''))
       if (missingRequiredFields.length) {
         throw new Error(`Campos obrigatórios ausentes: ${missingRequiredFields.join(', ')}`)
       }
@@ -175,19 +230,19 @@ export default function SingularDataImportDialog({
   }
 
   async function handleSubmit() {
-    if (!canSubmit || !selectedFile) return
+    if (!canSubmit || !selectedFile || !selectedOperator) return
     setIsSubmitting(true)
     setParseError(null)
     setUploadResult(null)
     try {
-      const response = await fetchWithAuth('/api/import/singular-demonstracoes', {
+      const response = await fetchWithAuth('/api/import/operadora-demonstracoes', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          operatorName,
-          operatorRegAns: operatorRegAns ? String(operatorRegAns) : null,
+          operatorName: selectedOperator.operatorName ?? selectedOperator.regAns,
+          operatorRegAns: selectedOperator.regAns,
           fileName: selectedFile.name,
           rows: parsedRows,
         }),
@@ -224,55 +279,60 @@ export default function SingularDataImportDialog({
         <DialogHeader>
           <DialogTitle>Atualize seus dados</DialogTitle>
           <DialogDescription>
-            Faça upload das demonstrações contábeis da operadora selecionada em tabela auxiliar (sem alterar a base ANS).
+            Envie demonstrações contábeis da sua operadora para a tabela auxiliar, sem alterar a base oficial da ANS.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="operadora-upload-select">Operadora autorizada</Label>
+            <select
+              id="operadora-upload-select"
+              value={selectedRegAns}
+              onChange={(event) => setSelectedRegAns(event.target.value)}
+              disabled={!uploadOperators.length || isSubmitting}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {uploadOperators.length ? null : <option value="">Sem operadoras com permissão de envio</option>}
+              {uploadOperators.map((item) => (
+                <option key={item.regAns} value={item.regAns}>
+                  {(item.operatorName ?? `Reg ANS ${item.regAns}`) + ` (${item.regAns})`}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="rounded-md border border-border/70 bg-muted/30 p-3 text-sm">
             <p>
-              <strong>Operadora:</strong> {operatorName ?? 'Não selecionada'}
+              <strong>Operadora:</strong> {selectedOperator?.operatorName ?? 'Não selecionada'}
             </p>
             <p>
-              <strong>Registro ANS:</strong> {operatorRegAns ?? 'Não informado'}
+              <strong>Registro ANS:</strong> {selectedOperator?.regAns ?? 'Não informado'}
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleTemplateDownload('template')}
-              disabled={isDownloadingTemplate}
-            >
+            <Button size="sm" variant="outline" onClick={() => handleTemplateDownload('template')} disabled={isDownloadingTemplate}>
               {isDownloadingTemplate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
               Baixar template CSV
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleTemplateDownload('exemplo')}
-              disabled={isDownloadingTemplate}
-            >
+            <Button size="sm" variant="outline" onClick={() => handleTemplateDownload('exemplo')} disabled={isDownloadingTemplate}>
               {isDownloadingTemplate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
               Baixar exemplo CSV
             </Button>
           </div>
 
           <div className="space-y-2">
-            <label htmlFor="singular-file-input" className="text-sm font-medium">
-              Arquivo de importação (CSV/XLS/XLSX)
-            </label>
+            <Label htmlFor="operadora-file-input">Arquivo de importação (CSV/XLS/XLSX)</Label>
             <Input
-              id="singular-file-input"
+              id="operadora-file-input"
               type="file"
               accept=".csv,.xls,.xlsx"
               onChange={handleFileChange}
-              disabled={!isSingularOperator || isParsing || isSubmitting}
+              disabled={!selectedOperator || isParsing || isSubmitting}
             />
             <p className="text-xs text-muted-foreground">
-              Campos obrigatórios: <code>competencia</code>, <code>reg_ans</code>, <code>cd_conta_contabil</code>,{' '}
-              <code>vl_saldo_final</code>.
+              Campos obrigatórios: <code>competencia</code>, <code>reg_ans</code>, <code>cd_conta_contabil</code>, <code>vl_saldo_final</code>.
             </p>
           </div>
 

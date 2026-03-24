@@ -9,6 +9,7 @@ import admin from 'firebase-admin'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+const HOST = process.env.SERVER_HOST ?? '0.0.0.0'
 const PORT = process.env.SERVER_PORT ?? process.env.PORT ?? 4000
 const BQ_PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
 const BQ_DATASET = process.env.BQ_DATASET ?? 'dash_ans'
@@ -34,6 +35,11 @@ const BQ_AUX_DATASET = process.env.BQ_AUX_DATASET ?? process.env.BQ_MART_DATASET
 const BQ_AUX_DEMONSTRACOES_TABLE = process.env.BQ_AUX_DEMONSTRACOES_TABLE ?? 'demonstracoes_contabeis_auxiliar'
 const BQ_AUX_DEMONSTRACOES_LATEST_VIEW =
   process.env.BQ_AUX_DEMONSTRACOES_LATEST_VIEW ?? 'vw_demonstracoes_contabeis_auxiliar_latest'
+const BQ_USER_ACCESS_TABLE = process.env.BQ_USER_ACCESS_TABLE ?? 'user_operadora_acessos'
+const ENFORCE_USER_ACCESS = (process.env.BQ_ENFORCE_USER_ACCESS ?? 'true')
+  .toLowerCase()
+  .trim() === 'true'
+const USER_ACCESS_CACHE_TTL_MS = Number(process.env.USER_ACCESS_CACHE_TTL_MS ?? 60_000)
 const BQ_BASE_DEMONSTRACOES_TABLE =
   process.env.BQ_BASE_DEMONSTRACOES_TABLE ?? `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.demonstracoes_contabeis`
 const BQ_CONSOLIDATED_DEMONSTRACOES_VIEW =
@@ -78,6 +84,7 @@ function parseTableRef(rawValue, defaultDataset = BQ_DATASET) {
 
 const AUX_DEMONSTRACOES_TABLE_REF = parseTableRef(BQ_AUX_DEMONSTRACOES_TABLE, BQ_AUX_DATASET)
 const AUX_DEMONSTRACOES_LATEST_VIEW_REF = parseTableRef(BQ_AUX_DEMONSTRACOES_LATEST_VIEW, BQ_AUX_DATASET)
+const USER_ACCESS_TABLE_REF = parseTableRef(BQ_USER_ACCESS_TABLE, BQ_MART_DATASET)
 const BASE_DEMONSTRACOES_TABLE_REF = parseTableRef(BQ_BASE_DEMONSTRACOES_TABLE, BQ_DATASET)
 const CONSOLIDATED_DEMONSTRACOES_VIEW_REF = parseTableRef(BQ_CONSOLIDATED_DEMONSTRACOES_VIEW, BQ_AUX_DATASET)
 const EXPORT_VIEW_REF = parseTableRef(BQ_EXPORT_VIEW, BQ_MART_DATASET)
@@ -91,6 +98,7 @@ const QUERY_CACHE_MAX_ENTRIES = Number(process.env.QUERY_CACHE_MAX_ENTRIES ?? 25
 
 const queryCache = new Map()
 const inFlightQueries = new Map()
+const userAccessCache = new Map()
 
 const RAW_ALLOWED_VIEWS = process.env.BQ_ALLOWED_VIEWS
 const ALLOWED_TABLES = (() => {
@@ -171,6 +179,7 @@ if (!admin.apps.length) {
 }
 
 const AUTH_PUBLIC_PATHS = new Set(['/api/health', '/api/auth/status'])
+const AUTH_ALLOW_NO_ACCESS_PATHS = new Set(['/api/auth/profile'])
 
 function extractToken(req) {
   const header = req.headers.authorization
@@ -196,9 +205,29 @@ async function authMiddleware(req, res, next) {
     req.user = {
       uid: decoded.uid,
       email: decoded.email ?? null,
+      claims: decoded,
+    }
+    req.accessContext = await resolveUserAccessContext(req.user)
+    if (
+      req.accessContext?.enforced &&
+      !req.accessContext?.isAdmin &&
+      !(req.accessContext?.allowedRegAns ?? []).length &&
+      !AUTH_ALLOW_NO_ACCESS_PATHS.has(req.path)
+    ) {
+      throw createNoAccessError()
     }
     return next()
   } catch (err) {
+    if (err?.code === 'NO_OPERATOR_ACCESS') {
+      return res.status(403).json({
+        error: err.message,
+        code: err.code,
+      })
+    }
+    if (err?.message?.includes(USER_ACCESS_TABLE_REF.objectId) || err?.message?.includes('Dataset')) {
+      console.error('[server] Falha ao resolver acesso por operadora', err?.message ?? err)
+      return res.status(500).json({ error: 'Falha ao validar acesso do usuário.' })
+    }
     console.warn('[server] Token Firebase invalido', err?.message ?? err)
     return res.status(401).json({ error: 'Autenticacao necessaria.' })
   }
@@ -337,6 +366,283 @@ async function runBigQuery(queryText) {
   return { rows: normalizeBigQueryRows(rows), fields }
 }
 
+let userAccessTablePromise = null
+let userAccessTableReady = false
+
+function normalizeRegAns(value) {
+  const normalized = String(value ?? '')
+    .trim()
+    .replace(/\D+/g, '')
+  return normalized ? normalized : null
+}
+
+function normalizeEmail(value) {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  return normalized ? normalized : null
+}
+
+function escapeRegExp(value) {
+  return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function getUserAccessCacheKey(user = {}) {
+  const uid = String(user.uid ?? '').trim()
+  const email = normalizeEmail(user.email)
+  return `${uid}|${email ?? ''}`
+}
+
+function getCachedUserAccess(cacheKey) {
+  if (!cacheKey) return null
+  const cached = userAccessCache.get(cacheKey)
+  if (!cached) return null
+  if (!Number.isFinite(USER_ACCESS_CACHE_TTL_MS) || USER_ACCESS_CACHE_TTL_MS <= 0) {
+    userAccessCache.delete(cacheKey)
+    return null
+  }
+  if (cached.expiresAt <= Date.now()) {
+    userAccessCache.delete(cacheKey)
+    return null
+  }
+  return cached.value
+}
+
+function setCachedUserAccess(cacheKey, value) {
+  if (!cacheKey) return
+  if (!Number.isFinite(USER_ACCESS_CACHE_TTL_MS) || USER_ACCESS_CACHE_TTL_MS <= 0) return
+  userAccessCache.set(cacheKey, {
+    value,
+    expiresAt: Date.now() + USER_ACCESS_CACHE_TTL_MS,
+  })
+}
+
+function createNoAccessError(message = 'Usuário sem operadora vinculada.') {
+  const error = new Error(message)
+  error.code = 'NO_OPERATOR_ACCESS'
+  return error
+}
+
+function parseClaimedRegAnsList(claims = {}) {
+  const claimed = claims?.allowedRegAns ?? claims?.allowed_reg_ans ?? claims?.regAns ?? claims?.reg_ans ?? null
+  if (Array.isArray(claimed)) {
+    return claimed.map((item) => normalizeRegAns(item)).filter(Boolean)
+  }
+  if (typeof claimed === 'string') {
+    return claimed
+      .split(',')
+      .map((item) => normalizeRegAns(item))
+      .filter(Boolean)
+  }
+  return []
+}
+
+function createAccessContextFromRows(rows = [], user = {}) {
+  const operatorMap = new Map()
+  let isAdmin = Boolean(user?.claims?.admin === true || user?.claims?.isAdmin === true)
+  const claimedRegAns = parseClaimedRegAnsList(user?.claims)
+  claimedRegAns.forEach((regAns) => {
+    operatorMap.set(regAns, {
+      regAns,
+      operatorName: null,
+      canUpload: true,
+    })
+  })
+
+  rows.forEach((row) => {
+    const role = String(row?.role ?? '')
+      .trim()
+      .toLowerCase()
+    const regAns = normalizeRegAns(row?.reg_ans)
+    const operatorName = String(row?.operator_name ?? '').trim() || null
+    const canUpload = row?.can_upload === false ? false : true
+    if (role === 'admin' || regAns === '*') {
+      isAdmin = true
+      return
+    }
+    if (!regAns) return
+    const current = operatorMap.get(regAns)
+    if (!current) {
+      operatorMap.set(regAns, {
+        regAns,
+        operatorName,
+        canUpload,
+      })
+      return
+    }
+    operatorMap.set(regAns, {
+      regAns,
+      operatorName: current.operatorName ?? operatorName,
+      canUpload: current.canUpload || canUpload,
+    })
+  })
+
+  const operators = [...operatorMap.values()].sort((a, b) => {
+    const aLabel = a.operatorName ?? a.regAns
+    const bLabel = b.operatorName ?? b.regAns
+    return aLabel.localeCompare(bLabel)
+  })
+  const allowedRegAns = operators.map((item) => item.regAns)
+  const canUploadRegAns = operators.filter((item) => item.canUpload).map((item) => item.regAns)
+  return {
+    enforced: ENFORCE_USER_ACCESS,
+    isAdmin,
+    operators,
+    allowedRegAns,
+    canUploadRegAns,
+  }
+}
+
+async function ensureUserAccessTable() {
+  if (userAccessTableReady) {
+    return bigquery.dataset(USER_ACCESS_TABLE_REF.datasetId).table(USER_ACCESS_TABLE_REF.objectId)
+  }
+  if (userAccessTablePromise) {
+    return userAccessTablePromise
+  }
+  userAccessTablePromise = (async () => {
+    const dataset = bigquery.dataset(USER_ACCESS_TABLE_REF.datasetId)
+    const [datasetExists] = await dataset.exists()
+    if (!datasetExists) {
+      throw new Error(`Dataset ${USER_ACCESS_TABLE_REF.projectId}.${USER_ACCESS_TABLE_REF.datasetId} não existe.`)
+    }
+    const table = dataset.table(USER_ACCESS_TABLE_REF.objectId)
+    const [tableExists] = await table.exists()
+    if (!tableExists) {
+      await table.create({
+        schema: [
+          { name: 'user_uid', type: 'STRING' },
+          { name: 'user_email', type: 'STRING' },
+          { name: 'reg_ans', type: 'STRING' },
+          { name: 'operator_name', type: 'STRING' },
+          { name: 'can_upload', type: 'BOOL' },
+          { name: 'role', type: 'STRING' },
+          { name: 'active', type: 'BOOL' },
+          { name: 'created_at', type: 'TIMESTAMP' },
+          { name: 'updated_at', type: 'TIMESTAMP' },
+        ],
+        location: BQ_LOCATION,
+        clustering: {
+          fields: ['user_uid', 'user_email', 'reg_ans'],
+        },
+      })
+    }
+    userAccessTableReady = true
+    return table
+  })()
+    .catch((err) => {
+      userAccessTableReady = false
+      throw err
+    })
+    .finally(() => {
+      userAccessTablePromise = null
+    })
+  return userAccessTablePromise
+}
+
+async function resolveUserAccessContext(user = {}) {
+  if (!ENFORCE_USER_ACCESS) {
+    return {
+      enforced: false,
+      isAdmin: true,
+      operators: [],
+      allowedRegAns: [],
+      canUploadRegAns: [],
+    }
+  }
+  const cacheKey = getUserAccessCacheKey(user)
+  const cached = getCachedUserAccess(cacheKey)
+  if (cached) {
+    return cached
+  }
+
+  await ensureUserAccessTable()
+  const uid = String(user.uid ?? '').trim() || null
+  const email = normalizeEmail(user.email)
+  const query = `
+    SELECT
+      REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', '') AS reg_ans,
+      NULLIF(TRIM(CAST(operator_name AS STRING)), '') AS operator_name,
+      COALESCE(can_upload, TRUE) AS can_upload,
+      LOWER(NULLIF(TRIM(CAST(role AS STRING)), '')) AS role
+    FROM \`${USER_ACCESS_TABLE_REF.fqn}\`
+    WHERE COALESCE(active, TRUE) IS TRUE
+      AND (
+        (@uid IS NOT NULL AND CAST(user_uid AS STRING) = @uid)
+        OR (@email IS NOT NULL AND LOWER(TRIM(CAST(user_email AS STRING))) = @email)
+      )
+  `
+  const [rows] = await bigquery.query({
+    query,
+    params: {
+      uid,
+      email,
+    },
+    location: BQ_LOCATION,
+  })
+
+  const context = createAccessContextFromRows(normalizeBigQueryRows(rows), user)
+  setCachedUserAccess(cacheKey, context)
+  return context
+}
+
+function replaceTableRefInSql(sql, tableRef, replacementRef) {
+  const escaped = escapeRegExp(tableRef)
+  const pattern = new RegExp(`\\b(from|join)\\s+(?:\\\`${escaped}\\\`|${escaped})(?=\\s|$|,|\\))`, 'gi')
+  return sql.replace(pattern, (_full, keyword) => `${keyword} ${replacementRef}`)
+}
+
+function prependAclCtes(sql, ctes = []) {
+  if (!ctes.length) return sql
+  const trimmed = String(sql ?? '').trim()
+  if (!trimmed) return trimmed
+  if (/^with\b/i.test(trimmed)) {
+    return trimmed.replace(/^with\b/i, `WITH ${ctes.join(', ')},`)
+  }
+  return `WITH ${ctes.join(', ')}\n${trimmed}`
+}
+
+function applyUserAccessScopeToSql(sql, accessContext = {}) {
+  if (!accessContext?.enforced || accessContext?.isAdmin) {
+    return sql
+  }
+  const allowedRegAns = Array.from(new Set((accessContext.allowedRegAns ?? []).map((value) => normalizeRegAns(value)).filter(Boolean)))
+  if (!allowedRegAns.length) {
+    throw createNoAccessError()
+  }
+  const cteNames = extractCteNames(sql)
+  const tableRefs = [...extractTableRefs(sql, cteNames)].filter((ref) => ALLOWED_TABLES.has(ref))
+  if (!tableRefs.length) {
+    const error = new Error('Consulta sem fonte compatível com o escopo de operadora.')
+    error.code = 'NO_SCOPE_TABLE'
+    throw error
+  }
+  const predicateValues = allowedRegAns.map((value) => `'${value}'`).join(', ')
+  const predicate = `REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', '') IN (${predicateValues})`
+  const uniqueRefs = Array.from(new Set(tableRefs))
+  const aclCtes = uniqueRefs.map((tableRef, index) => {
+    const cteName = `__acl_src_${index}`
+    return {
+      tableRef,
+      cteName,
+      expression: `${cteName} AS (SELECT * FROM ${formatTableRef(tableRef)} WHERE ${predicate})`,
+    }
+  })
+  let scopedSql = sql
+  aclCtes.forEach(({ tableRef, cteName }) => {
+    scopedSql = replaceTableRefInSql(scopedSql, tableRef, cteName)
+  })
+  return prependAclCtes(
+    scopedSql,
+    aclCtes.map((item) => item.expression),
+  )
+}
+
+function hasOperatorUploadAccess(accessContext = {}, regAns) {
+  if (!accessContext?.enforced || accessContext?.isAdmin) return true
+  const normalizedRegAns = normalizeRegAns(regAns)
+  if (!normalizedRegAns) return false
+  return (accessContext.canUploadRegAns ?? []).includes(normalizedRegAns)
+}
+
 const DEMONSTRACOES_MAX_UPLOAD_ROWS = Number(process.env.DEMONSTRACOES_MAX_UPLOAD_ROWS ?? 10_000)
 const DEMONSTRACOES_REQUIRED_FIELDS = ['competencia', 'reg_ans', 'cd_conta_contabil', 'vl_saldo_final']
 const DEMONSTRACOES_ALLOWED_FIELDS = [
@@ -436,10 +742,6 @@ function parseTimestampValue(value) {
   const date = new Date(text)
   if (Number.isNaN(date.getTime())) return null
   return date.toISOString()
-}
-
-function isSingularOperator(name) {
-  return /\bsingular\b/i.test(String(name ?? ''))
 }
 
 function chunkList(values = [], size = 500) {
@@ -662,6 +964,28 @@ app.get('/api/auth/status', (req, res) => {
   res.json({ enabled: true, bootId: SERVER_BOOT_ID, projectId: FIREBASE_PROJECT_ID ?? null })
 })
 
+app.get('/api/auth/profile', (req, res) => {
+  const accessContext = req.accessContext ?? {
+    enforced: ENFORCE_USER_ACCESS,
+    isAdmin: false,
+    operators: [],
+    allowedRegAns: [],
+    canUploadRegAns: [],
+  }
+  const payload = {
+    uid: req.user?.uid ?? null,
+    email: req.user?.email ?? null,
+    enforced: accessContext.enforced,
+    isAdmin: accessContext.isAdmin,
+    operators: accessContext.operators ?? [],
+    allowedRegAns: accessContext.allowedRegAns ?? [],
+    canUploadRegAns: accessContext.canUploadRegAns ?? [],
+    noAccess: accessContext.enforced && !accessContext.isAdmin && !(accessContext.allowedRegAns ?? []).length,
+  }
+  res.setHeader('Cache-Control', 'no-store')
+  res.json(payload)
+})
+
 app.get('/api/health', async (req, res) => {
   try {
     await runBigQuery('SELECT 1')
@@ -674,11 +998,15 @@ app.get('/api/health', async (req, res) => {
 
 app.get('/api/indicadores.csv', async (req, res) => {
   try {
-    const result = await runBigQuery(exportQuery)
+    const scopedQuery = applyUserAccessScopeToSql(exportQuery, req.accessContext)
+    const result = await runBigQuery(scopedQuery)
     res.setHeader('Content-Type', 'text/csv; charset=utf-8')
     res.setHeader('Cache-Control', 'no-store')
     res.send(buildCsv(result))
   } catch (err) {
+    if (err?.code === 'NO_OPERATOR_ACCESS' || err?.code === 'NO_SCOPE_TABLE') {
+      return res.status(403).json({ error: err.message, code: err.code })
+    }
     console.error('[server] falha ao gerar CSV', err)
     res.status(500).json({ error: 'Falha ao gerar CSV de indicadores.' })
   }
@@ -698,16 +1026,35 @@ app.get('/api/import/demonstracoes/exemplo.csv', (_req, res) => {
   res.send(DEMONSTRACOES_EXAMPLE_CSV)
 })
 
-app.post('/api/import/singular-demonstracoes', async (req, res) => {
+async function handleOperadoraDemonstracoesUpload(req, res) {
   const operatorName = toNullableString(req.body?.operatorName)
-  const operatorRegAns = toNullableString(req.body?.operatorRegAns)?.replace(/\D+/g, '') ?? null
+  const operatorRegAns = normalizeRegAns(req.body?.operatorRegAns)
   const fileName = toNullableString(req.body?.fileName) ?? 'upload.csv'
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : null
 
-  if (!operatorName || !isSingularOperator(operatorName)) {
-    return res.status(400).json({
-      error: 'Importação permitida apenas para operadoras Singular selecionadas.',
+  if (!operatorName) {
+    return res.status(400).json({ error: 'Operadora é obrigatória.' })
+  }
+  if (!operatorRegAns) {
+    return res.status(400).json({ error: 'Registro ANS da operadora é obrigatório.' })
+  }
+  if (!hasOperatorUploadAccess(req.accessContext, operatorRegAns)) {
+    return res.status(403).json({
+      error: 'Usuário sem permissão para enviar dados desta operadora.',
+      code: 'OPERATOR_UPLOAD_FORBIDDEN',
     })
+  }
+  if (req.accessContext?.enforced && !req.accessContext?.isAdmin) {
+    const scopedOperator = (req.accessContext?.operators ?? []).find((item) => item.regAns === operatorRegAns)
+    if (scopedOperator?.operatorName) {
+      const expectedName = scopedOperator.operatorName.trim().toLowerCase()
+      const currentName = String(operatorName).trim().toLowerCase()
+      if (expectedName && currentName && expectedName !== currentName) {
+        return res.status(400).json({
+          error: `Operadora selecionada não corresponde ao vínculo de acesso para reg_ans ${operatorRegAns}.`,
+        })
+      }
+    }
   }
   if (!rows?.length) {
     return res.status(400).json({ error: 'Nenhuma linha de dados foi enviada.' })
@@ -782,7 +1129,7 @@ app.post('/api/import/singular-demonstracoes', async (req, res) => {
   const uploadedAt = new Date().toISOString()
   const userUid = req.user?.uid ?? null
   const userEmail = req.user?.email ?? null
-  const fileOrigin = `singular-upload:${fileName}`
+  const fileOrigin = `operadora-upload:${fileName}`
   const records = normalizedRows.map((row) => ({
     upload_id: uploadId,
     uploaded_at: uploadedAt,
@@ -843,13 +1190,16 @@ app.post('/api/import/singular-demonstracoes', async (req, res) => {
       warning: consolidatedViewWarning,
     })
   } catch (err) {
-    console.error('[server] Falha ao importar demonstracoes Singular', err)
+    console.error('[server] Falha ao importar demonstracoes da operadora', err)
     return res.status(500).json({
       error: 'Falha ao importar arquivo para a tabela auxiliar.',
       details: err?.message ?? String(err),
     })
   }
-})
+}
+
+app.post('/api/import/operadora-demonstracoes', handleOperadoraDemonstracoesUpload)
+app.post('/api/import/singular-demonstracoes', handleOperadoraDemonstracoesUpload)
 
 app.post('/api/query', async (req, res) => {
   const sql = req.body?.sql
@@ -873,10 +1223,20 @@ app.post('/api/query', async (req, res) => {
       tables: disallowed,
     })
   }
+  let scopedSql = sanitized
+  try {
+    scopedSql = applyUserAccessScopeToSql(sanitized, req.accessContext)
+  } catch (err) {
+    if (err?.code === 'NO_OPERATOR_ACCESS' || err?.code === 'NO_SCOPE_TABLE') {
+      return res.status(403).json({ error: err.message, code: err.code })
+    }
+    console.error('[server] Falha ao aplicar escopo de acesso na consulta', err?.message ?? err)
+    return res.status(500).json({ error: 'Falha ao validar escopo da consulta.' })
+  }
 
   const includeFields = Boolean(req.body?.includeFields)
   const cacheEnabled = Number.isFinite(QUERY_CACHE_TTL_MS) && QUERY_CACHE_TTL_MS > 0
-  const cacheKey = cacheEnabled ? getCacheKey(sanitized) : null
+  const cacheKey = cacheEnabled ? getCacheKey(scopedSql) : null
   if (cacheKey) {
     const cachedEntry = getCachedEntry(cacheKey)
     if (cachedEntry) {
@@ -902,7 +1262,7 @@ app.post('/api/query', async (req, res) => {
   }
 
   try {
-    const queryPromise = runBigQuery(sanitized).finally(() => {
+    const queryPromise = runBigQuery(scopedSql).finally(() => {
       if (cacheKey) {
         inFlightQueries.delete(cacheKey)
       }
@@ -922,7 +1282,7 @@ app.post('/api/query', async (req, res) => {
       cache: cacheKey ? 'miss' : 'disabled',
     })
   } catch (err) {
-    console.error('[server] erro ao executar consulta', err?.message ?? err, '\nSQL:', sanitized)
+    console.error('[server] erro ao executar consulta', err?.message ?? err, '\nSQL:', scopedSql)
     res.status(500).json({ error: 'Falha ao executar consulta' })
   }
 })
@@ -940,6 +1300,7 @@ if (SHOULD_SERVE_STATIC) {
   })
 }
 
-app.listen(PORT, () => {
-  console.log(`[server] API disponível em http://localhost:${PORT}`)
+app.listen(PORT, HOST, () => {
+  const publicHost = HOST === '0.0.0.0' ? 'localhost' : HOST
+  console.log(`[server] API disponível em http://${publicHost}:${PORT} (bind ${HOST})`)
 })

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT_DIR}/.env.local.server"
+CLIENT_ENV_FILE="${ROOT_DIR}/.env.local"
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -11,7 +12,20 @@ if [[ -f "${ENV_FILE}" ]]; then
   set +a
 fi
 
+if [[ -f "${CLIENT_ENV_FILE}" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "${CLIENT_ENV_FILE}"
+  set +a
+fi
+
 set -a
+: "${SERVER_HOST:=0.0.0.0}"
+: "${SERVER_PORT:=4000}"
+: "${VITE_HOST:=0.0.0.0}"
+: "${VITE_PORT:=5173}"
+: "${VITE_ALLOWED_HOSTS:=localhost,127.0.0.1,0.0.0.0,dash.collos.com.br,backdash.collos.com.br}"
+: "${VITE_API_PROXY:=http://localhost:${SERVER_PORT}}"
 : "${BQ_PROJECT_ID:=bigdata-467917}"
 : "${BQ_DATASET:=dash_ans}"
 : "${BQ_EXPORT_VIEW:=indicadores_curados_snapshot}"
@@ -77,6 +91,8 @@ elif [[ ! -f "${FIREBASE_SERVICE_ACCOUNT_PATH}" ]]; then
 fi
 
 cd "${ROOT_DIR}"
+
+echo "[dev-local] frontend em http://localhost:${VITE_PORT} | api em http://localhost:${SERVER_PORT}"
 
 if [[ -f "${ROOT_DIR}/package-lock.json" ]]; then
   should_install_deps="false"

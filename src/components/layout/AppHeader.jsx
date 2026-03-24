@@ -70,8 +70,8 @@ function AppHeader({
               disabled={!canOpenDataImport}
               title={
                 canOpenDataImport
-                  ? 'Importar demonstrações contábeis da operadora Singular selecionada'
-                  : 'Selecione uma operadora Singular para habilitar este botão'
+                  ? 'Importar demonstrações contábeis da sua operadora autorizada'
+                  : 'Seu usuário não possui operadora com permissão de envio'
               }
               className="rounded-md border border-border bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
             >

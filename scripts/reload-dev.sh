@@ -2,7 +2,22 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PORTS="${PORTS:-5173 5174 4000}"
+SERVER_ENV_FILE="${ROOT_DIR}/.env.local.server"
+CLIENT_ENV_FILE="${ROOT_DIR}/.env.local"
+
+if [[ -f "${SERVER_ENV_FILE}" ]]; then
+  # shellcheck disable=SC1090
+  . "${SERVER_ENV_FILE}"
+fi
+
+if [[ -f "${CLIENT_ENV_FILE}" ]]; then
+  # shellcheck disable=SC1090
+  . "${CLIENT_ENV_FILE}"
+fi
+
+: "${SERVER_PORT:=4000}"
+: "${VITE_PORT:=5173}"
+PORTS="${PORTS:-${VITE_PORT} 5174 ${SERVER_PORT}}"
 
 kill_port() {
   local port="$1"

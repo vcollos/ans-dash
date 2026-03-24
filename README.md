@@ -2,6 +2,16 @@
 
 Dashboard interativo em Vite + React para análise de indicadores DIOPS/ANS consumindo dados do **BigQuery** via API Express. Autenticação é feita com **Firebase Auth** (ID token validado no backend). O deploy de produção roda no **Google Cloud Run**.
 
+## Política Operacional
+
+Este repositório segue uma política de sandbox operacional:
+- sem banco de dados local
+- execução local preferencial via Docker
+- dados e autenticação usando apenas serviços remotos oficiais do projeto
+- publicação por `commit + push + CI/CD + deploy`, quando solicitada
+
+Documento de referência: [documentacao/politica-operacional-sandbox.md](/Volumes/SSD/Collos/ans-dash/documentacao/politica-operacional-sandbox.md)
+
 ## Pré-requisitos
 
 - Node.js 18+
@@ -10,6 +20,8 @@ Dashboard interativo em Vite + React para análise de indicadores DIOPS/ANS cons
 - Projeto Firebase configurado
 
 ## Desenvolvimento local
+
+O fluxo recomendado para desenvolvimento é o ambiente Docker do projeto. O comando `npm run dev` continua disponível para debug rápido no host, mas não é o caminho operacional principal.
 
 ```bash
 npm install
@@ -20,6 +32,10 @@ Esse comando sobe **Vite + API** em paralelo (via `concurrently`).
 - Frontend: `http://localhost:5173`
 - API: `http://localhost:4000`
 
+As portas/hosts locais podem ser sobrescritos via `.env.local` e `.env.local.server`:
+- `VITE_HOST` / `VITE_PORT` (frontend; default `0.0.0.0:5173`)
+- `SERVER_HOST` / `SERVER_PORT` (API; default `0.0.0.0:4000`)
+
 Se quiser evitar exportar variáveis manualmente, use:
 ```bash
 npm run dev:local
@@ -27,6 +43,8 @@ npm run dev:local
 O script lê `.env.local.server` (opcional) e aplica defaults compatíveis com o projeto.
 
 ### Desenvolvimento local com Docker
+
+Este é o fluxo padrão do repositório para subir o app em sandbox local.
 
 Para rodar em ambiente controlado (sem mudar o deploy do Cloud Run), use:
 
@@ -42,6 +60,8 @@ Esse fluxo sobe o mesmo app (Vite + API), com hot reload:
 - Frontend: `http://localhost:5173`
 - API: `http://localhost:4000`
 
+O `docker-compose.dev.yml` publica as portas explicitamente e inclui `healthcheck` na API. No Docker Desktop, a linha `ans-dash` é o projeto Compose; expanda a seta para ver o serviço `dashboard` com `5173` e `4000`.
+
 Comandos úteis:
 
 ```bash
@@ -55,9 +75,9 @@ Arquivos de referência:
 - `env/.env.local.example` e `env/.env.local.server.example` (templates versionados)
 - o compose monta `${HOME}/.config/gcloud` em `/root/.config/gcloud` para usar ADC no container
 
-### Importação de dados da Singular (tabela auxiliar)
+### Importação de dados da operadora (tabela auxiliar)
 
-- O botão **“Atualize seus dados”** aparece no header quando a operadora selecionada contém `Singular`.
+- O botão **“Atualize seus dados”** aparece para usuários com pelo menos uma operadora vinculada com permissão de envio.
 - O upload aceita `CSV`, `XLS` e `XLSX`.
 - Os dados enviados **não** são gravados na tabela original da ANS.
 - O backend grava em uma tabela auxiliar e mantém views auxiliares para consumo/controladoria.
@@ -80,9 +100,13 @@ Arquivos de referência:
 - `BQ_CONSOLIDATED_DEMONSTRACOES_VIEW` (opcional): view consolidada (base ANS + auxiliar) (default: `${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.vw_demonstracoes_contabeis_consolidada`).
 - `BQ_REFRESH_CONSOLIDATED_VIEW` (opcional): `true|false` para atualizar a view consolidada ao final do upload (default: `true`).
 - `DEMONSTRACOES_MAX_UPLOAD_ROWS` (opcional): limite de linhas por arquivo (default: `10000`).
+- `BQ_USER_ACCESS_TABLE` (opcional): tabela de vínculo usuário x operadora (default: `user_operadora_acessos`).
+- `BQ_ENFORCE_USER_ACCESS` (opcional): habilita bloqueio por operadora (default: `true`).
+- `USER_ACCESS_CACHE_TTL_MS` (opcional): cache do perfil de acesso em ms (default: `60000`).
 - `QUERY_CACHE_TTL_MS` (opcional): cache em ms para `/api/query` (default 60000).
 - `QUERY_CACHE_MAX_ENTRIES` (opcional): tamanho máximo do cache (default 250).
 - `SERVER_PORT` ou `PORT` (opcional): porta da API (default 4000 em dev).
+- `SERVER_HOST` (opcional): host/bind da API (default `0.0.0.0`).
 - `SERVE_STATIC` (opcional): `true` para servir o `dist/` pelo Express.
 
 **Firebase (frontend):** crie `.env.local` com as chaves do Firebase Web:
@@ -102,6 +126,8 @@ Outras variáveis Vite (opcionais):
 - `VITE_PRESTADORES_ORIGEM` (default `PRÓPRIA`).
 - `VITE_PRESTADORES_CACHE_TTL_MS` e `VITE_PRESTADORES_ERROR_TTL_MS` (cache local para prestadores).
 - `VITE_API_PROXY` (proxy local da API; default `http://localhost:4000`).
+- `VITE_HOST` e `VITE_PORT` (host/porta do Vite; defaults `0.0.0.0` e `5173`).
+- `VITE_ALLOWED_HOSTS` (lista separada por vírgula com hosts aceitos pelo Vite).
 - `VITE_ALLOW_SIGNUP` (default `true`; use `false` para esconder "Criar conta").
 
 **Firebase (API):**
@@ -114,7 +140,19 @@ No Docker dev, o `scripts/dev-local.sh` detecta automaticamente um arquivo `*fir
 
 O login é feito via **Firebase Auth** (email/senha, link por email ou Google). O frontend envia o ID token e o backend valida com o Admin SDK. Sem token válido, as rotas `/api/*` retornam 401.
 
+Com `BQ_ENFORCE_USER_ACCESS=true`, o backend também valida o vínculo do usuário na tabela `BQ_USER_ACCESS_TABLE` e limita as consultas/importações ao `reg_ans` autorizado.
+
 Para **login por link**, o app envia um link para o email informado. Ao abrir o link, o navegador conclui o login automaticamente (ou solicita o email usado, se não estiver salvo).
+
+### Cadastro de acesso por operadora
+
+Com `BQ_ENFORCE_USER_ACCESS=true`, cada usuário precisa de vínculo na tabela de acesso:
+
+1. Crie a tabela (se ainda não existir) usando `db/create_user_access_table.sql` (substitua `{{USER_ACCESS_TABLE}}` pelo FQN real).
+2. Insira uma linha por `reg_ans` permitido para o usuário (mesmo `user_uid` ou `user_email` pode ter múltiplas linhas).
+3. Defina `can_upload=true` apenas para operadoras onde o usuário pode enviar arquivo.
+
+Sem vínculo ativo, o login funciona, mas o dashboard fica bloqueado até o cadastro do acesso.
 
 ## Dados (BigQuery)
 
@@ -134,6 +172,11 @@ A imagem é construída com as variáveis `VITE_FIREBASE_*` e `VITE_DATASET_VIEW
 
 O fluxo Docker local **não altera** o deploy automático: o Cloud Build usa `cloudbuild.yaml` + `Dockerfile` (produção), não o `docker-compose.dev.yml`.
 
+Política de publicação:
+- validar localmente com Docker antes de publicar
+- quando solicitado, concluir com `commit`, `push` e acompanhamento do CI/CD
+- só considerar deploy encerrado após confirmação do pipeline/revisão publicada
+
 Para evitar deploy acidental ao subir para o GitHub:
 - trabalhe em branch de feature (não em `main`);
 - abra PR e faça merge quando quiser publicar;
@@ -145,9 +188,11 @@ Para evitar deploy acidental ao subir para o GitHub:
 - `GET /api/indicadores.csv` – export CSV via BigQuery.
 - `GET /api/import/demonstracoes/template.csv` – template CSV da importação.
 - `GET /api/import/demonstracoes/exemplo.csv` – exemplo CSV preenchido.
-- `POST /api/import/singular-demonstracoes` – upload de demonstrações para tabela auxiliar.
+- `POST /api/import/operadora-demonstracoes` – upload de demonstrações para tabela auxiliar.
+- `POST /api/import/singular-demonstracoes` – alias de compatibilidade para o endpoint novo.
 - `GET /api/health` – healthcheck BigQuery.
 - `GET /api/auth/status` – status do auth.
+- `GET /api/auth/profile` – perfil autenticado + operadoras permitidas.
 
 
 ## Solução de problemas
