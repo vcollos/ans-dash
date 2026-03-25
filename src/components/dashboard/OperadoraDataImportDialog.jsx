@@ -237,7 +237,14 @@ export default function OperadoraDataImportDialog({
     () => uploadOperators.find((item) => item.regAns === selectedRegAns) ?? null,
     [selectedRegAns, uploadOperators],
   )
-  const canSubmit = parsedRows.length > 0 && !isSubmitting && !isLoadingOperatorContext && Boolean(selectedOperator) && Boolean(toNullableString(batchForm.competencia))
+  const isCompleted = Boolean(uploadResult?.success)
+  const isFormLocked = isSubmitting || isCompleted
+  const canSubmit =
+    parsedRows.length > 0 &&
+    !isFormLocked &&
+    !isLoadingOperatorContext &&
+    Boolean(selectedOperator) &&
+    Boolean(toNullableString(batchForm.competencia))
 
   useEffect(() => {
     if (!open) return
@@ -440,252 +447,271 @@ export default function OperadoraDataImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Atualize seus dados</DialogTitle>
-          <DialogDescription>
-            Envie demonstrações contábeis da sua operadora para a tabela auxiliar, sem alterar a base oficial da ANS.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="operadora-upload-select">Operadora autorizada</Label>
-            <select
-              id="operadora-upload-select"
-              value={selectedRegAns}
-              onChange={(event) => setSelectedRegAns(event.target.value)}
-              disabled={!uploadOperators.length || isSubmitting}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {uploadOperators.length ? null : <option value="">Sem operadoras com permissão de envio</option>}
-              {uploadOperators.map((item) => (
-                <option key={item.regAns} value={item.regAns}>
-                  {(item.operatorName ?? `Reg ANS ${item.regAns}`) + ` (${item.regAns})`}
-                </option>
-              ))}
-            </select>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-3xl">
+        <div className="flex min-h-0 max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-3xl flex-col">
+          <div className="border-b border-border/60 px-6 py-5">
+            <DialogHeader>
+              <DialogTitle>Atualize seus dados</DialogTitle>
+              <DialogDescription>
+                Envie demonstrações contábeis da sua operadora para a tabela auxiliar, sem alterar a base oficial da ANS.
+              </DialogDescription>
+            </DialogHeader>
           </div>
 
-          <div className="rounded-md border border-border/70 bg-muted/30 p-3 text-sm">
-            <p>
-              <strong>Operadora:</strong> {selectedOperator?.operatorName ?? 'Não selecionada'}
-            </p>
-            <p>
-              <strong>Registro ANS:</strong> {selectedOperator?.regAns ?? 'Não informado'}
-            </p>
-            <p>
-              <strong>Porte calculado:</strong> {batchForm.porte || 'Informe a quantidade de beneficiários'}
-            </p>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="upload-competencia">Competência</Label>
-              <Input
-                id="upload-competencia"
-                type="month"
-                value={batchForm.competencia}
-                onChange={(event) => updateBatchForm('competencia', event.target.value)}
-                disabled={isSubmitting}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="upload-cnpj">CNPJ</Label>
-              <Input
-                id="upload-cnpj"
-                value={batchForm.cnpj}
-                onChange={(event) => updateBatchForm('cnpj', normalizeDigits(event.target.value))}
-                disabled={isSubmitting || isLoadingOperatorContext}
-                placeholder="Preenchido automaticamente pelo reg_ans"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="upload-versao">Versão do envio</Label>
-              <Input
-                id="upload-versao"
-                type="number"
-                min="1"
-                step="1"
-                value={batchForm.versao_envio}
-                onChange={(event) => updateBatchForm('versao_envio', event.target.value)}
-                disabled={isSubmitting}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="upload-sistema-origem">Sistema de origem</Label>
-              <Input
-                id="upload-sistema-origem"
-                value={batchForm.sistema_origem}
-                onChange={(event) => updateBatchForm('sistema_origem', event.target.value)}
-                disabled={isSubmitting}
-                placeholder="Ex.: ERP, Protheus, Tasy"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="upload-responsavel-nome">Responsável</Label>
-              <Input
-                id="upload-responsavel-nome"
-                value={batchForm.responsavel_nome}
-                onChange={(event) => updateBatchForm('responsavel_nome', event.target.value)}
-                disabled={isSubmitting}
-                placeholder="Nome de quem está enviando"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="upload-responsavel-email">Email do responsável</Label>
-              <Input
-                id="upload-responsavel-email"
-                type="email"
-                value={batchForm.responsavel_email}
-                onChange={(event) => updateBatchForm('responsavel_email', event.target.value)}
-                disabled={isSubmitting}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="upload-beneficiarios">Quantidade de beneficiários</Label>
-              <Input
-                id="upload-beneficiarios"
-                type="number"
-                min="0"
-                step="1"
-                value={batchForm.qt_beneficiarios}
-                onChange={(event) => updateBatchForm('qt_beneficiarios', event.target.value)}
-                disabled={isSubmitting}
-              />
-              <p className="text-xs text-muted-foreground">Informar a quantidade no último dia do período e ativos na ANS.</p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="upload-prestadores">Quantidade de prestadores</Label>
-              <Input
-                id="upload-prestadores"
-                type="number"
-                min="0"
-                step="1"
-                value={batchForm.qt_prestadores}
-                onChange={(event) => updateBatchForm('qt_prestadores', event.target.value)}
-                disabled={isSubmitting}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="upload-modalidade">Modalidade</Label>
-              <select
-                id="upload-modalidade"
-                value={batchForm.modalidade}
-                onChange={(event) => updateBatchForm('modalidade', event.target.value)}
-                disabled={isSubmitting || isLoadingOperatorContext}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {MODALIDADE_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="upload-porte">Porte</Label>
-              <Input id="upload-porte" value={batchForm.porte} disabled readOnly placeholder="Calculado pelos beneficiários" />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="upload-observacoes">Observações</Label>
-            <Textarea
-              id="upload-observacoes"
-              value={batchForm.observacoes}
-              onChange={(event) => updateBatchForm('observacoes', event.target.value)}
-              disabled={isSubmitting}
-              className="min-h-[96px]"
-              placeholder="Observações do lote enviado"
-            />
-            <p className="text-xs text-muted-foreground">
-              A data do envio é registrada automaticamente pelo servidor no momento da importação.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => handleTemplateDownload('template')} disabled={isDownloadingTemplate}>
-              {isDownloadingTemplate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              Baixar modelo vazio
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => handleTemplateDownload('exemplo')} disabled={isDownloadingTemplate}>
-              {isDownloadingTemplate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              Baixar exemplo preenchido
-            </Button>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="operadora-file-input">Arquivo de importação (CSV/XLS/XLSX)</Label>
-            <Input
-              id="operadora-file-input"
-              type="file"
-              accept=".csv,.xls,.xlsx"
-              onChange={handleFileChange}
-              disabled={!selectedOperator || isParsing || isSubmitting}
-            />
-            <p className="text-xs text-muted-foreground">
-              O arquivo pode conter apenas <code>cd_conta_contabil</code> e <code>vl_saldo_final</code>, ou layouts equivalentes de balancete, como
-              {' '}
-              <code>Classificação</code>, <code>Descrição da conta</code>, <code>Saldo Anterior</code>, <code>Débito</code>, <code>Crédito</code> e <code>Saldo Atual</code>.
-            </p>
-          </div>
-
-          {isParsing ? (
-            <div className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-sm">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Lendo arquivo...
-            </div>
-          ) : null}
-
-          {parseError ? (
-            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              <AlertCircle className="mt-0.5 h-4 w-4" />
-              <span>{parseError}</span>
-            </div>
-          ) : null}
-
-          {parsedRows.length ? (
-            <div className="flex items-start gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
-              <FileUp className="mt-0.5 h-4 w-4" />
-              <span>
-                {parsedRows.length} linha(s) pronta(s) para envio. Arquivo: <strong>{selectedFile?.name}</strong>
-              </span>
-            </div>
-          ) : null}
-
-          {uploadResult?.success ? (
-            <div className="space-y-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4" />
-                <span>Upload concluído com sucesso.</span>
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="operadora-upload-select">Operadora autorizada</Label>
+                <select
+                  id="operadora-upload-select"
+                  value={selectedRegAns}
+                  onChange={(event) => setSelectedRegAns(event.target.value)}
+                  disabled={!uploadOperators.length || isFormLocked}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {uploadOperators.length ? null : <option value="">Sem operadoras com permissão de envio</option>}
+                  {uploadOperators.map((item) => (
+                    <option key={item.regAns} value={item.regAns}>
+                      {(item.operatorName ?? `Reg ANS ${item.regAns}`) + ` (${item.regAns})`}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <p>
-                <strong>Upload ID:</strong> {uploadResult.uploadId}
-              </p>
-              <p>
-                <strong>Linhas inseridas:</strong> {uploadResult.insertedRows}
-              </p>
-              <p>
-                <strong>Tabela auxiliar:</strong> {uploadResult.auxTable}
-              </p>
-              <p>
-                <strong>View auxiliar:</strong> {uploadResult.latestView}
-              </p>
-              {uploadResult.warning ? <p className="text-amber-700">Aviso: {uploadResult.warning}</p> : null}
-            </div>
-          ) : null}
-        </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isSubmitting}>
-            Fechar
-          </Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit}>
-            {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
-            Enviar dados
-          </Button>
-        </DialogFooter>
+              <div className="rounded-md border border-border/70 bg-muted/30 p-3 text-sm">
+                <p>
+                  <strong>Operadora:</strong> {selectedOperator?.operatorName ?? 'Não selecionada'}
+                </p>
+                <p>
+                  <strong>Registro ANS:</strong> {selectedOperator?.regAns ?? 'Não informado'}
+                </p>
+                <p>
+                  <strong>Porte calculado:</strong> {batchForm.porte || 'Informe a quantidade de beneficiários'}
+                </p>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="upload-competencia">Competência</Label>
+                  <Input
+                    id="upload-competencia"
+                    type="month"
+                    value={batchForm.competencia}
+                    onChange={(event) => updateBatchForm('competencia', event.target.value)}
+                    disabled={isFormLocked}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="upload-cnpj">CNPJ</Label>
+                  <Input
+                    id="upload-cnpj"
+                    value={batchForm.cnpj}
+                    onChange={(event) => updateBatchForm('cnpj', normalizeDigits(event.target.value))}
+                    disabled={isFormLocked || isLoadingOperatorContext}
+                    placeholder="Preenchido automaticamente pelo reg_ans"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="upload-versao">Versão do envio</Label>
+                  <Input
+                    id="upload-versao"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={batchForm.versao_envio}
+                    onChange={(event) => updateBatchForm('versao_envio', event.target.value)}
+                    disabled={isFormLocked}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="upload-sistema-origem">Sistema de origem</Label>
+                  <Input
+                    id="upload-sistema-origem"
+                    value={batchForm.sistema_origem}
+                    onChange={(event) => updateBatchForm('sistema_origem', event.target.value)}
+                    disabled={isFormLocked}
+                    placeholder="Ex.: ERP, Protheus, Tasy"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="upload-responsavel-nome">Responsável</Label>
+                  <Input
+                    id="upload-responsavel-nome"
+                    value={batchForm.responsavel_nome}
+                    onChange={(event) => updateBatchForm('responsavel_nome', event.target.value)}
+                    disabled={isFormLocked}
+                    placeholder="Nome de quem está enviando"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="upload-responsavel-email">Email do responsável</Label>
+                  <Input
+                    id="upload-responsavel-email"
+                    type="email"
+                    value={batchForm.responsavel_email}
+                    onChange={(event) => updateBatchForm('responsavel_email', event.target.value)}
+                    disabled={isFormLocked}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="upload-beneficiarios">Quantidade de beneficiários</Label>
+                  <Input
+                    id="upload-beneficiarios"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={batchForm.qt_beneficiarios}
+                    onChange={(event) => updateBatchForm('qt_beneficiarios', event.target.value)}
+                    disabled={isFormLocked}
+                  />
+                  <p className="text-xs text-muted-foreground">Informar a quantidade no último dia do período e ativos na ANS.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="upload-prestadores">Quantidade de prestadores</Label>
+                  <Input
+                    id="upload-prestadores"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={batchForm.qt_prestadores}
+                    onChange={(event) => updateBatchForm('qt_prestadores', event.target.value)}
+                    disabled={isFormLocked}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="upload-modalidade">Modalidade</Label>
+                  <select
+                    id="upload-modalidade"
+                    value={batchForm.modalidade}
+                    onChange={(event) => updateBatchForm('modalidade', event.target.value)}
+                    disabled={isFormLocked || isLoadingOperatorContext}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {MODALIDADE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="upload-porte">Porte</Label>
+                  <Input id="upload-porte" value={batchForm.porte} disabled readOnly placeholder="Calculado pelos beneficiários" />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="upload-observacoes">Observações</Label>
+                <Textarea
+                  id="upload-observacoes"
+                  value={batchForm.observacoes}
+                  onChange={(event) => updateBatchForm('observacoes', event.target.value)}
+                  disabled={isFormLocked}
+                  className="min-h-[96px]"
+                  placeholder="Observações do lote enviado"
+                />
+                <p className="text-xs text-muted-foreground">
+                  A data do envio é registrada automaticamente pelo servidor no momento da importação.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleTemplateDownload('template')}
+                  disabled={isDownloadingTemplate || isCompleted}
+                >
+                  {isDownloadingTemplate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                  Baixar modelo vazio
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleTemplateDownload('exemplo')}
+                  disabled={isDownloadingTemplate || isCompleted}
+                >
+                  {isDownloadingTemplate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                  Baixar exemplo preenchido
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="operadora-file-input">Arquivo de importação (CSV/XLS/XLSX)</Label>
+                <Input
+                  id="operadora-file-input"
+                  type="file"
+                  accept=".csv,.xls,.xlsx"
+                  onChange={handleFileChange}
+                  disabled={!selectedOperator || isParsing || isFormLocked}
+                />
+                <p className="text-xs text-muted-foreground">
+                  O arquivo pode conter apenas <code>cd_conta_contabil</code> e <code>vl_saldo_final</code>, ou layouts equivalentes de balancete, como{' '}
+                  <code>Classificação</code>, <code>Descrição da conta</code>, <code>Saldo Anterior</code>, <code>Débito</code>, <code>Crédito</code> e <code>Saldo Atual</code>.
+                </p>
+              </div>
+
+              {isParsing ? (
+                <div className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Lendo arquivo...
+                </div>
+              ) : null}
+
+              {parseError ? (
+                <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  <AlertCircle className="mt-0.5 h-4 w-4" />
+                  <span>{parseError}</span>
+                </div>
+              ) : null}
+
+              {parsedRows.length ? (
+                <div className="flex items-start gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
+                  <FileUp className="mt-0.5 h-4 w-4" />
+                  <span>
+                    {parsedRows.length} linha(s) pronta(s) para envio. Arquivo: <strong>{selectedFile?.name}</strong>
+                  </span>
+                </div>
+              ) : null}
+
+              {uploadResult?.success ? (
+                <div className="space-y-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>Upload concluído com sucesso.</span>
+                  </div>
+                  <p>
+                    <strong>Upload ID:</strong> {uploadResult.uploadId}
+                  </p>
+                  <p>
+                    <strong>Linhas inseridas:</strong> {uploadResult.insertedRows}
+                  </p>
+                  <p>
+                    <strong>Tabela auxiliar:</strong> {uploadResult.auxTable}
+                  </p>
+                  <p>
+                    <strong>View auxiliar:</strong> {uploadResult.latestView}
+                  </p>
+                  {uploadResult.warning ? <p className="text-amber-700">Aviso: {uploadResult.warning}</p> : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="border-t border-border/60 px-6 py-4">
+            <DialogFooter>
+              <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isSubmitting}>
+                Fechar
+              </Button>
+              {isCompleted ? null : (
+                <Button onClick={handleSubmit} disabled={!canSubmit}>
+                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
+                  Enviar dados
+                </Button>
+              )}
+            </DialogFooter>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   )

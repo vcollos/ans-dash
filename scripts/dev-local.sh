@@ -32,6 +32,7 @@ set -a
 : "${BQ_MART_ANS_TABLE:=indicadores_mart_ans}"
 : "${BQ_MART_UNIODONTO_TABLE:=indicadores_mart_uniodonto}"
 : "${BQ_MART_DATASET:=dash_ans}"
+: "${BQ_AUX_DATASET:=dash_ans_uploads}"
 : "${BQ_LOCATION:=US}"
 : "${FIREBASE_PROJECT_ID:=${BQ_PROJECT_ID}}"
 : "${FIREBASE_SERVICE_ACCOUNT_PATH:=}"
@@ -43,10 +44,10 @@ else
   _export_view_ref="${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_EXPORT_VIEW}"
 fi
 
-: "${VITE_DATASET_VIEW:=${_export_view_ref}}"
-: "${VITE_MART_ANS_TABLE:=${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_ANS_TABLE}}"
-: "${VITE_MART_UNIODONTO_TABLE:=${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_UNIODONTO_TABLE}}"
-: "${BQ_ALLOWED_VIEWS:=${_export_view_ref},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_ANS_TABLE},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_UNIODONTO_TABLE},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.prestadores_ativos_uniodonto_origem}"
+: "${VITE_DATASET_VIEW:=${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.indicadores_curados_snapshot_consolidado}"
+: "${VITE_MART_ANS_TABLE:=${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.indicadores_mart_ans_consolidado}"
+: "${VITE_MART_UNIODONTO_TABLE:=${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.indicadores_mart_uniodonto_consolidado}"
+: "${BQ_ALLOWED_VIEWS:=${_export_view_ref},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_ANS_TABLE},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_UNIODONTO_TABLE},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.prestadores_ativos_uniodonto_origem,${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.indicadores_curados_snapshot_consolidado,${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.indicadores_mart_ans_consolidado,${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.indicadores_mart_uniodonto_consolidado}"
 set +a
 
 if [[ ! -f "${GOOGLE_APPLICATION_CREDENTIALS}" ]]; then
