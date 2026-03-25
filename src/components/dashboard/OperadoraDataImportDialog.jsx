@@ -39,6 +39,34 @@ const ALLOWED_FIELDS = [
   'porte',
   'observacoes',
 ]
+const HEADER_ALIASES = {
+  codigo: 'cd_conta_contabil',
+  codigo_da_conta: 'cd_conta_contabil',
+  codigo_conta: 'cd_conta_contabil',
+  classificacao: 'cd_conta_contabil',
+  classificacao_da_conta: 'cd_conta_contabil',
+  classificacao_contabil: 'cd_conta_contabil',
+  codigo_contabil: 'cd_conta_contabil',
+  conta_contabil: 'cd_conta_contabil',
+  conta: 'cd_conta_contabil',
+  conta_codigo: 'cd_conta_contabil',
+  descricao: 'descricao',
+  descricao_da_conta: 'descricao',
+  descricao_conta: 'descricao',
+  conta_descricao: 'descricao',
+  saldo_inicial: 'vl_saldo_inicial',
+  saldo_anterior: 'vl_saldo_inicial',
+  saldo_abertura: 'vl_saldo_inicial',
+  debito: 'vl_debitos',
+  debitos: 'vl_debitos',
+  valor_debito: 'vl_debitos',
+  credito: 'vl_creditos',
+  creditos: 'vl_creditos',
+  valor_credito: 'vl_creditos',
+  saldo_final: 'vl_saldo_final',
+  saldo_atual: 'vl_saldo_final',
+  saldo_encerramento: 'vl_saldo_final',
+}
 const DEFAULT_MODALIDADE = 'Cooperativa odontológica'
 const MODALIDADE_OPTIONS = [
   'Cooperativa odontológica',
@@ -113,11 +141,17 @@ function createDefaultBatchForm(userEmail = '') {
 function normalizeInputRow(rawRow = {}) {
   const mapped = {}
   Object.entries(rawRow).forEach(([key, value]) => {
-    const normalizedKey = normalizeHeaderName(key)
+    const normalizedKey = resolveInputFieldName(key)
     if (!normalizedKey || !ALLOWED_FIELDS.includes(normalizedKey)) return
     mapped[normalizedKey] = value
   })
   return mapped
+}
+
+function resolveInputFieldName(value) {
+  const normalized = normalizeHeaderName(value)
+  if (!normalized) return ''
+  return HEADER_ALIASES[normalized] ?? normalized
 }
 
 function hasAnyValue(row = {}) {
@@ -303,7 +337,7 @@ export default function OperadoraDataImportDialog({
       const unknownColumns = new Set()
       rows.forEach((rawRow) => {
         Object.keys(rawRow).forEach((key) => {
-          const normalized = normalizeHeaderName(key)
+          const normalized = resolveInputFieldName(key)
           if (normalized && !ALLOWED_FIELDS.includes(normalized)) {
             unknownColumns.add(normalized)
           }
@@ -591,7 +625,9 @@ export default function OperadoraDataImportDialog({
               disabled={!selectedOperator || isParsing || isSubmitting}
             />
             <p className="text-xs text-muted-foreground">
-              O arquivo pode conter apenas <code>cd_conta_contabil</code> e <code>vl_saldo_final</code>. A competência e os metadados do envio vêm do formulário acima.
+              O arquivo pode conter apenas <code>cd_conta_contabil</code> e <code>vl_saldo_final</code>, ou layouts equivalentes de balancete, como
+              {' '}
+              <code>Classificação</code>, <code>Descrição da conta</code>, <code>Saldo Anterior</code>, <code>Débito</code>, <code>Crédito</code> e <code>Saldo Atual</code>.
             </p>
           </div>
 

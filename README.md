@@ -93,11 +93,11 @@ Arquivos de referência:
 - `BQ_LOCATION` (ex.: `US`)
 - `BQ_ALLOWED_VIEWS` (opcional): lista de views/tabelas permitidas no `/api/query` (ex.: `bigdata-467917.dash_ans.indicadores_curados_snapshot,bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem`).
 - `BQ_PRESTADORES_TABLE` (opcional): tabela de prestadores usada na complementação de dados.
-- `BQ_AUX_DATASET` (opcional): dataset da tabela auxiliar de importação (default: `BQ_MART_DATASET`).
+- `BQ_AUX_DATASET` (opcional): dataset da tabela auxiliar de importação (default: `dash_ans_uploads`).
 - `BQ_AUX_DEMONSTRACOES_TABLE` (opcional): tabela auxiliar de importação (default: `demonstracoes_contabeis_auxiliar`).
 - `BQ_AUX_DEMONSTRACOES_LATEST_VIEW` (opcional): view com última versão por chave da importação (default: `vw_demonstracoes_contabeis_auxiliar_latest`).
 - `BQ_BASE_DEMONSTRACOES_TABLE` (opcional): tabela base usada para view consolidada (default: `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.demonstracoes_contabeis`).
-- `BQ_CONSOLIDATED_DEMONSTRACOES_VIEW` (opcional): view consolidada (base ANS + auxiliar) (default: `${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.vw_demonstracoes_contabeis_consolidada`).
+- `BQ_CONSOLIDATED_DEMONSTRACOES_VIEW` (opcional): view consolidada (base ANS + auxiliar, com precedência da base oficial) (default: `${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.vw_demonstracoes_contabeis_consolidada`).
 - `BQ_REFRESH_CONSOLIDATED_VIEW` (opcional): `true|false` para atualizar a view consolidada ao final do upload (default: `true`).
 - `DEMONSTRACOES_MAX_UPLOAD_ROWS` (opcional): limite de linhas por arquivo (default: `10000`).
 - `BQ_USER_ACCESS_TABLE` (opcional): tabela de vínculo usuário x operadora (default: `user_operadora_acessos`).

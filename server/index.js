@@ -25,6 +25,7 @@ const BQ_PRESTADORES_TABLE =
 const BQ_OPERADORAS_TABLE = process.env.BQ_OPERADORAS_TABLE ?? `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.operadoras`
 const EXPORT_SQL_PATH = path.resolve(__dirname, '../db/export_indicadores.sql')
 const DIST_DIR = path.resolve(__dirname, '../dist')
+const DEFAULT_BQ_AUX_DATASET = 'dash_ans_uploads'
 const DEMONSTRACOES_TEMPLATE_CSV = `cd_conta_contabil;vl_saldo_final`
 const DEMONSTRACOES_EXAMPLE_CSV = `cd_conta_contabil;vl_saldo_final
 311;1200000.00
@@ -32,7 +33,7 @@ const DEMONSTRACOES_EXAMPLE_CSV = `cd_conta_contabil;vl_saldo_final
 46;180000.00
 12;800000.00
 21;500000.00`
-const BQ_AUX_DATASET = process.env.BQ_AUX_DATASET ?? process.env.BQ_MART_DATASET ?? BQ_MART_DATASET
+const BQ_AUX_DATASET = process.env.BQ_AUX_DATASET ?? DEFAULT_BQ_AUX_DATASET
 const BQ_AUX_DEMONSTRACOES_TABLE = process.env.BQ_AUX_DEMONSTRACOES_TABLE ?? 'demonstracoes_contabeis_auxiliar'
 const BQ_AUX_DEMONSTRACOES_LATEST_VIEW =
   process.env.BQ_AUX_DEMONSTRACOES_LATEST_VIEW ?? 'vw_demonstracoes_contabeis_auxiliar_latest'
@@ -849,7 +850,7 @@ async function ensureAuxDemonstracoesTable() {
   const dataset = bigquery.dataset(AUX_DEMONSTRACOES_TABLE_REF.datasetId)
   const [datasetExists] = await dataset.exists()
   if (!datasetExists) {
-    throw new Error(`Dataset ${AUX_DEMONSTRACOES_TABLE_REF.projectId}.${AUX_DEMONSTRACOES_TABLE_REF.datasetId} não existe.`)
+    await dataset.create({ location: BQ_LOCATION })
   }
 
   const table = dataset.table(AUX_DEMONSTRACOES_TABLE_REF.objectId)
@@ -1039,21 +1040,24 @@ async function refreshConsolidatedDemonstracoesView() {
         trimestre,
         arquivo_origem
       FROM \`${AUX_DEMONSTRACOES_LATEST_VIEW_REF.fqn}\`
-    ), base_only AS (
+    ), base_data AS (
       SELECT base.*
       FROM (
         ${baseProjectionSql}
       ) base
-      LEFT JOIN aux_latest a
+    ), aux_only AS (
+      SELECT a.*
+      FROM aux_latest a
+      LEFT JOIN base_data base
         ON SAFE_CAST(base.reg_ans AS STRING) = SAFE_CAST(a.reg_ans AS STRING)
        AND base.cd_conta_contabil = a.cd_conta_contabil
        AND base.ano = a.ano
        AND base.trimestre = a.trimestre
-      WHERE a.reg_ans IS NULL
+      WHERE base.reg_ans IS NULL
     )
-    SELECT * FROM base_only
+    SELECT * FROM base_data
     UNION ALL
-    SELECT * FROM aux_latest
+    SELECT * FROM aux_only
   `
   await bigquery.query({ query, location: BQ_LOCATION })
 }
