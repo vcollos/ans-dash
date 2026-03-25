@@ -49,9 +49,10 @@ fi
 : "${BQ_ALLOWED_VIEWS:=${_export_view_ref},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_ANS_TABLE},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_UNIODONTO_TABLE},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.prestadores_ativos_uniodonto_origem}"
 set +a
 
-if [[ ! -f "${GOOGLE_APPLICATION_CREDENTIALS}" ]] && [[ -f "/.dockerenv" ]]; then
+if [[ ! -f "${GOOGLE_APPLICATION_CREDENTIALS}" ]]; then
   adc_candidate=""
   for candidate in \
+    "${HOME}/.config/gcloud/application_default_credentials.json" \
     "/root/.config/gcloud/application_default_credentials.json" \
     "/home/node/.config/gcloud/application_default_credentials.json"
   do
@@ -99,10 +100,12 @@ if [[ -f "${ROOT_DIR}/package-lock.json" ]]; then
 
   if [[ ! -d "${ROOT_DIR}/node_modules" ]]; then
     should_install_deps="true"
-  elif [[ ! -f "${ROOT_DIR}/node_modules/.package-lock.json" ]]; then
-    should_install_deps="true"
-  elif ! cmp -s "${ROOT_DIR}/package-lock.json" "${ROOT_DIR}/node_modules/.package-lock.json"; then
-    should_install_deps="true"
+  elif [[ -f "/.dockerenv" ]]; then
+    if [[ ! -f "${ROOT_DIR}/node_modules/.package-lock.json" ]]; then
+      should_install_deps="true"
+    elif ! cmp -s "${ROOT_DIR}/package-lock.json" "${ROOT_DIR}/node_modules/.package-lock.json"; then
+      should_install_deps="true"
+    fi
   fi
 
   if [[ "${should_install_deps}" == "true" ]]; then

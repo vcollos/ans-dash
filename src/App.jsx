@@ -317,6 +317,7 @@ function DashboardApp({ onLogout, accessProfile }) {
           allowedOperators={uploadOperators}
           defaultOperatorName={operatorInsight?.operatorName ?? null}
           defaultOperatorRegAns={operatorContext?.regAns ?? null}
+          userEmail={accessProfile?.email ?? ''}
         />
       </main>
     </div>

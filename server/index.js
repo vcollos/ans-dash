@@ -22,15 +22,16 @@ const BQ_MART_UNIODONTO_TABLE =
   process.env.BQ_MART_UNIODONTO_TABLE ?? process.env.BQ_DATASET_VIEW_UNIODONTO ?? ''
 const BQ_PRESTADORES_TABLE =
   process.env.BQ_PRESTADORES_TABLE ?? `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.prestadores_ativos_uniodonto_origem`
+const BQ_OPERADORAS_TABLE = process.env.BQ_OPERADORAS_TABLE ?? `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.operadoras`
 const EXPORT_SQL_PATH = path.resolve(__dirname, '../db/export_indicadores.sql')
 const DIST_DIR = path.resolve(__dirname, '../dist')
-const DEMONSTRACOES_TEMPLATE_CSV = `competencia;reg_ans;cnpj;cd_conta_contabil;vl_saldo_final;descricao;vl_saldo_inicial;vl_debitos;vl_creditos;moeda;status_fechamento;tipo_envio;versao_envio;dt_envio;sistema_origem;responsavel_nome;responsavel_email;qt_beneficiarios;qt_prestadores;modalidade;porte;observacoes`
-const DEMONSTRACOES_EXAMPLE_CSV = `competencia;reg_ans;cnpj;cd_conta_contabil;vl_saldo_final;descricao;vl_saldo_inicial;vl_debitos;vl_creditos;moeda;status_fechamento;tipo_envio;versao_envio;dt_envio;sistema_origem;responsavel_nome;responsavel_email;qt_beneficiarios;qt_prestadores;modalidade;porte;observacoes
-2026-01;123456;12345678000190;311;1200000.00;CONTRAPRESTACOES;;;;BRL;FECHADO;NORMAL;1;2026-02-05T18:22:10Z;ERP-EXEMPLO;Maria Silva;maria@operadora.com.br;18234;542;Cooperativa odontologica;Medio Porte;
-2026-01;123456;12345678000190;41;600000.00;EVENTOS LIQUIDOS;;;;BRL;FECHADO;NORMAL;1;2026-02-05T18:22:10Z;ERP-EXEMPLO;Maria Silva;maria@operadora.com.br;18234;542;Cooperativa odontologica;Medio Porte;
-2026-01;123456;12345678000190;46;180000.00;DESPESAS ADMINISTRATIVAS;;;;BRL;FECHADO;NORMAL;1;2026-02-05T18:22:10Z;ERP-EXEMPLO;Maria Silva;maria@operadora.com.br;18234;542;Cooperativa odontologica;Medio Porte;
-2026-01;123456;12345678000190;12;800000.00;ATIVO CIRCULANTE;;;;BRL;FECHADO;NORMAL;1;2026-02-05T18:22:10Z;ERP-EXEMPLO;Maria Silva;maria@operadora.com.br;18234;542;Cooperativa odontologica;Medio Porte;
-2026-01;123456;12345678000190;21;500000.00;PASSIVO CIRCULANTE;;;;BRL;FECHADO;NORMAL;1;2026-02-05T18:22:10Z;ERP-EXEMPLO;Maria Silva;maria@operadora.com.br;18234;542;Cooperativa odontologica;Medio Porte;`
+const DEMONSTRACOES_TEMPLATE_CSV = `cd_conta_contabil;vl_saldo_final`
+const DEMONSTRACOES_EXAMPLE_CSV = `cd_conta_contabil;vl_saldo_final
+311;1200000.00
+41;600000.00
+46;180000.00
+12;800000.00
+21;500000.00`
 const BQ_AUX_DATASET = process.env.BQ_AUX_DATASET ?? process.env.BQ_MART_DATASET ?? BQ_MART_DATASET
 const BQ_AUX_DEMONSTRACOES_TABLE = process.env.BQ_AUX_DEMONSTRACOES_TABLE ?? 'demonstracoes_contabeis_auxiliar'
 const BQ_AUX_DEMONSTRACOES_LATEST_VIEW =
@@ -95,6 +96,9 @@ const bigquery = new BigQuery({
 
 const QUERY_CACHE_TTL_MS = Number(process.env.QUERY_CACHE_TTL_MS ?? 60_000)
 const QUERY_CACHE_MAX_ENTRIES = Number(process.env.QUERY_CACHE_MAX_ENTRIES ?? 250)
+const DEFAULT_DEMONSTRACOES_STATUS = 'FECHADO'
+const DEFAULT_DEMONSTRACOES_TIPO_ENVIO = 'NORMAL'
+const DEFAULT_DEMONSTRACOES_MODALIDADE = 'Cooperativa odontológica'
 
 const queryCache = new Map()
 const inFlightQueries = new Map()
@@ -381,6 +385,95 @@ function normalizeEmail(value) {
   return normalized ? normalized : null
 }
 
+function normalizeDigits(value) {
+  const normalized = String(value ?? '')
+    .trim()
+    .replace(/\D+/g, '')
+  return normalized ? normalized : null
+}
+
+function computePorteFromBeneficiarios(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return null
+  if (numeric <= 19999) return 'Pequeno Porte'
+  if (numeric <= 99999) return 'Médio Porte'
+  return 'Grande Porte'
+}
+
+async function fetchOperatorRegistryMetadata(regAns) {
+  const normalizedRegAns = normalizeRegAns(regAns)
+  if (!normalizedRegAns) return null
+  const [rows] = await bigquery.query({
+    query: `
+      SELECT
+        REGEXP_REPLACE(CAST(REG_ANS AS STRING), r'\\D', '') AS reg_ans,
+        REGEXP_REPLACE(CAST(CNPJ AS STRING), r'\\D', '') AS cnpj,
+        NULLIF(TRIM(CAST(NOME_FANTASIA AS STRING)), '') AS nome_fantasia,
+        NULLIF(TRIM(CAST(RAZAO_SOCIAL AS STRING)), '') AS razao_social,
+        NULLIF(TRIM(CAST(MODALIDADE AS STRING)), '') AS modalidade
+      FROM \`${BQ_OPERADORAS_TABLE}\`
+      WHERE REGEXP_REPLACE(CAST(REG_ANS AS STRING), r'\\D', '') = @regAns
+      LIMIT 1
+    `,
+    params: { regAns: normalizedRegAns },
+    location: BQ_LOCATION,
+  })
+  const row = normalizeBigQueryRows(rows)[0]
+  if (!row) return null
+  return {
+    regAns: normalizedRegAns,
+    cnpj: normalizeDigits(row?.cnpj),
+    operatorName: toNullableString(row?.nome_fantasia) || toNullableString(row?.razao_social) || null,
+    modalidade: toNullableString(row?.modalidade) || null,
+  }
+}
+
+async function fetchAccountDescriptionMap(accountCodes = []) {
+  const codes = Array.from(
+    new Set(
+      accountCodes
+        .map((value) => toNullableString(value))
+        .filter(Boolean),
+    ),
+  )
+  if (!codes.length) return new Map()
+
+  const [rows] = await bigquery.query({
+    query: `
+      WITH ranked AS (
+        SELECT
+          CAST(cd_conta_contabil AS STRING) AS cd_conta_contabil,
+          NULLIF(TRIM(CAST(descricao AS STRING)), '') AS descricao,
+          COUNT(*) AS freq
+        FROM \`${BASE_DEMONSTRACOES_TABLE_REF.fqn}\`
+        WHERE CAST(cd_conta_contabil AS STRING) IN UNNEST(@codes)
+          AND NULLIF(TRIM(CAST(descricao AS STRING)), '') IS NOT NULL
+        GROUP BY 1, 2
+      )
+      SELECT cd_conta_contabil, descricao
+      FROM (
+        SELECT
+          cd_conta_contabil,
+          descricao,
+          ROW_NUMBER() OVER (PARTITION BY cd_conta_contabil ORDER BY freq DESC, descricao) AS rn
+        FROM ranked
+      )
+      WHERE rn = 1
+    `,
+    params: { codes },
+    location: BQ_LOCATION,
+  })
+
+  return normalizeBigQueryRows(rows).reduce((map, row) => {
+    const conta = toNullableString(row?.cd_conta_contabil)
+    const descricao = toNullableString(row?.descricao)
+    if (conta && descricao) {
+      map.set(conta, descricao)
+    }
+    return map
+  }, new Map())
+}
+
 function escapeRegExp(value) {
   return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -644,7 +737,7 @@ function hasOperatorUploadAccess(accessContext = {}, regAns) {
 }
 
 const DEMONSTRACOES_MAX_UPLOAD_ROWS = Number(process.env.DEMONSTRACOES_MAX_UPLOAD_ROWS ?? 10_000)
-const DEMONSTRACOES_REQUIRED_FIELDS = ['competencia', 'reg_ans', 'cd_conta_contabil', 'vl_saldo_final']
+const DEMONSTRACOES_REQUIRED_FIELDS = ['cd_conta_contabil', 'vl_saldo_final']
 const DEMONSTRACOES_ALLOWED_FIELDS = [
   'competencia',
   'reg_ans',
@@ -858,7 +951,80 @@ async function refreshAuxDemonstracoesLatestView() {
   await bigquery.query({ query, location: BQ_LOCATION })
 }
 
+async function inferBaseDemonstracoesSchemaMode() {
+  const [rows] = await bigquery.query({
+    query: `
+      SELECT LOWER(column_name) AS column_name
+      FROM \`${BASE_DEMONSTRACOES_TABLE_REF.projectId}.${BASE_DEMONSTRACOES_TABLE_REF.datasetId}.INFORMATION_SCHEMA.COLUMNS\`
+      WHERE table_name = @tableName
+    `,
+    params: { tableName: BASE_DEMONSTRACOES_TABLE_REF.objectId },
+    location: BQ_LOCATION,
+  })
+
+  const columnSet = new Set(normalizeBigQueryRows(rows).map((row) => toNullableString(row?.column_name).toLowerCase()).filter(Boolean))
+  if (columnSet.has('reg_ans') && columnSet.has('valor') && columnSet.has('operadora')) return 'curated_valor'
+  if (columnSet.has('registro_operadora')) return 'legacy_registro_operadora'
+  if (columnSet.has('reg_ans') && columnSet.has('vl_saldo_final') && columnSet.has('vl_saldo_inicial') && columnSet.has('data')) {
+    return 'raw_uppercase'
+  }
+
+  throw new Error(
+    `Schema base não suportado em ${BASE_DEMONSTRACOES_TABLE_REF.fqn}. Colunas encontradas: ${[...columnSet].sort().join(', ')}`,
+  )
+}
+
+function buildBaseDemonstracoesProjectionSql(schemaMode) {
+  if (schemaMode === 'curated_valor') {
+    return `
+      SELECT
+        DATE(SAFE_CAST(b.ano AS INT64), 1 + (SAFE_CAST(b.trimestre AS INT64) - 1) * 3, 1) AS data,
+        SAFE_CAST(b.reg_ans AS INT64) AS reg_ans,
+        CAST(b.cd_conta_contabil AS STRING) AS cd_conta_contabil,
+        CAST(b.descricao AS STRING) AS descricao,
+        CAST(NULL AS FLOAT64) AS vl_saldo_inicial,
+        SAFE_CAST(b.valor AS FLOAT64) AS vl_saldo_final,
+        SAFE_CAST(b.ano AS INT64) AS ano,
+        SAFE_CAST(b.trimestre AS INT64) AS trimestre,
+        CAST(NULL AS STRING) AS arquivo_origem
+      FROM \`${BASE_DEMONSTRACOES_TABLE_REF.fqn}\` b
+    `
+  }
+
+  if (schemaMode === 'legacy_registro_operadora') {
+    return `
+      SELECT
+        DATE(b.data) AS data,
+        SAFE_CAST(b.registro_operadora AS INT64) AS reg_ans,
+        CAST(b.cd_conta_contabil AS STRING) AS cd_conta_contabil,
+        CAST(b.descricao AS STRING) AS descricao,
+        SAFE_CAST(b.vl_saldo_inicial AS FLOAT64) AS vl_saldo_inicial,
+        SAFE_CAST(b.vl_saldo_final AS FLOAT64) AS vl_saldo_final,
+        SAFE_CAST(b.ano AS INT64) AS ano,
+        SAFE_CAST(b.trimestre AS INT64) AS trimestre,
+        CAST(b.arquivo_origem AS STRING) AS arquivo_origem
+      FROM \`${BASE_DEMONSTRACOES_TABLE_REF.fqn}\` b
+    `
+  }
+
+  return `
+    SELECT
+      DATE(b.data) AS data,
+      SAFE_CAST(b.reg_ans AS INT64) AS reg_ans,
+      CAST(b.cd_conta_contabil AS STRING) AS cd_conta_contabil,
+      CAST(b.descricao AS STRING) AS descricao,
+      SAFE_CAST(b.vl_saldo_inicial AS FLOAT64) AS vl_saldo_inicial,
+      SAFE_CAST(b.vl_saldo_final AS FLOAT64) AS vl_saldo_final,
+      SAFE_CAST(b.ano AS INT64) AS ano,
+      SAFE_CAST(b.trimestre AS INT64) AS trimestre,
+      CAST(b.arquivo_origem AS STRING) AS arquivo_origem
+    FROM \`${BASE_DEMONSTRACOES_TABLE_REF.fqn}\` b
+  `
+}
+
 async function refreshConsolidatedDemonstracoesView() {
+  const schemaMode = await inferBaseDemonstracoesSchemaMode()
+  const baseProjectionSql = buildBaseDemonstracoesProjectionSql(schemaMode)
   const query = `
     CREATE OR REPLACE VIEW \`${CONSOLIDATED_DEMONSTRACOES_VIEW_REF.fqn}\` AS
     WITH aux_latest AS (
@@ -874,22 +1040,15 @@ async function refreshConsolidatedDemonstracoesView() {
         arquivo_origem
       FROM \`${AUX_DEMONSTRACOES_LATEST_VIEW_REF.fqn}\`
     ), base_only AS (
-      SELECT
-        DATE(b.data) AS data,
-        SAFE_CAST(b.reg_ans AS INT64) AS reg_ans,
-        CAST(b.cd_conta_contabil AS STRING) AS cd_conta_contabil,
-        CAST(b.descricao AS STRING) AS descricao,
-        SAFE_CAST(b.vl_saldo_inicial AS FLOAT64) AS vl_saldo_inicial,
-        SAFE_CAST(b.vl_saldo_final AS FLOAT64) AS vl_saldo_final,
-        SAFE_CAST(b.ano AS INT64) AS ano,
-        SAFE_CAST(b.trimestre AS INT64) AS trimestre,
-        CAST(b.arquivo_origem AS STRING) AS arquivo_origem
-      FROM \`${BASE_DEMONSTRACOES_TABLE_REF.fqn}\` b
+      SELECT base.*
+      FROM (
+        ${baseProjectionSql}
+      ) base
       LEFT JOIN aux_latest a
-        ON SAFE_CAST(b.reg_ans AS STRING) = SAFE_CAST(a.reg_ans AS STRING)
-       AND CAST(b.cd_conta_contabil AS STRING) = a.cd_conta_contabil
-       AND SAFE_CAST(b.ano AS INT64) = a.ano
-       AND SAFE_CAST(b.trimestre AS INT64) = a.trimestre
+        ON SAFE_CAST(base.reg_ans AS STRING) = SAFE_CAST(a.reg_ans AS STRING)
+       AND base.cd_conta_contabil = a.cd_conta_contabil
+       AND base.ano = a.ano
+       AND base.trimestre = a.trimestre
       WHERE a.reg_ans IS NULL
     )
     SELECT * FROM base_only
@@ -899,14 +1058,52 @@ async function refreshConsolidatedDemonstracoesView() {
   await bigquery.query({ query, location: BQ_LOCATION })
 }
 
+function buildUploadBatchMetadata(rawMetadata = {}, context = {}) {
+  const competenciaText = toNullableString(rawMetadata?.competencia)
+  const competenciaParts = competenciaText ? parseCompetencia(competenciaText) : null
+  if (competenciaText && !competenciaParts) {
+    return { error: 'Competência do formulário é inválida. Use o formato YYYY-MM.' }
+  }
+
+  const qtBeneficiarios = parseFlexibleInteger(rawMetadata?.qt_beneficiarios)
+  const qtPrestadores = parseFlexibleInteger(rawMetadata?.qt_prestadores)
+  const computedPorte = computePorteFromBeneficiarios(qtBeneficiarios)
+  const responsavelEmail = normalizeEmail(rawMetadata?.responsavel_email) ?? normalizeEmail(context.userEmail)
+
+  return {
+    metadata: {
+      competencia: competenciaParts?.competencia ?? null,
+      cnpj: normalizeDigits(rawMetadata?.cnpj) ?? context.operatorMetadata?.cnpj ?? null,
+      status_fechamento: toNullableString(rawMetadata?.status_fechamento) || DEFAULT_DEMONSTRACOES_STATUS,
+      tipo_envio: toNullableString(rawMetadata?.tipo_envio) || DEFAULT_DEMONSTRACOES_TIPO_ENVIO,
+      versao_envio: parseFlexibleInteger(rawMetadata?.versao_envio) ?? 1,
+      dt_envio: parseTimestampValue(rawMetadata?.dt_envio) ?? null,
+      sistema_origem: toNullableString(rawMetadata?.sistema_origem) || 'UPLOAD_MANUAL',
+      responsavel_nome: toNullableString(rawMetadata?.responsavel_nome) || null,
+      responsavel_email: responsavelEmail,
+      qt_beneficiarios: qtBeneficiarios,
+      qt_prestadores: qtPrestadores,
+      modalidade: toNullableString(rawMetadata?.modalidade) || context.operatorMetadata?.modalidade || DEFAULT_DEMONSTRACOES_MODALIDADE,
+      porte: toNullableString(rawMetadata?.porte) || computedPorte,
+      observacoes: toNullableString(rawMetadata?.observacoes) || null,
+    },
+  }
+}
+
 function buildNormalizedUploadRow(rawRow = {}, context = {}) {
   const normalized = normalizeRowObject(rawRow)
-  const competenciaParts = parseCompetencia(normalized.competencia)
+  const batchMetadata = context.batchMetadata ?? {}
+
+  const competenciaText = toNullableString(normalized.competencia) || batchMetadata.competencia
+  const competenciaParts = parseCompetencia(competenciaText)
   if (!competenciaParts) {
     return { error: 'Competência inválida. Use o formato YYYY-MM.' }
   }
+  if (batchMetadata.competencia && toNullableString(normalized.competencia) && competenciaParts.competencia !== batchMetadata.competencia) {
+    return { error: `Competência ${competenciaParts.competencia} não confere com o formulário (${batchMetadata.competencia}).` }
+  }
 
-  const regAnsText = toNullableString(normalized.reg_ans)?.replace(/\D+/g, '') ?? ''
+  const regAnsText = normalizeRegAns(normalized.reg_ans) ?? normalizeRegAns(context.operatorRegAns)
   if (!regAnsText) {
     return { error: 'reg_ans é obrigatório.' }
   }
@@ -924,32 +1121,42 @@ function buildNormalizedUploadRow(rawRow = {}, context = {}) {
     return { error: 'vl_saldo_final é obrigatório e precisa ser numérico.' }
   }
 
+  const descricaoByCode = context.accountDescriptionMap?.get(conta) ?? null
+  const descricao = descricaoByCode || toNullableString(normalized.descricao) || null
+  if (!descricao) {
+    return { error: `Descrição não encontrada para a conta ${conta}.` }
+  }
+
+  const qtBeneficiarios = parseFlexibleInteger(normalized.qt_beneficiarios) ?? batchMetadata.qt_beneficiarios
+  const qtPrestadores = parseFlexibleInteger(normalized.qt_prestadores) ?? batchMetadata.qt_prestadores
+  const computedPorte = computePorteFromBeneficiarios(qtBeneficiarios)
+
   const row = {
     competencia: competenciaParts.competencia,
     ano: competenciaParts.ano,
     trimestre: competenciaParts.trimestre,
     data: competenciaParts.data,
     reg_ans: regAnsText,
-    cnpj: toNullableString(normalized.cnpj)?.replace(/\D+/g, '') ?? null,
+    cnpj: normalizeDigits(normalized.cnpj) ?? batchMetadata.cnpj ?? null,
     cd_conta_contabil: conta,
     vl_saldo_final: saldoFinal,
-    descricao: toNullableString(normalized.descricao),
+    descricao,
     vl_saldo_inicial: parseFlexibleNumber(normalized.vl_saldo_inicial),
     vl_debitos: parseFlexibleNumber(normalized.vl_debitos),
     vl_creditos: parseFlexibleNumber(normalized.vl_creditos),
-    moeda: toNullableString(normalized.moeda) ?? 'BRL',
-    status_fechamento: toNullableString(normalized.status_fechamento),
-    tipo_envio: toNullableString(normalized.tipo_envio),
-    versao_envio: parseFlexibleInteger(normalized.versao_envio),
-    dt_envio: parseTimestampValue(normalized.dt_envio),
-    sistema_origem: toNullableString(normalized.sistema_origem),
-    responsavel_nome: toNullableString(normalized.responsavel_nome),
-    responsavel_email: toNullableString(normalized.responsavel_email),
-    qt_beneficiarios: parseFlexibleInteger(normalized.qt_beneficiarios),
-    qt_prestadores: parseFlexibleInteger(normalized.qt_prestadores),
-    modalidade: toNullableString(normalized.modalidade),
-    porte: toNullableString(normalized.porte),
-    observacoes: toNullableString(normalized.observacoes),
+    moeda: toNullableString(normalized.moeda) || 'BRL',
+    status_fechamento: toNullableString(normalized.status_fechamento) || batchMetadata.status_fechamento || DEFAULT_DEMONSTRACOES_STATUS,
+    tipo_envio: toNullableString(normalized.tipo_envio) || batchMetadata.tipo_envio || DEFAULT_DEMONSTRACOES_TIPO_ENVIO,
+    versao_envio: parseFlexibleInteger(normalized.versao_envio) ?? batchMetadata.versao_envio ?? 1,
+    dt_envio: parseTimestampValue(normalized.dt_envio) ?? batchMetadata.dt_envio ?? null,
+    sistema_origem: toNullableString(normalized.sistema_origem) || batchMetadata.sistema_origem || null,
+    responsavel_nome: toNullableString(normalized.responsavel_nome) || batchMetadata.responsavel_nome || null,
+    responsavel_email: normalizeEmail(normalized.responsavel_email) ?? batchMetadata.responsavel_email,
+    qt_beneficiarios: qtBeneficiarios,
+    qt_prestadores: qtPrestadores,
+    modalidade: toNullableString(normalized.modalidade) || batchMetadata.modalidade || DEFAULT_DEMONSTRACOES_MODALIDADE,
+    porte: toNullableString(normalized.porte) || batchMetadata.porte || computedPorte,
+    observacoes: toNullableString(normalized.observacoes) || batchMetadata.observacoes || null,
   }
 
   return { row }
@@ -1012,6 +1219,41 @@ app.get('/api/indicadores.csv', async (req, res) => {
   }
 })
 
+app.get('/api/import/operadora-demonstracoes/context', async (req, res) => {
+  const operatorRegAns = normalizeRegAns(req.query?.reg_ans)
+  if (!operatorRegAns) {
+    return res.status(400).json({ error: 'Registro ANS da operadora é obrigatório.' })
+  }
+  if (!hasOperatorUploadAccess(req.accessContext, operatorRegAns)) {
+    return res.status(403).json({
+      error: 'Usuário sem permissão para enviar dados desta operadora.',
+      code: 'OPERATOR_UPLOAD_FORBIDDEN',
+    })
+  }
+
+  try {
+    const scopedOperator = (req.accessContext?.operators ?? []).find((item) => item.regAns === operatorRegAns)
+    const operatorMetadata = await fetchOperatorRegistryMetadata(operatorRegAns)
+    res.setHeader('Cache-Control', 'no-store')
+    return res.json({
+      regAns: operatorRegAns,
+      operatorName: scopedOperator?.operatorName ?? operatorMetadata?.operatorName ?? null,
+      cnpj: operatorMetadata?.cnpj ?? null,
+      modalidade: operatorMetadata?.modalidade ?? DEFAULT_DEMONSTRACOES_MODALIDADE,
+      statusFechamento: DEFAULT_DEMONSTRACOES_STATUS,
+      tipoEnvio: DEFAULT_DEMONSTRACOES_TIPO_ENVIO,
+      versaoEnvio: 1,
+      responsavelEmail: normalizeEmail(req.user?.email) ?? null,
+    })
+  } catch (err) {
+    console.error('[server] Falha ao carregar contexto da operadora', err)
+    return res.status(500).json({
+      error: 'Falha ao carregar dados da operadora para o formulário.',
+      details: err?.message ?? String(err),
+    })
+  }
+})
+
 app.get('/api/import/demonstracoes/template.csv', (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
@@ -1029,7 +1271,8 @@ app.get('/api/import/demonstracoes/exemplo.csv', (_req, res) => {
 async function handleOperadoraDemonstracoesUpload(req, res) {
   const operatorName = toNullableString(req.body?.operatorName)
   const operatorRegAns = normalizeRegAns(req.body?.operatorRegAns)
-  const fileName = toNullableString(req.body?.fileName) ?? 'upload.csv'
+  const fileName = toNullableString(req.body?.fileName) || 'upload.csv'
+  const rawMetadata = req.body?.metadata ?? {}
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : null
 
   if (!operatorName) {
@@ -1081,6 +1324,42 @@ async function handleOperadoraDemonstracoesUpload(req, res) {
     })
   }
 
+  let operatorMetadata = null
+  try {
+    operatorMetadata = await fetchOperatorRegistryMetadata(operatorRegAns)
+  } catch (err) {
+    console.error('[server] Falha ao buscar cadastro da operadora', err)
+    return res.status(500).json({
+      error: 'Falha ao carregar cadastro da operadora.',
+      details: err?.message ?? String(err),
+    })
+  }
+
+  const batchMetadataResult = buildUploadBatchMetadata(rawMetadata, {
+    operatorRegAns,
+    operatorMetadata,
+    userEmail: req.user?.email ?? null,
+  })
+  if (batchMetadataResult.error) {
+    return res.status(400).json({ error: batchMetadataResult.error })
+  }
+  const batchMetadata = batchMetadataResult.metadata
+
+  const accountCodes = rows
+    .map((rawRow) => normalizeRowObject(rawRow))
+    .map((row) => toNullableString(row.cd_conta_contabil))
+    .filter(Boolean)
+  let accountDescriptionMap = new Map()
+  try {
+    accountDescriptionMap = await fetchAccountDescriptionMap(accountCodes)
+  } catch (err) {
+    console.error('[server] Falha ao resolver descricoes de contas', err)
+    return res.status(500).json({
+      error: 'Falha ao carregar o dicionário de contas contábeis.',
+      details: err?.message ?? String(err),
+    })
+  }
+
   const normalizedRows = []
   const validationErrors = []
   const duplicateKeys = new Set()
@@ -1099,7 +1378,11 @@ async function handleOperadoraDemonstracoesUpload(req, res) {
       })
       return
     }
-    const parsed = buildNormalizedUploadRow(rawRow, { operatorRegAns })
+    const parsed = buildNormalizedUploadRow(rawRow, {
+      operatorRegAns,
+      batchMetadata,
+      accountDescriptionMap,
+    })
     if (parsed.error) {
       validationErrors.push({ row: rowNumber, message: parsed.error })
       return
@@ -1153,7 +1436,7 @@ async function handleOperadoraDemonstracoesUpload(req, res) {
     status_fechamento: row.status_fechamento,
     tipo_envio: row.tipo_envio,
     versao_envio: row.versao_envio,
-    dt_envio: row.dt_envio,
+    dt_envio: row.dt_envio ?? uploadedAt,
     sistema_origem: row.sistema_origem,
     responsavel_nome: row.responsavel_nome,
     responsavel_email: row.responsavel_email,

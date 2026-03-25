@@ -12,8 +12,9 @@ import {
 } from '../ui/dialog'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
+import { Textarea } from '../ui/textarea'
 
-const REQUIRED_FIELDS = ['competencia', 'reg_ans', 'cd_conta_contabil', 'vl_saldo_final']
+const REQUIRED_FIELDS = ['cd_conta_contabil', 'vl_saldo_final']
 const ALLOWED_FIELDS = [
   'competencia',
   'reg_ans',
@@ -38,6 +39,21 @@ const ALLOWED_FIELDS = [
   'porte',
   'observacoes',
 ]
+const DEFAULT_STATUS_FECHAMENTO = 'FECHADO'
+const DEFAULT_TIPO_ENVIO = 'NORMAL'
+const DEFAULT_MODALIDADE = 'Cooperativa odontológica'
+const STATUS_OPTIONS = ['FECHADO', 'ABERTO', 'PRELIMINAR']
+const TIPO_ENVIO_OPTIONS = ['NORMAL', 'RETIFICACAO', 'AJUSTE']
+const MODALIDADE_OPTIONS = [
+  'Cooperativa odontológica',
+  'Odontologia de Grupo',
+  'Autogestão',
+  'Medicina de Grupo',
+  'Seguradora Especializada em Saúde',
+  'Filantropia',
+  'Administradora de Benefícios',
+  'Outra',
+]
 
 function normalizeHeaderName(value) {
   return String(value ?? '')
@@ -54,9 +70,50 @@ function normalizeRegAns(value) {
     .replace(/\D+/g, '')
 }
 
+function normalizeDigits(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/\D+/g, '')
+}
+
 function toNullableString(value) {
   if (value === null || value === undefined) return ''
   return String(value).trim()
+}
+
+function getCurrentCompetencia() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
+}
+
+function computePorteFromBeneficiarios(value) {
+  const text = toNullableString(value)
+  if (!text) return ''
+  const numeric = Number(String(text).replace(/[^\d-]/g, ''))
+  if (!Number.isFinite(numeric)) return ''
+  if (numeric <= 19999) return 'Pequeno Porte'
+  if (numeric <= 99999) return 'Médio Porte'
+  return 'Grande Porte'
+}
+
+function createDefaultBatchForm(userEmail = '') {
+  return {
+    competencia: getCurrentCompetencia(),
+    cnpj: '',
+    status_fechamento: DEFAULT_STATUS_FECHAMENTO,
+    tipo_envio: DEFAULT_TIPO_ENVIO,
+    versao_envio: '1',
+    sistema_origem: 'UPLOAD_MANUAL',
+    responsavel_nome: '',
+    responsavel_email: toNullableString(userEmail),
+    qt_beneficiarios: '',
+    qt_prestadores: '',
+    modalidade: DEFAULT_MODALIDADE,
+    porte: '',
+    observacoes: '',
+  }
 }
 
 function normalizeInputRow(rawRow = {}) {
@@ -133,6 +190,7 @@ export default function OperadoraDataImportDialog({
   allowedOperators = [],
   defaultOperatorName = null,
   defaultOperatorRegAns = null,
+  userEmail = '',
   onUploadSuccess,
 }) {
   const [selectedFile, setSelectedFile] = useState(null)
@@ -143,13 +201,15 @@ export default function OperadoraDataImportDialog({
   const [isParsing, setIsParsing] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false)
+  const [isLoadingOperatorContext, setIsLoadingOperatorContext] = useState(false)
+  const [batchForm, setBatchForm] = useState(() => createDefaultBatchForm(userEmail))
 
   const uploadOperators = useMemo(() => normalizeOperatorList(allowedOperators).filter((item) => item.canUpload), [allowedOperators])
   const selectedOperator = useMemo(
     () => uploadOperators.find((item) => item.regAns === selectedRegAns) ?? null,
     [selectedRegAns, uploadOperators],
   )
-  const canSubmit = parsedRows.length > 0 && !isSubmitting && Boolean(selectedOperator)
+  const canSubmit = parsedRows.length > 0 && !isSubmitting && !isLoadingOperatorContext && Boolean(selectedOperator) && Boolean(toNullableString(batchForm.competencia))
 
   useEffect(() => {
     if (!open) return
@@ -167,6 +227,56 @@ export default function OperadoraDataImportDialog({
       return preferred
     })
   }, [defaultOperatorName, defaultOperatorRegAns, open, uploadOperators])
+
+  useEffect(() => {
+    setBatchForm((current) => ({
+      ...createDefaultBatchForm(userEmail),
+      ...current,
+      responsavel_email: toNullableString(current.responsavel_email) || toNullableString(userEmail),
+    }))
+  }, [userEmail])
+
+  useEffect(() => {
+    if (!open || !selectedRegAns) return
+    let cancelled = false
+    setIsLoadingOperatorContext(true)
+    setParseError(null)
+    fetchWithAuth(`/api/import/operadora-demonstracoes/context?reg_ans=${selectedRegAns}`)
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          throw new Error(payload?.error ?? 'Falha ao carregar dados da operadora.')
+        }
+        return payload
+      })
+      .then((payload) => {
+        if (cancelled) return
+        setBatchForm((current) => ({
+          ...current,
+          cnpj: toNullableString(payload?.cnpj) || current.cnpj,
+          status_fechamento: toNullableString(payload?.statusFechamento) || current.status_fechamento || DEFAULT_STATUS_FECHAMENTO,
+          tipo_envio: toNullableString(payload?.tipoEnvio) || current.tipo_envio || DEFAULT_TIPO_ENVIO,
+          versao_envio: toNullableString(payload?.versaoEnvio) || current.versao_envio || '1',
+          modalidade: toNullableString(payload?.modalidade) || current.modalidade || DEFAULT_MODALIDADE,
+          responsavel_email:
+            toNullableString(current.responsavel_email) ||
+            toNullableString(payload?.responsavelEmail) ||
+            toNullableString(userEmail),
+          porte: computePorteFromBeneficiarios(current.qt_beneficiarios) || current.porte,
+        }))
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setParseError(err?.message ?? 'Falha ao carregar contexto da operadora.')
+      })
+      .finally(() => {
+        if (cancelled) return
+        setIsLoadingOperatorContext(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, selectedRegAns, userEmail])
 
   async function handleTemplateDownload(kind) {
     setIsDownloadingTemplate(true)
@@ -244,12 +354,33 @@ export default function OperadoraDataImportDialog({
           operatorName: selectedOperator.operatorName ?? selectedOperator.regAns,
           operatorRegAns: selectedOperator.regAns,
           fileName: selectedFile.name,
+          metadata: {
+            competencia: batchForm.competencia,
+            cnpj: batchForm.cnpj,
+            status_fechamento: batchForm.status_fechamento,
+            tipo_envio: batchForm.tipo_envio,
+            versao_envio: batchForm.versao_envio,
+            sistema_origem: batchForm.sistema_origem,
+            responsavel_nome: batchForm.responsavel_nome,
+            responsavel_email: batchForm.responsavel_email,
+            qt_beneficiarios: batchForm.qt_beneficiarios,
+            qt_prestadores: batchForm.qt_prestadores,
+            modalidade: batchForm.modalidade,
+            porte: batchForm.porte,
+            observacoes: batchForm.observacoes,
+          },
           rows: parsedRows,
         }),
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error(payload?.error ?? 'Falha ao enviar o arquivo.')
+        const detailMessage = Array.isArray(payload?.details) && payload.details.length
+          ? ` ${payload.details
+              .slice(0, 3)
+              .map((item) => `Linha ${item.row}: ${item.message}`)
+              .join(' | ')}`
+          : ''
+        throw new Error(`${payload?.error ?? 'Falha ao enviar o arquivo.'}${detailMessage}`)
       }
       setUploadResult(payload)
       if (typeof onUploadSuccess === 'function') {
@@ -271,6 +402,16 @@ export default function OperadoraDataImportDialog({
     setUploadResult(null)
     setIsParsing(false)
     setIsSubmitting(false)
+    setIsLoadingOperatorContext(false)
+    setBatchForm(createDefaultBatchForm(userEmail))
+  }
+
+  function updateBatchForm(field, value) {
+    setBatchForm((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === 'qt_beneficiarios' ? { porte: computePorteFromBeneficiarios(value) } : null),
+    }))
   }
 
   return (
@@ -309,16 +450,176 @@ export default function OperadoraDataImportDialog({
             <p>
               <strong>Registro ANS:</strong> {selectedOperator?.regAns ?? 'Não informado'}
             </p>
+            <p>
+              <strong>Porte calculado:</strong> {batchForm.porte || 'Informe a quantidade de beneficiários'}
+            </p>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="upload-competencia">Competência</Label>
+              <Input
+                id="upload-competencia"
+                type="month"
+                value={batchForm.competencia}
+                onChange={(event) => updateBatchForm('competencia', event.target.value)}
+                disabled={isSubmitting}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="upload-cnpj">CNPJ</Label>
+              <Input
+                id="upload-cnpj"
+                value={batchForm.cnpj}
+                onChange={(event) => updateBatchForm('cnpj', normalizeDigits(event.target.value))}
+                disabled={isSubmitting || isLoadingOperatorContext}
+                placeholder="Preenchido automaticamente pelo reg_ans"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="upload-status">Status do fechamento</Label>
+              <select
+                id="upload-status"
+                value={batchForm.status_fechamento}
+                onChange={(event) => updateBatchForm('status_fechamento', event.target.value)}
+                disabled={isSubmitting}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {STATUS_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="upload-tipo-envio">Tipo de envio</Label>
+              <select
+                id="upload-tipo-envio"
+                value={batchForm.tipo_envio}
+                onChange={(event) => updateBatchForm('tipo_envio', event.target.value)}
+                disabled={isSubmitting}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {TIPO_ENVIO_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="upload-versao">Versão do envio</Label>
+              <Input
+                id="upload-versao"
+                type="number"
+                min="1"
+                step="1"
+                value={batchForm.versao_envio}
+                onChange={(event) => updateBatchForm('versao_envio', event.target.value)}
+                disabled={isSubmitting}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="upload-sistema-origem">Sistema de origem</Label>
+              <Input
+                id="upload-sistema-origem"
+                value={batchForm.sistema_origem}
+                onChange={(event) => updateBatchForm('sistema_origem', event.target.value)}
+                disabled={isSubmitting}
+                placeholder="Ex.: ERP, Protheus, Tasy"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="upload-responsavel-nome">Responsável</Label>
+              <Input
+                id="upload-responsavel-nome"
+                value={batchForm.responsavel_nome}
+                onChange={(event) => updateBatchForm('responsavel_nome', event.target.value)}
+                disabled={isSubmitting}
+                placeholder="Nome de quem está enviando"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="upload-responsavel-email">Email do responsável</Label>
+              <Input
+                id="upload-responsavel-email"
+                type="email"
+                value={batchForm.responsavel_email}
+                onChange={(event) => updateBatchForm('responsavel_email', event.target.value)}
+                disabled={isSubmitting}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="upload-beneficiarios">Quantidade de beneficiários</Label>
+              <Input
+                id="upload-beneficiarios"
+                type="number"
+                min="0"
+                step="1"
+                value={batchForm.qt_beneficiarios}
+                onChange={(event) => updateBatchForm('qt_beneficiarios', event.target.value)}
+                disabled={isSubmitting}
+              />
+              <p className="text-xs text-muted-foreground">Informar a quantidade no último dia do período e ativos na ANS.</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="upload-prestadores">Quantidade de prestadores</Label>
+              <Input
+                id="upload-prestadores"
+                type="number"
+                min="0"
+                step="1"
+                value={batchForm.qt_prestadores}
+                onChange={(event) => updateBatchForm('qt_prestadores', event.target.value)}
+                disabled={isSubmitting}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="upload-modalidade">Modalidade</Label>
+              <select
+                id="upload-modalidade"
+                value={batchForm.modalidade}
+                onChange={(event) => updateBatchForm('modalidade', event.target.value)}
+                disabled={isSubmitting || isLoadingOperatorContext}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {MODALIDADE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="upload-porte">Porte</Label>
+              <Input id="upload-porte" value={batchForm.porte} disabled readOnly placeholder="Calculado pelos beneficiários" />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="upload-observacoes">Observações</Label>
+            <Textarea
+              id="upload-observacoes"
+              value={batchForm.observacoes}
+              onChange={(event) => updateBatchForm('observacoes', event.target.value)}
+              disabled={isSubmitting}
+              className="min-h-[96px]"
+              placeholder="Observações do lote enviado"
+            />
+            <p className="text-xs text-muted-foreground">
+              A data do envio é registrada automaticamente pelo servidor no momento da importação.
+            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={() => handleTemplateDownload('template')} disabled={isDownloadingTemplate}>
               {isDownloadingTemplate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              Baixar template CSV
+              Baixar modelo vazio
             </Button>
             <Button size="sm" variant="outline" onClick={() => handleTemplateDownload('exemplo')} disabled={isDownloadingTemplate}>
               {isDownloadingTemplate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              Baixar exemplo CSV
+              Baixar exemplo preenchido
             </Button>
           </div>
 
@@ -332,7 +633,7 @@ export default function OperadoraDataImportDialog({
               disabled={!selectedOperator || isParsing || isSubmitting}
             />
             <p className="text-xs text-muted-foreground">
-              Campos obrigatórios: <code>competencia</code>, <code>reg_ans</code>, <code>cd_conta_contabil</code>, <code>vl_saldo_final</code>.
+              O arquivo pode conter apenas <code>cd_conta_contabil</code> e <code>vl_saldo_final</code>. A competência e os metadados do envio vêm do formulário acima.
             </p>
           </div>
 
