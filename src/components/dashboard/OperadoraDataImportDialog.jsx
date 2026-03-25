@@ -39,11 +39,7 @@ const ALLOWED_FIELDS = [
   'porte',
   'observacoes',
 ]
-const DEFAULT_STATUS_FECHAMENTO = 'FECHADO'
-const DEFAULT_TIPO_ENVIO = 'NORMAL'
 const DEFAULT_MODALIDADE = 'Cooperativa odontológica'
-const STATUS_OPTIONS = ['FECHADO', 'ABERTO', 'PRELIMINAR']
-const TIPO_ENVIO_OPTIONS = ['NORMAL', 'RETIFICACAO', 'AJUSTE']
 const MODALIDADE_OPTIONS = [
   'Cooperativa odontológica',
   'Odontologia de Grupo',
@@ -102,8 +98,6 @@ function createDefaultBatchForm(userEmail = '') {
   return {
     competencia: getCurrentCompetencia(),
     cnpj: '',
-    status_fechamento: DEFAULT_STATUS_FECHAMENTO,
-    tipo_envio: DEFAULT_TIPO_ENVIO,
     versao_envio: '1',
     sistema_origem: 'UPLOAD_MANUAL',
     responsavel_nome: '',
@@ -254,8 +248,6 @@ export default function OperadoraDataImportDialog({
         setBatchForm((current) => ({
           ...current,
           cnpj: toNullableString(payload?.cnpj) || current.cnpj,
-          status_fechamento: toNullableString(payload?.statusFechamento) || current.status_fechamento || DEFAULT_STATUS_FECHAMENTO,
-          tipo_envio: toNullableString(payload?.tipoEnvio) || current.tipo_envio || DEFAULT_TIPO_ENVIO,
           versao_envio: toNullableString(payload?.versaoEnvio) || current.versao_envio || '1',
           modalidade: toNullableString(payload?.modalidade) || current.modalidade || DEFAULT_MODALIDADE,
           responsavel_email:
@@ -357,8 +349,6 @@ export default function OperadoraDataImportDialog({
           metadata: {
             competencia: batchForm.competencia,
             cnpj: batchForm.cnpj,
-            status_fechamento: batchForm.status_fechamento,
-            tipo_envio: batchForm.tipo_envio,
             versao_envio: batchForm.versao_envio,
             sistema_origem: batchForm.sistema_origem,
             responsavel_nome: batchForm.responsavel_nome,
@@ -475,38 +465,6 @@ export default function OperadoraDataImportDialog({
                 disabled={isSubmitting || isLoadingOperatorContext}
                 placeholder="Preenchido automaticamente pelo reg_ans"
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="upload-status">Status do fechamento</Label>
-              <select
-                id="upload-status"
-                value={batchForm.status_fechamento}
-                onChange={(event) => updateBatchForm('status_fechamento', event.target.value)}
-                disabled={isSubmitting}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {STATUS_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="upload-tipo-envio">Tipo de envio</Label>
-              <select
-                id="upload-tipo-envio"
-                value={batchForm.tipo_envio}
-                onChange={(event) => updateBatchForm('tipo_envio', event.target.value)}
-                disabled={isSubmitting}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {TIPO_ENVIO_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="upload-versao">Versão do envio</Label>
