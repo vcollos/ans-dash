@@ -143,6 +143,16 @@ function DashboardApp({ onLogout, accessProfile }) {
     [accessProfile?.operators],
   )
   const canOpenDataImport = uploadOperators.length > 0
+  const rankingAccessScopeDescription = useMemo(() => {
+    if (!accessProfile?.enforced || accessProfile?.isAdmin) return null
+    const operatorCount = accessProfile?.allowedRegAns?.length ?? accessProfile?.operators?.length ?? 0
+    if (!operatorCount) {
+      return 'Leitura restrita pelo vínculo do usuário: nenhuma operadora autorizada.'
+    }
+    return operatorCount === 1
+      ? 'Leitura restrita pelo vínculo do usuário: 1 operadora autorizada.'
+      : `Leitura restrita pelo vínculo do usuário: ${operatorCount} operadoras autorizadas.`
+  }, [accessProfile?.allowedRegAns?.length, accessProfile?.enforced, accessProfile?.isAdmin, accessProfile?.operators?.length])
 
   if (status === 'loading') {
     return (
@@ -271,6 +281,7 @@ function DashboardApp({ onLogout, accessProfile }) {
                 operatorRow={rankingData.operatorRow}
                 operatorName={operatorInsight?.operatorName}
                 comparisonLabel={comparisonLabel}
+                accessScopeDescription={rankingAccessScopeDescription}
                 indicatorMetric={rankingMetric}
                 onIndicatorMetricChange={setRankingMetric}
                 isUniodontoMode={uniodontoMode}

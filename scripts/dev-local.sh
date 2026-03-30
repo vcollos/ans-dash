@@ -24,7 +24,7 @@ set -a
 : "${SERVER_PORT:=4000}"
 : "${VITE_HOST:=0.0.0.0}"
 : "${VITE_PORT:=5173}"
-: "${VITE_ALLOWED_HOSTS:=localhost,127.0.0.1,0.0.0.0,dash.collos.com.br,backdash.collos.com.br}"
+: "${VITE_ALLOWED_HOSTS:=localhost,127.0.0.1,0.0.0.0,contabil.uniodonto.coop.br,dash.collos.com.br,backdash.collos.com.br}"
 : "${VITE_API_PROXY:=http://localhost:${SERVER_PORT}}"
 : "${BQ_PROJECT_ID:=bigdata-467917}"
 : "${BQ_DATASET:=dash_ans}"
