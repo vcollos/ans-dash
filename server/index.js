@@ -205,8 +205,6 @@ if (!admin.apps.length) {
 }
 
 const AUTH_PUBLIC_PATHS = new Set(['/api/health', '/api/auth/status'])
-const AUTH_ALLOW_NO_ACCESS_PATHS = new Set(['/api/auth/profile'])
-
 function extractToken(req) {
   const header = req.headers.authorization
   if (typeof header === 'string' && header.startsWith('Bearer ')) {
@@ -234,14 +232,6 @@ async function authMiddleware(req, res, next) {
       claims: decoded,
     }
     req.accessContext = await resolveUserAccessContext(req.user)
-    if (
-      req.accessContext?.enforced &&
-      !req.accessContext?.isAdmin &&
-      !(req.accessContext?.allowedRegAns ?? []).length &&
-      !AUTH_ALLOW_NO_ACCESS_PATHS.has(req.path)
-    ) {
-      throw createNoAccessError()
-    }
     return next()
   } catch (err) {
     if (err?.code === 'NO_OPERATOR_ACCESS') {
@@ -496,7 +486,7 @@ async function fetchAccountDescriptionMap(accountCodes = []) {
   }, new Map())
 }
 
-function escapeRegExp(value) {
+function _escapeRegExp(value) {
   return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
@@ -528,12 +518,6 @@ function setCachedUserAccess(cacheKey, value) {
     value,
     expiresAt: Date.now() + USER_ACCESS_CACHE_TTL_MS,
   })
-}
-
-function createNoAccessError(message = 'Usuário sem operadora vinculada.') {
-  const error = new Error(message)
-  error.code = 'NO_OPERATOR_ACCESS'
-  return error
 }
 
 function parseClaimedRegAnsList(claims = {}) {
@@ -699,56 +683,10 @@ async function resolveUserAccessContext(user = {}) {
   return context
 }
 
-function replaceTableRefInSql(sql, tableRef, replacementRef) {
-  const escaped = escapeRegExp(tableRef)
-  const pattern = new RegExp(`\\b(from|join)\\s+(?:\\\`${escaped}\\\`|${escaped})(?=\\s|$|,|\\))`, 'gi')
-  return sql.replace(pattern, (_full, keyword) => `${keyword} ${replacementRef}`)
-}
-
-function prependAclCtes(sql, ctes = []) {
-  if (!ctes.length) return sql
-  const trimmed = String(sql ?? '').trim()
-  if (!trimmed) return trimmed
-  if (/^with\b/i.test(trimmed)) {
-    return trimmed.replace(/^with\b/i, `WITH ${ctes.join(', ')},`)
-  }
-  return `WITH ${ctes.join(', ')}\n${trimmed}`
-}
-
-function applyUserAccessScopeToSql(sql, accessContext = {}) {
-  if (!accessContext?.enforced || accessContext?.isAdmin) {
-    return sql
-  }
-  const allowedRegAns = Array.from(new Set((accessContext.allowedRegAns ?? []).map((value) => normalizeRegAns(value)).filter(Boolean)))
-  if (!allowedRegAns.length) {
-    throw createNoAccessError()
-  }
-  const cteNames = extractCteNames(sql)
-  const tableRefs = [...extractTableRefs(sql, cteNames)].filter((ref) => ALLOWED_TABLES.has(ref))
-  if (!tableRefs.length) {
-    const error = new Error('Consulta sem fonte compatível com o escopo de operadora.')
-    error.code = 'NO_SCOPE_TABLE'
-    throw error
-  }
-  const predicateValues = allowedRegAns.map((value) => `'${value}'`).join(', ')
-  const predicate = `REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', '') IN (${predicateValues})`
-  const uniqueRefs = Array.from(new Set(tableRefs))
-  const aclCtes = uniqueRefs.map((tableRef, index) => {
-    const cteName = `__acl_src_${index}`
-    return {
-      tableRef,
-      cteName,
-      expression: `${cteName} AS (SELECT * FROM ${formatTableRef(tableRef)} WHERE ${predicate})`,
-    }
-  })
-  let scopedSql = sql
-  aclCtes.forEach(({ tableRef, cteName }) => {
-    scopedSql = replaceTableRefInSql(scopedSql, tableRef, cteName)
-  })
-  return prependAclCtes(
-    scopedSql,
-    aclCtes.map((item) => item.expression),
-  )
+function applyUserAccessScopeToSql(sql) {
+  // Leitura do dashboard e exportacao ficam liberadas para qualquer usuario autenticado.
+  // O vinculo por operadora segue valendo apenas para upload/importacao.
+  return sql
 }
 
 function hasOperatorUploadAccess(accessContext = {}, regAns) {
@@ -1563,7 +1501,7 @@ app.get('/api/auth/profile', (req, res) => {
     operators: accessContext.operators ?? [],
     allowedRegAns: accessContext.allowedRegAns ?? [],
     canUploadRegAns: accessContext.canUploadRegAns ?? [],
-    noAccess: accessContext.enforced && !accessContext.isAdmin && !(accessContext.allowedRegAns ?? []).length,
+    noAccess: false,
   }
   res.setHeader('Cache-Control', 'no-store')
   res.json(payload)

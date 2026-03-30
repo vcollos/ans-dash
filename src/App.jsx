@@ -62,25 +62,6 @@ function ErrorState({ error, onRetry }) {
   )
 }
 
-function AccessBlockedState({ onLogout }) {
-  return (
-    <Card className="border-amber-400/50 bg-amber-50">
-      <CardContent className="flex flex-col items-start gap-4 p-6 text-amber-900">
-        <div className="space-y-1">
-          <p className="text-lg font-semibold">Acesso pendente para operadora</p>
-          <p className="text-sm">
-            Seu usuário autenticou com sucesso, mas ainda não possui vínculo ativo com nenhuma Operadora Uniodonto.
-          </p>
-          <p className="text-sm">Solicite ao administrador o cadastro do seu `reg_ans` na tabela de acessos do sistema.</p>
-        </div>
-        <Button variant="outline" onClick={onLogout}>
-          Sair
-        </Button>
-      </CardContent>
-    </Card>
-  )
-}
-
 function DashboardApp({ onLogout, accessProfile }) {
   const [filtersSidebarOpen, setFiltersSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('indicadores')
@@ -143,16 +124,6 @@ function DashboardApp({ onLogout, accessProfile }) {
     [accessProfile?.operators],
   )
   const canOpenDataImport = uploadOperators.length > 0
-  const rankingAccessScopeDescription = useMemo(() => {
-    if (!accessProfile?.enforced || accessProfile?.isAdmin) return null
-    const operatorCount = accessProfile?.allowedRegAns?.length ?? accessProfile?.operators?.length ?? 0
-    if (!operatorCount) {
-      return 'Leitura restrita pelo vínculo do usuário: nenhuma operadora autorizada.'
-    }
-    return operatorCount === 1
-      ? 'Leitura restrita pelo vínculo do usuário: 1 operadora autorizada.'
-      : `Leitura restrita pelo vínculo do usuário: ${operatorCount} operadoras autorizadas.`
-  }, [accessProfile?.allowedRegAns?.length, accessProfile?.enforced, accessProfile?.isAdmin, accessProfile?.operators?.length])
 
   if (status === 'loading') {
     return (
@@ -281,7 +252,6 @@ function DashboardApp({ onLogout, accessProfile }) {
                 operatorRow={rankingData.operatorRow}
                 operatorName={operatorInsight?.operatorName}
                 comparisonLabel={comparisonLabel}
-                accessScopeDescription={rankingAccessScopeDescription}
                 indicatorMetric={rankingMetric}
                 onIndicatorMetricChange={setRankingMetric}
                 isUniodontoMode={uniodontoMode}
@@ -513,14 +483,6 @@ function AppContent() {
     return (
       <main className="flex min-h-screen w-full flex-col justify-center px-[3vw] py-[3vh]">
         <ErrorState error={accessProfileError} onRetry={() => window.location.reload()} />
-      </main>
-    )
-  }
-
-  if (accessProfile?.noAccess) {
-    return (
-      <main className="flex min-h-screen w-full flex-col justify-center px-[3vw] py-[3vh]">
-        <AccessBlockedState onLogout={signOut} />
       </main>
     )
   }
