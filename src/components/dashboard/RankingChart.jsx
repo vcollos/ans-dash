@@ -74,6 +74,7 @@ function RankingChart({
   operatorRow,
   operatorName,
   comparisonLabel,
+  accessScopeDescription = null,
   onOperatorClick = null,
   metric = 'regulatory_score',
   onMetricChange,
@@ -331,6 +332,7 @@ function RankingChart({
           <div>
             <CardTitle className="text-lg">{title}</CardTitle>
             <p className="text-sm text-muted-foreground">{subtitle ?? infoText}</p>
+            {accessScopeDescription ? <p className="text-xs text-muted-foreground">{accessScopeDescription}</p> : null}
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Ordenar por</p>

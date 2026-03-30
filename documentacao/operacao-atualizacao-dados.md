@@ -81,6 +81,13 @@ bq --location=US mk --dataset bigdata-467917:dash_ans
 - Carregue os novos dados no dataset adotado pelo projeto (`dash_ans`).
 - Se houver mudancas de colunas, atualize o script/view base.
 
+Quando a origem oficial estiver no datalake normalizado (`bigdata-467917.datalake_ans.vw_demonstracoes_contabeis_norm`), atualize a tabela base usada pelo dashboard com:
+```
+npm run data:refresh-bq-demonstracoes-base
+```
+
+Esse comando recria `bigdata-467917.dash_ans.demonstracoes_contabeis` a partir da view oficial normalizada e preserva o schema esperado pelos fluxos do projeto.
+
 ### 2) Atualizar a view base (se necessario)
 Se a view `indicadores_curados` precisa ser recriada:
 ```
@@ -90,6 +97,11 @@ npm run data:create-bq-view
 ### 3) Materializar o snapshot
 ```
 npm run data:materialize-bq-snapshot
+```
+
+Se o frontend/Cloud Run estiver configurado para ler os artefatos consolidados em `dash_ans_uploads`, rode tambem:
+```
+npm run data:refresh-bq-consolidated-indicators
 ```
 
 ### 4) Materializar as tabelas mart (ANS + Uniodonto)

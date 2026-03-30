@@ -34,8 +34,6 @@ const uniodontoRankingCatalog = UNIODONTO_RANKING_METRICS
 const uniodontoIndicatorCatalog = UNIODONTO_INDICATORS
 const DEFAULT_RANKING_METRIC = 'regulatory_score'
 const DEFAULT_MONETARY_RANKING_METRIC = 'resultado_liquido_final_ans'
-const DEFAULT_START_PERIOD = { ano: 2024, trimestre: 4, periodo: '2024T4' }
-
 const getMetricTrend = (metricId) => {
   if (metricId === 'regulatory_score') return 'higher'
   return rankingCatalog.find((metric) => metric.id === metricId)?.trend ?? 'higher'
@@ -137,7 +135,7 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
     availablePeriods: [],
     selectedPeriod: null,
   })
-  const [operatorPeriod, setOperatorPeriod] = useState(() => ({ ...DEFAULT_START_PERIOD }))
+  const [operatorPeriod, setOperatorPeriod] = useState(null)
   const operatorSelectionRef = useRef(0)
 
   const comparisonFilterQuery = useMemo(() => comparisonFiltersToQuery(comparisonFilters), [comparisonFilters])
@@ -253,9 +251,6 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
 
   useEffect(() => {
     if (!periodOptions.length) return
-    const defaultMatch = periodOptions.find(
-      (item) => item.ano === DEFAULT_START_PERIOD.ano && item.trimestre === DEFAULT_START_PERIOD.trimestre,
-    )
     setOperatorPeriod((current) => {
       if (current?.ano && current?.trimestre) {
         const match = periodOptions.find(
@@ -263,7 +258,6 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
         )
         if (match) return match
       }
-      if (defaultMatch) return defaultMatch
       const [latest] = periodOptions
       return latest ? { ano: latest.ano, trimestre: latest.trimestre, periodo: latest.periodo } : current
     })

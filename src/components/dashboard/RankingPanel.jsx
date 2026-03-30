@@ -74,6 +74,7 @@ function RankingPanel({
   operatorName,
   operatorRow,
   comparisonLabel,
+  accessScopeDescription = null,
   onOperatorClick,
   monetaryRanking,
   monetaryMetric,
@@ -120,6 +121,7 @@ function RankingPanel({
             operatorRow={operatorRow}
             operatorName={operatorName}
             comparisonLabel={comparisonLabel}
+            accessScopeDescription={accessScopeDescription}
             metric={activeIndicatorMetric}
             onMetricChange={handleIndicatorMetricChange}
             metrics={indicatorMetrics}
@@ -138,6 +140,7 @@ function RankingPanel({
             operatorRow={monetaryOperatorRow}
             operatorName={operatorName}
             comparisonLabel={comparisonLabel}
+            accessScopeDescription={accessScopeDescription}
             metric={monetaryMetric}
             onMetricChange={onMonetaryMetricChange}
             onOperatorClick={onOperatorClick}
