@@ -39,10 +39,17 @@ const BQ_AUX_DEMONSTRACOES_TABLE = process.env.BQ_AUX_DEMONSTRACOES_TABLE ?? 'de
 const BQ_AUX_DEMONSTRACOES_LATEST_VIEW =
   process.env.BQ_AUX_DEMONSTRACOES_LATEST_VIEW ?? 'vw_demonstracoes_contabeis_auxiliar_latest'
 const BQ_USER_ACCESS_TABLE = process.env.BQ_USER_ACCESS_TABLE ?? 'user_operadora_acessos'
+const BQ_USER_PROFILE_TABLE = process.env.BQ_USER_PROFILE_TABLE ?? 'user_profile_completions'
 const ENFORCE_USER_ACCESS = (process.env.BQ_ENFORCE_USER_ACCESS ?? 'true')
   .toLowerCase()
   .trim() === 'true'
 const USER_ACCESS_CACHE_TTL_MS = Number(process.env.USER_ACCESS_CACHE_TTL_MS ?? 60_000)
+const ADMIN_EMAIL_DOMAINS = String(
+  process.env.ACCESS_ADMIN_EMAIL_DOMAINS ?? 'uniodonto.coop.br,collos.com.br,contagbr.com.br',
+)
+  .split(',')
+  .map((item) => item.trim().toLowerCase())
+  .filter(Boolean)
 const BQ_BASE_DEMONSTRACOES_TABLE =
   process.env.BQ_BASE_DEMONSTRACOES_TABLE ?? `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.demonstracoes_contabeis`
 const BQ_CONSOLIDATED_DEMONSTRACOES_VIEW =
@@ -101,6 +108,7 @@ function parseTableRef(rawValue, defaultDataset = BQ_DATASET) {
 const AUX_DEMONSTRACOES_TABLE_REF = parseTableRef(BQ_AUX_DEMONSTRACOES_TABLE, BQ_AUX_DATASET)
 const AUX_DEMONSTRACOES_LATEST_VIEW_REF = parseTableRef(BQ_AUX_DEMONSTRACOES_LATEST_VIEW, BQ_AUX_DATASET)
 const USER_ACCESS_TABLE_REF = parseTableRef(BQ_USER_ACCESS_TABLE, BQ_MART_DATASET)
+const USER_PROFILE_TABLE_REF = parseTableRef(BQ_USER_PROFILE_TABLE, BQ_MART_DATASET)
 const BASE_DEMONSTRACOES_TABLE_REF = parseTableRef(BQ_BASE_DEMONSTRACOES_TABLE, BQ_DATASET)
 const CONSOLIDATED_DEMONSTRACOES_VIEW_REF = parseTableRef(BQ_CONSOLIDATED_DEMONSTRACOES_VIEW, BQ_AUX_DATASET)
 const EXPORT_VIEW_REF = parseTableRef(BQ_EXPORT_VIEW, BQ_MART_DATASET)
@@ -122,6 +130,10 @@ const DEFAULT_DEMONSTRACOES_MODALIDADE = 'Cooperativa odontológica'
 const queryCache = new Map()
 const inFlightQueries = new Map()
 const userAccessCache = new Map()
+const operatorCatalogCache = {
+  entries: [],
+  expiresAt: 0,
+}
 
 const RAW_ALLOWED_VIEWS = process.env.BQ_ALLOWED_VIEWS
 const ALLOWED_TABLES = (() => {
@@ -384,6 +396,8 @@ async function runBigQuery(queryText) {
 
 let userAccessTablePromise = null
 let userAccessTableReady = false
+let userProfileTablePromise = null
+let userProfileTableReady = false
 
 function normalizeRegAns(value) {
   const normalized = String(value ?? '')
@@ -395,6 +409,64 @@ function normalizeRegAns(value) {
 function normalizeEmail(value) {
   const normalized = String(value ?? '').trim().toLowerCase()
   return normalized ? normalized : null
+}
+
+const KNOWN_EMAIL_OPERATOR_BINDINGS = new Map(
+  Object.entries({
+    'federacaobnu@uniodontosc.com.br': 'Uniodonto SC (Federação)',
+    'contabilidadeuniodontoap@gmail.com': 'Uniodonto AP',
+    'gerencia@uniodontojac.com.br': 'Uniodonto Jacareí',
+    'claudio@uniodontolondrina.coop.br': 'Uniodonto Londrina',
+    'jalves@uniodonto.coop.br': 'Uniodonto Brasil',
+    'contabil@uniodontoap.com.br': 'Uniodonto AP',
+    'uniodontopinda@gmail.com': 'Uniodonto Pindamonhangaba',
+    'contabil@uniodontomt.com.br': 'Uniodonto MT',
+    'contabil@uniodonto.mt.gov.br': 'Uniodonto MT',
+    'draacilialourenco@uol.com.br': 'Uniodonto Pindamonhangaba',
+    'diretoriaoperacional@uniodontosjc.coop.br': 'Uniodonto São José dos Campos',
+    'ouvidoria@uniodontoathenas.coop.br': 'Uniodonto Athenas',
+    'uniodontocacapava@gmail.com': 'Uniodonto Caçapava',
+    'adm@uniodontomt.com.br': 'Uniodonto MT',
+    'gerencia@uniodontocatanduva.com.br': 'Uniodonto Catanduva',
+    'financeiro@uniodontosjc.coop.br': 'Uniodonto São José dos Campos',
+    'juliomaciel@uniodonto.coop.br': 'Uniodonto Brasil',
+    'uniodontoamer@uol.com.br': 'Uniodonto Americana',
+    'ronaldonemesio@uniodontomaceio.com.br': 'Uniodonto Maceió',
+    'gerencia@uniodontorn.com.br': 'Uniodonto RN',
+    'eugeniocaraujo@hotmail.com': 'Uniodonto RN',
+    'federacao@uniodontosc.com.br': 'Uniodonto SC (Federação)',
+    'clovis@uniodonto.coop.br': 'Uniodonto Brasil',
+    'diretoria@uniodontopiracicaba.com.br': 'Uniodonto Piracicaba',
+    'fernandopaivaposso@gmail.com': 'Uniodonto Poços de Caldas',
+    'contato@collos.com.br': 'Collos',
+    'vitor@collos.com.br': 'Collos',
+  }).map(([email, operatorName]) => [normalizeEmail(email), operatorName]),
+)
+
+function normalizeOperatorLookupKey(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+}
+
+function getEmailDomain(email) {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail || !normalizedEmail.includes('@')) return null
+  return normalizedEmail.split('@').pop() ?? null
+}
+
+function isPrivilegedDomainEmail(email) {
+  const domain = getEmailDomain(email)
+  if (!domain) return false
+  return ADMIN_EMAIL_DOMAINS.includes(domain)
+}
+
+function getKnownOperatorNameByEmail(email) {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return null
+  return KNOWN_EMAIL_OPERATOR_BINDINGS.get(normalizedEmail) ?? null
 }
 
 function normalizeDigits(value) {
@@ -438,6 +510,64 @@ async function fetchOperatorRegistryMetadata(regAns) {
     operatorName: toNullableString(row?.nome_fantasia) || toNullableString(row?.razao_social) || null,
     modalidade: toNullableString(row?.modalidade) || null,
   }
+}
+
+async function listOperatorCatalog({ forceRefresh = false } = {}) {
+  const now = Date.now()
+  if (!forceRefresh && operatorCatalogCache.entries.length && operatorCatalogCache.expiresAt > now) {
+    return operatorCatalogCache.entries
+  }
+
+  const [rows] = await bigquery.query({
+    query: `
+      SELECT
+        REGEXP_REPLACE(CAST(REG_ANS AS STRING), r'\\D', '') AS reg_ans,
+        NULLIF(TRIM(CAST(CNPJ AS STRING)), '') AS cnpj,
+        COALESCE(
+          NULLIF(TRIM(CAST(NOME_FANTASIA AS STRING)), ''),
+          NULLIF(TRIM(CAST(RAZAO_SOCIAL AS STRING)), '')
+        ) AS operator_name,
+        NULLIF(TRIM(CAST(MODALIDADE AS STRING)), '') AS modalidade
+      FROM \`${BQ_OPERADORAS_TABLE}\`
+      WHERE COALESCE(
+        NULLIF(TRIM(CAST(NOME_FANTASIA AS STRING)), ''),
+        NULLIF(TRIM(CAST(RAZAO_SOCIAL AS STRING)), '')
+      ) IS NOT NULL
+    `,
+    location: BQ_LOCATION,
+  })
+
+  const entries = normalizeBigQueryRows(rows)
+    .map((row) => {
+      const regAns = normalizeRegAns(row?.reg_ans)
+      const operatorName = toNullableString(row?.operator_name)
+      if (!regAns || !operatorName) return null
+      return {
+        regAns,
+        cnpj: normalizeDigits(row?.cnpj),
+        operatorName,
+        modalidade: toNullableString(row?.modalidade),
+        normalizedName: normalizeOperatorLookupKey(operatorName),
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.operatorName.localeCompare(b.operatorName))
+
+  operatorCatalogCache.entries = entries
+  operatorCatalogCache.expiresAt = now + Math.max(USER_ACCESS_CACHE_TTL_MS, 60_000)
+  return entries
+}
+
+async function resolveOperatorByName(operatorName) {
+  const normalized = normalizeOperatorLookupKey(operatorName)
+  if (!normalized) return null
+  const entries = await listOperatorCatalog()
+  const exact = entries.find((item) => item.normalizedName === normalized)
+  if (exact) return exact
+  const contains = entries.find(
+    (item) => item.normalizedName.includes(normalized) || normalized.includes(item.normalizedName),
+  )
+  return contains ?? null
 }
 
 async function fetchAccountDescriptionMap(accountCodes = []) {
@@ -536,7 +666,7 @@ function parseClaimedRegAnsList(claims = {}) {
 
 function createAccessContextFromRows(rows = [], user = {}) {
   const operatorMap = new Map()
-  let isAdmin = Boolean(user?.claims?.admin === true || user?.claims?.isAdmin === true)
+  let isAdmin = Boolean(user?.claims?.admin === true || user?.claims?.isAdmin === true || user?.isDomainAdmin === true)
   const claimedRegAns = parseClaimedRegAnsList(user?.claims)
   claimedRegAns.forEach((regAns) => {
     operatorMap.set(regAns, {
@@ -637,6 +767,310 @@ async function ensureUserAccessTable() {
   return userAccessTablePromise
 }
 
+async function ensureUserProfileTable() {
+  if (userProfileTableReady) {
+    return bigquery.dataset(USER_PROFILE_TABLE_REF.datasetId).table(USER_PROFILE_TABLE_REF.objectId)
+  }
+  if (userProfileTablePromise) {
+    return userProfileTablePromise
+  }
+  userProfileTablePromise = (async () => {
+    const dataset = bigquery.dataset(USER_PROFILE_TABLE_REF.datasetId)
+    const [datasetExists] = await dataset.exists()
+    if (!datasetExists) {
+      throw new Error(`Dataset ${USER_PROFILE_TABLE_REF.projectId}.${USER_PROFILE_TABLE_REF.datasetId} não existe.`)
+    }
+    const table = dataset.table(USER_PROFILE_TABLE_REF.objectId)
+    const [tableExists] = await table.exists()
+    if (!tableExists) {
+      await table.create({
+        schema: [
+          { name: 'user_uid', type: 'STRING' },
+          { name: 'user_email', type: 'STRING' },
+          { name: 'first_name', type: 'STRING' },
+          { name: 'last_name', type: 'STRING' },
+          { name: 'phone', type: 'STRING' },
+          { name: 'job_title', type: 'STRING' },
+          { name: 'department', type: 'STRING' },
+          { name: 'reg_ans', type: 'STRING' },
+          { name: 'operator_name', type: 'STRING' },
+          { name: 'is_completed', type: 'BOOL' },
+          { name: 'created_at', type: 'TIMESTAMP' },
+          { name: 'updated_at', type: 'TIMESTAMP' },
+        ],
+        location: BQ_LOCATION,
+        clustering: {
+          fields: ['user_uid', 'user_email'],
+        },
+      })
+    }
+    userProfileTableReady = true
+    return table
+  })()
+    .catch((err) => {
+      userProfileTableReady = false
+      throw err
+    })
+    .finally(() => {
+      userProfileTablePromise = null
+    })
+  return userProfileTablePromise
+}
+
+async function fetchUserProfile(user = {}) {
+  const uid = String(user.uid ?? '').trim() || null
+  const email = normalizeEmail(user.email)
+  if (!uid && !email) return null
+  await ensureUserProfileTable()
+  const [rows] = await bigquery.query({
+    query: `
+      SELECT
+        NULLIF(TRIM(CAST(first_name AS STRING)), '') AS first_name,
+        NULLIF(TRIM(CAST(last_name AS STRING)), '') AS last_name,
+        NULLIF(TRIM(CAST(phone AS STRING)), '') AS phone,
+        NULLIF(TRIM(CAST(job_title AS STRING)), '') AS job_title,
+        NULLIF(TRIM(CAST(department AS STRING)), '') AS department,
+        NULLIF(TRIM(CAST(operator_name AS STRING)), '') AS operator_name,
+        REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', '') AS reg_ans,
+        LOWER(NULLIF(TRIM(CAST(user_email AS STRING)), '')) AS user_email,
+        COALESCE(is_completed, FALSE) AS is_completed
+      FROM \`${USER_PROFILE_TABLE_REF.fqn}\`
+      WHERE (
+        (@uid IS NOT NULL AND CAST(user_uid AS STRING) = @uid)
+        OR (@email IS NOT NULL AND LOWER(TRIM(CAST(user_email AS STRING))) = @email)
+      )
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT 1
+    `,
+    params: { uid, email },
+    location: BQ_LOCATION,
+  })
+  const row = normalizeBigQueryRows(rows)[0]
+  if (!row) return null
+  return {
+    firstName: toNullableString(row?.first_name),
+    lastName: toNullableString(row?.last_name),
+    phone: toNullableString(row?.phone),
+    jobTitle: toNullableString(row?.job_title),
+    department: toNullableString(row?.department),
+    operatorName: toNullableString(row?.operator_name),
+    regAns: normalizeRegAns(row?.reg_ans),
+    email: normalizeEmail(row?.user_email),
+    isCompleted: row?.is_completed === true,
+  }
+}
+
+async function upsertUserProfile(user = {}, payload = {}) {
+  const uid = String(user.uid ?? '').trim() || null
+  const userEmail = normalizeEmail(user.email)
+  const email = normalizeEmail(payload.email) ?? userEmail
+  const regAns = normalizeRegAns(payload.regAns)
+  const operatorName = toNullableString(payload.operatorName)
+  await ensureUserProfileTable()
+  await bigquery.query({
+    query: `
+      MERGE \`${USER_PROFILE_TABLE_REF.fqn}\` target
+      USING (
+        SELECT
+          @uid AS user_uid,
+          @email AS user_email
+      ) source
+      ON (
+        (
+          source.user_uid IS NOT NULL
+          AND CAST(target.user_uid AS STRING) = source.user_uid
+        )
+        OR (
+          source.user_email IS NOT NULL
+          AND LOWER(TRIM(CAST(target.user_email AS STRING))) = source.user_email
+        )
+      )
+      WHEN MATCHED THEN
+        UPDATE SET
+          first_name = @first_name,
+          last_name = @last_name,
+          phone = @phone,
+          job_title = @job_title,
+          department = @department,
+          reg_ans = @reg_ans,
+          operator_name = @operator_name,
+          is_completed = TRUE,
+          updated_at = CURRENT_TIMESTAMP(),
+          user_uid = COALESCE(target.user_uid, source.user_uid),
+          user_email = COALESCE(target.user_email, source.user_email)
+      WHEN NOT MATCHED THEN
+        INSERT (
+          user_uid,
+          user_email,
+          first_name,
+          last_name,
+          phone,
+          job_title,
+          department,
+          reg_ans,
+          operator_name,
+          is_completed,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          source.user_uid,
+          source.user_email,
+          @first_name,
+          @last_name,
+          @phone,
+          @job_title,
+          @department,
+          @reg_ans,
+          @operator_name,
+          TRUE,
+          CURRENT_TIMESTAMP(),
+          CURRENT_TIMESTAMP()
+        )
+    `,
+    params: {
+      uid,
+      email,
+      first_name: toNullableString(payload.firstName),
+      last_name: toNullableString(payload.lastName),
+      phone: toNullableString(payload.phone),
+      job_title: toNullableString(payload.jobTitle),
+      department: toNullableString(payload.department),
+      reg_ans: regAns,
+      operator_name: operatorName,
+    },
+    location: BQ_LOCATION,
+  })
+}
+
+async function upsertUserUploadAccess(user = {}, { regAns, operatorName }) {
+  const normalizedRegAns = normalizeRegAns(regAns)
+  if (!normalizedRegAns) return
+  await ensureUserAccessTable()
+  const uid = String(user.uid ?? '').trim() || null
+  const email = normalizeEmail(user.email)
+  await bigquery.query({
+    query: `
+      MERGE \`${USER_ACCESS_TABLE_REF.fqn}\` target
+      USING (
+        SELECT
+          @uid AS user_uid,
+          @email AS user_email,
+          @reg_ans AS reg_ans
+      ) source
+      ON (
+        REGEXP_REPLACE(CAST(target.reg_ans AS STRING), r'\\D', '') = source.reg_ans
+        AND (
+          (source.user_uid IS NOT NULL AND CAST(target.user_uid AS STRING) = source.user_uid)
+          OR (
+            source.user_email IS NOT NULL
+            AND LOWER(TRIM(CAST(target.user_email AS STRING))) = source.user_email
+          )
+        )
+      )
+      WHEN MATCHED THEN
+        UPDATE SET
+          operator_name = COALESCE(@operator_name, target.operator_name),
+          can_upload = TRUE,
+          role = COALESCE(NULLIF(TRIM(CAST(target.role AS STRING)), ''), 'user'),
+          active = TRUE,
+          updated_at = CURRENT_TIMESTAMP(),
+          user_uid = COALESCE(target.user_uid, source.user_uid),
+          user_email = COALESCE(target.user_email, source.user_email)
+      WHEN NOT MATCHED THEN
+        INSERT (
+          user_uid,
+          user_email,
+          reg_ans,
+          operator_name,
+          can_upload,
+          role,
+          active,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          source.user_uid,
+          source.user_email,
+          source.reg_ans,
+          @operator_name,
+          TRUE,
+          'user',
+          TRUE,
+          CURRENT_TIMESTAMP(),
+          CURRENT_TIMESTAMP()
+        )
+    `,
+    params: {
+      uid,
+      email,
+      reg_ans: normalizedRegAns,
+      operator_name: toNullableString(operatorName),
+    },
+    location: BQ_LOCATION,
+  })
+}
+
+function buildProfileCompletionFlag(accessContext = {}) {
+  if (!accessContext?.enforced) return false
+  if (accessContext?.isAdmin) return false
+  return (accessContext?.canUploadRegAns ?? []).length === 0
+}
+
+async function buildAuthProfilePayload(reqUser = {}, accessContext = {}) {
+  let registrationProfile = null
+  try {
+    registrationProfile = await fetchUserProfile(reqUser)
+  } catch (err) {
+    console.warn('[server] Falha ao carregar perfil complementar do usuário', err?.message ?? err)
+  }
+  let operators = accessContext?.operators ?? []
+  if (accessContext?.isAdmin) {
+    try {
+      const allOperators = (await listOperatorCatalog())
+        .filter((item) => item.normalizedName.includes('uniodonto'))
+        .map((item) => ({
+          regAns: item.regAns,
+          operatorName: item.operatorName,
+          canUpload: true,
+        }))
+      operators = allOperators
+    } catch (err) {
+      console.warn('[server] Falha ao carregar catálogo de operadoras para perfil admin', err?.message ?? err)
+    }
+  }
+  const allowedRegAns = accessContext?.isAdmin
+    ? operators.map((item) => item.regAns)
+    : accessContext?.allowedRegAns ?? []
+  const canUploadRegAns = accessContext?.isAdmin
+    ? operators.map((item) => item.regAns)
+    : accessContext?.canUploadRegAns ?? []
+  return {
+    uid: reqUser?.uid ?? null,
+    email: reqUser?.email ?? null,
+    enforced: accessContext?.enforced === true,
+    isAdmin: accessContext?.isAdmin === true,
+    operators,
+    allowedRegAns,
+    canUploadRegAns,
+    noAccess: false,
+    requiresProfileCompletion: buildProfileCompletionFlag(accessContext),
+    registrationProfile: registrationProfile
+      ? {
+          firstName: registrationProfile.firstName ?? null,
+          lastName: registrationProfile.lastName ?? null,
+          phone: registrationProfile.phone ?? null,
+          email: registrationProfile.email ?? null,
+          jobTitle: registrationProfile.jobTitle ?? null,
+          department: registrationProfile.department ?? null,
+          regAns: registrationProfile.regAns ?? null,
+          operatorName: registrationProfile.operatorName ?? null,
+          isCompleted: registrationProfile.isCompleted === true,
+        }
+      : null,
+  }
+}
+
 async function resolveUserAccessContext(user = {}) {
   if (!ENFORCE_USER_ACCESS) {
     return {
@@ -656,6 +1090,7 @@ async function resolveUserAccessContext(user = {}) {
   await ensureUserAccessTable()
   const uid = String(user.uid ?? '').trim() || null
   const email = normalizeEmail(user.email)
+  const isDomainAdmin = isPrivilegedDomainEmail(email)
   const query = `
     SELECT
       REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', '') AS reg_ans,
@@ -677,8 +1112,27 @@ async function resolveUserAccessContext(user = {}) {
     },
     location: BQ_LOCATION,
   })
+  const normalizedRows = normalizeBigQueryRows(rows)
+  const inferredRows = []
+  if (!isDomainAdmin && !normalizedRows.length && email) {
+    const knownOperatorName = getKnownOperatorNameByEmail(email)
+    if (knownOperatorName) {
+      const resolvedOperator = await resolveOperatorByName(knownOperatorName)
+      if (resolvedOperator?.regAns) {
+        inferredRows.push({
+          reg_ans: resolvedOperator.regAns,
+          operator_name: resolvedOperator.operatorName,
+          can_upload: true,
+          role: 'user',
+        })
+      }
+    }
+  }
 
-  const context = createAccessContextFromRows(normalizeBigQueryRows(rows), user)
+  const context = createAccessContextFromRows([...normalizedRows, ...inferredRows], {
+    ...user,
+    isDomainAdmin,
+  })
   setCachedUserAccess(cacheKey, context)
   return context
 }
@@ -1485,7 +1939,7 @@ app.get('/api/auth/status', (req, res) => {
   res.json({ enabled: true, bootId: SERVER_BOOT_ID, projectId: FIREBASE_PROJECT_ID ?? null })
 })
 
-app.get('/api/auth/profile', (req, res) => {
+app.get('/api/auth/profile', async (req, res) => {
   const accessContext = req.accessContext ?? {
     enforced: ENFORCE_USER_ACCESS,
     isAdmin: false,
@@ -1493,18 +1947,91 @@ app.get('/api/auth/profile', (req, res) => {
     allowedRegAns: [],
     canUploadRegAns: [],
   }
-  const payload = {
-    uid: req.user?.uid ?? null,
-    email: req.user?.email ?? null,
-    enforced: accessContext.enforced,
-    isAdmin: accessContext.isAdmin,
-    operators: accessContext.operators ?? [],
-    allowedRegAns: accessContext.allowedRegAns ?? [],
-    canUploadRegAns: accessContext.canUploadRegAns ?? [],
-    noAccess: false,
+  try {
+    const payload = await buildAuthProfilePayload(req.user, accessContext)
+    res.setHeader('Cache-Control', 'no-store')
+    return res.json(payload)
+  } catch (err) {
+    console.error('[server] Falha ao carregar perfil do usuário', err)
+    return res.status(500).json({ error: 'Falha ao carregar perfil do usuário.' })
   }
-  res.setHeader('Cache-Control', 'no-store')
-  res.json(payload)
+})
+
+app.get('/api/operators', async (_req, res) => {
+  try {
+    const operators = (await listOperatorCatalog())
+      .filter((item) => item.normalizedName.includes('uniodonto'))
+      .map((item) => ({
+        regAns: item.regAns,
+        operatorName: item.operatorName,
+      }))
+    res.setHeader('Cache-Control', 'no-store')
+    return res.json({ operators })
+  } catch (err) {
+    console.error('[server] Falha ao listar operadoras', err)
+    return res.status(500).json({ error: 'Falha ao carregar lista de operadoras.' })
+  }
+})
+
+app.post('/api/auth/profile/complete', async (req, res) => {
+  const firstName = toNullableString(req.body?.firstName)
+  const lastName = toNullableString(req.body?.lastName)
+  const phone = toNullableString(req.body?.phone)
+  const profileEmail = normalizeEmail(req.body?.email ?? req.user?.email)
+  const jobTitle = toNullableString(req.body?.jobTitle)
+  const department = toNullableString(req.body?.department)
+  const regAns = normalizeRegAns(req.body?.regAns)
+  const authenticatedEmail = normalizeEmail(req.user?.email)
+  const isPrivilegedUser = isPrivilegedDomainEmail(authenticatedEmail)
+
+  if (!firstName || !lastName || !phone || !profileEmail || !jobTitle || !department) {
+    return res.status(400).json({
+      error: 'Preencha todos os campos obrigatórios: Nome, Sobrenome, Telefone, E-mail, Cargo/Função e Departamento.',
+    })
+  }
+  if (authenticatedEmail && profileEmail !== authenticatedEmail) {
+    return res.status(400).json({ error: 'O e-mail informado deve ser o mesmo do login atual.' })
+  }
+  if (!isPrivilegedUser && !regAns) {
+    return res.status(400).json({ error: 'Selecione a Uniodonto vinculada para concluir o cadastro.' })
+  }
+
+  try {
+    let operatorMetadata = null
+    if (regAns) {
+      operatorMetadata = await fetchOperatorRegistryMetadata(regAns)
+      if (!operatorMetadata && !isPrivilegedUser) {
+        return res.status(400).json({ error: 'Operadora inválida para o vínculo informado.' })
+      }
+    }
+
+    await upsertUserProfile(req.user, {
+      firstName,
+      lastName,
+      phone,
+      email: profileEmail,
+      jobTitle,
+      department,
+      regAns: regAns ?? null,
+      operatorName: operatorMetadata?.operatorName ?? null,
+    })
+
+    if (!isPrivilegedUser && regAns) {
+      await upsertUserUploadAccess(req.user, {
+        regAns,
+        operatorName: operatorMetadata?.operatorName ?? null,
+      })
+    }
+
+    userAccessCache.delete(getUserAccessCacheKey(req.user))
+    const accessContext = await resolveUserAccessContext(req.user)
+    const payload = await buildAuthProfilePayload(req.user, accessContext)
+    res.setHeader('Cache-Control', 'no-store')
+    return res.json(payload)
+  } catch (err) {
+    console.error('[server] Falha ao concluir perfil do usuário', err)
+    return res.status(500).json({ error: 'Falha ao concluir cadastro do usuário.' })
+  }
 })
 
 app.get('/api/health', async (req, res) => {

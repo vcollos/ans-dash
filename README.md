@@ -101,7 +101,9 @@ Arquivos de referência:
 - `BQ_REFRESH_CONSOLIDATED_VIEW` (opcional): `true|false` para atualizar a view consolidada ao final do upload (default: `true`).
 - `DEMONSTRACOES_MAX_UPLOAD_ROWS` (opcional): limite de linhas por arquivo (default: `10000`).
 - `BQ_USER_ACCESS_TABLE` (opcional): tabela de vínculo usuário x operadora (default: `user_operadora_acessos`).
-- `BQ_ENFORCE_USER_ACCESS` (opcional): habilita bloqueio por operadora (default: `true`).
+- `BQ_USER_PROFILE_TABLE` (opcional): tabela de complemento cadastral de usuário (default: `user_profile_completions`).
+- `BQ_ENFORCE_USER_ACCESS` (opcional): habilita vínculo por operadora para upload/importação (default: `true`).
+- `ACCESS_ADMIN_EMAIL_DOMAINS` (opcional): domínios com acesso completo (default: `uniodonto.coop.br,collos.com.br,contagbr.com.br`).
 - `USER_ACCESS_CACHE_TTL_MS` (opcional): cache do perfil de acesso em ms (default: `60000`).
 - `QUERY_CACHE_TTL_MS` (opcional): cache em ms para `/api/query` (default 60000).
 - `QUERY_CACHE_MAX_ENTRIES` (opcional): tamanho máximo do cache (default 250).
@@ -140,7 +142,7 @@ No Docker dev, o `scripts/dev-local.sh` detecta automaticamente um arquivo `*fir
 
 O login é feito via **Firebase Auth** (email/senha, link por email ou Google). O frontend envia o ID token e o backend valida com o Admin SDK. Sem token válido, as rotas `/api/*` retornam 401.
 
-Com `BQ_ENFORCE_USER_ACCESS=true`, o backend também valida o vínculo do usuário na tabela `BQ_USER_ACCESS_TABLE` e limita as consultas/importações ao `reg_ans` autorizado.
+Com `BQ_ENFORCE_USER_ACCESS=true`, o backend valida o vínculo do usuário na tabela `BQ_USER_ACCESS_TABLE` para upload/importação (`Atualize seus dados`). As consultas do dashboard permanecem liberadas para usuários autenticados.
 
 Para **login por link**, o app envia um link para o email informado. Ao abrir o link, o navegador conclui o login automaticamente (ou solicita o email usado, se não estiver salvo).
 
@@ -151,8 +153,9 @@ Com `BQ_ENFORCE_USER_ACCESS=true`, cada usuário precisa de vínculo na tabela d
 1. Crie a tabela (se ainda não existir) usando `db/create_user_access_table.sql` (substitua `{{USER_ACCESS_TABLE}}` pelo FQN real).
 2. Insira uma linha por `reg_ans` permitido para o usuário (mesmo `user_uid` ou `user_email` pode ter múltiplas linhas).
 3. Defina `can_upload=true` apenas para operadoras onde o usuário pode enviar arquivo.
+4. (Opcional) Crie a tabela de complemento cadastral com `db/create_user_profile_table.sql` (`{{USER_PROFILE_TABLE}}`).
 
-Sem vínculo ativo, o login funciona, mas o dashboard fica bloqueado até o cadastro do acesso.
+Sem vínculo ativo, o login e o dashboard continuam funcionando, mas o upload fica bloqueado e o sistema exibe popup obrigatório para completar cadastro (nome, sobrenome, telefone, e-mail, cargo/função, departamento e Uniodonto vinculada).
 
 ## Dados (BigQuery)
 

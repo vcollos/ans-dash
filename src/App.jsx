@@ -3,6 +3,7 @@ import { AlertCircle } from 'lucide-react'
 import { useDashboardController } from './hooks/useDashboardController'
 import AppHeader from './components/layout/AppHeader'
 import LoginScreen from './components/auth/LoginScreen'
+import ProfileCompletionDialog from './components/auth/ProfileCompletionDialog'
 import FiltersPanel from './components/filters/FiltersPanel'
 import KpiCards from './components/dashboard/KpiCards'
 import UniodontoKpiCards from './components/dashboard/UniodontoKpiCards'
@@ -21,7 +22,7 @@ import DataLoadingIndicator from './components/dashboard/DataLoadingIndicator'
 import { AuthProvider } from './contexts/AuthProvider'
 import { useAuth } from './contexts/useAuth'
 import { UNIODONTO_INDICATORS } from './lib/uniodontoMetrics'
-import { fetchAccessProfile } from './lib/accessProfile'
+import { fetchAccessProfile, fetchOperatorsCatalog, saveProfileCompletion } from './lib/accessProfile'
 
 function LoadingState() {
   return (
@@ -324,7 +325,14 @@ function AppContent() {
   const [accessProfile, setAccessProfile] = useState(null)
   const [isAccessProfileLoading, setIsAccessProfileLoading] = useState(false)
   const [accessProfileError, setAccessProfileError] = useState(null)
+  const [operatorCatalog, setOperatorCatalog] = useState([])
+  const [isOperatorCatalogLoading, setIsOperatorCatalogLoading] = useState(false)
+  const [profileCompletionError, setProfileCompletionError] = useState(null)
+  const [isSavingProfileCompletion, setIsSavingProfileCompletion] = useState(false)
   const allowSignUp = import.meta.env?.VITE_ALLOW_SIGNUP !== 'false'
+  const requiresProfileCompletion = accessProfile?.requiresProfileCompletion === true
+  const userUid = user?.uid ?? null
+  const userEmail = user?.email ?? null
 
   useEffect(() => {
     function handleExpired() {
@@ -343,10 +351,12 @@ function AppContent() {
   }, [isLoading])
 
   useEffect(() => {
-    if (!user) {
+    if (!userUid && !userEmail) {
       setAccessProfile(null)
       setAccessProfileError(null)
       setIsAccessProfileLoading(false)
+      setOperatorCatalog([])
+      setProfileCompletionError(null)
       return
     }
     let cancelled = false
@@ -368,7 +378,34 @@ function AppContent() {
     return () => {
       cancelled = true
     }
-  }, [user?.uid, user?.email])
+  }, [userUid, userEmail])
+
+  useEffect(() => {
+    if (!requiresProfileCompletion) {
+      setOperatorCatalog([])
+      setIsOperatorCatalogLoading(false)
+      setProfileCompletionError(null)
+      return
+    }
+    let cancelled = false
+    setIsOperatorCatalogLoading(true)
+    fetchOperatorsCatalog()
+      .then((operators) => {
+        if (cancelled) return
+        setOperatorCatalog(operators)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setProfileCompletionError(err?.message ?? 'Falha ao carregar operadoras.')
+      })
+      .finally(() => {
+        if (cancelled) return
+        setIsOperatorCatalogLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [requiresProfileCompletion])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -448,6 +485,20 @@ function AppContent() {
     }
   }
 
+  async function handleProfileCompletionSubmit(formData) {
+    setIsSavingProfileCompletion(true)
+    setProfileCompletionError(null)
+    try {
+      const nextProfile = await saveProfileCompletion(formData)
+      setAccessProfile(nextProfile)
+      setOperatorCatalog([])
+    } catch (err) {
+      setProfileCompletionError(err?.message ?? 'Falha ao salvar cadastro.')
+    } finally {
+      setIsSavingProfileCompletion(false)
+    }
+  }
+
   if (isLoading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-muted/20 px-4 py-12 text-sm text-muted-foreground">
@@ -487,7 +538,21 @@ function AppContent() {
     )
   }
 
-  return <DashboardApp onLogout={signOut} accessProfile={accessProfile} />
+  return (
+    <>
+      <DashboardApp onLogout={signOut} accessProfile={accessProfile} />
+      <ProfileCompletionDialog
+        open={requiresProfileCompletion}
+        defaultProfile={accessProfile?.registrationProfile ?? null}
+        defaultEmail={accessProfile?.email ?? ''}
+        operatorOptions={operatorCatalog}
+        isLoadingOperators={isOperatorCatalogLoading}
+        isSubmitting={isSavingProfileCompletion}
+        errorMessage={profileCompletionError}
+        onSubmit={handleProfileCompletionSubmit}
+      />
+    </>
+  )
 }
 
 export default function App() {
