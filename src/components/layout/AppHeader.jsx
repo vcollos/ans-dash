@@ -1,6 +1,7 @@
 import { formatInteger } from '../../lib/utils'
 import { Switch } from '../ui/switch'
 import { Label } from '../ui/label'
+import uniodontoLogo from '../../assets/uniodonto-logo.svg'
 
 function SummaryBadge({ label, value }) {
   return (
@@ -23,14 +24,14 @@ function AppHeader({
   const operadorasValue = formatInteger(summary?.operadoras)
   const beneficiariosValue = formatInteger(summary?.beneficiarios)
   const prestadoresValue = formatInteger(summary?.qt_prestadores)
-  const headerTitle = uniodontoMode ? 'Painel Uniodonto' : 'Painel Regulatório RN 518'
+  const headerTitle = 'Painel Financeiro Contábil'
   const headerSubtitle = uniodontoMode ? 'Indicadores exclusivos do sistema Uniodonto.' : 'DIOPS Financeiro'
 
   return (
     <header className="sticky top-2 z-30 flex flex-col gap-5 rounded-2xl border bg-card/95 p-5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/80 sm:p-6 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
       <div className="space-y-4 lg:max-w-[520px]">
         <div className="flex items-center gap-4">
-          <img src="https://collos.com.br/wp-content/uploads/2024/12/logo_contag.png" alt="Contag" className="h-14 w-auto" />
+          <img src={uniodontoLogo} alt="Uniodonto" className="h-14 w-auto" />
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold leading-tight">{headerTitle}</h1>
             <p className="text-sm font-medium text-muted-foreground">{headerSubtitle}</p>

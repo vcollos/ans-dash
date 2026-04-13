@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
   const serverPort = Number(env.SERVER_PORT || 4000)
   const vitePort = Number(env.VITE_PORT || 5173)
   const allowedHosts = String(
-    env.VITE_ALLOWED_HOSTS || 'localhost,127.0.0.1,0.0.0.0,contabil.uniodonto.coop.br,dash.collos.com.br,backdash.collos.com.br',
+    env.VITE_ALLOWED_HOSTS || 'localhost,127.0.0.1,0.0.0.0,contabil.uniodonto.coop.br,pfc.uniodonto.coop.br,backdash.collos.com.br',
   )
     .split(',')
     .map((value) => value.trim())

@@ -3,6 +3,7 @@ import { Button } from '../ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '../ui/card'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
+import uniodontoLogo from '../../assets/uniodonto-logo.svg'
 
 function LoginScreen({
   onLogin,
@@ -31,9 +32,9 @@ function LoginScreen({
       <Card className="w-full max-w-md border-border/80 shadow-lg">
         <CardHeader className="space-y-3">
           <div className="flex items-center gap-3">
-            <img src="https://collos.com.br/wp-content/uploads/2024/12/logo_contag.png" alt="Contag" className="h-12 w-auto" />
+            <img src={uniodontoLogo} alt="Uniodonto" className="h-12 w-auto" />
             <div className="space-y-1">
-              <CardTitle className="text-xl">Painel Regulatorio RN 518</CardTitle>
+              <CardTitle className="text-xl">Painel Financeiro Contábil</CardTitle>
               <CardDescription>DIOPS Financeiro</CardDescription>
             </div>
           </div>
