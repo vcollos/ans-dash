@@ -8,6 +8,7 @@ import {
   sendSignInLinkToEmail,
   isSignInWithEmailLink,
   signInWithEmailLink,
+  sendPasswordResetEmail,
 } from 'firebase/auth'
 import { auth, googleProvider } from '../lib/firebaseClient'
 import AuthContext from './auth-context'
@@ -90,6 +91,17 @@ export function AuthProvider({ children }) {
     setUser(null)
   }, [])
 
+  const sendPasswordReset = useCallback(async (email) => {
+    setAuthError(null)
+    const fallback = auth.currentUser?.email ?? ''
+    const target = String(email ?? fallback).trim()
+    if (!target) {
+      throw new Error('Não foi possível identificar o e-mail da conta.')
+    }
+    await sendPasswordResetEmail(auth, target)
+    return target
+  }, [])
+
   const value = useMemo(
     () => ({
       user,
@@ -102,6 +114,7 @@ export function AuthProvider({ children }) {
       completeEmailLinkSignIn,
       isEmailLink,
       signOut,
+      sendPasswordReset,
     }),
     [
       user,
@@ -114,6 +127,7 @@ export function AuthProvider({ children }) {
       completeEmailLinkSignIn,
       isEmailLink,
       signOut,
+      sendPasswordReset,
     ],
   )
 

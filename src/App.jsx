@@ -63,7 +63,7 @@ function ErrorState({ error, onRetry }) {
   )
 }
 
-function DashboardApp({ onLogout, accessProfile }) {
+function DashboardApp({ onLogout, accessProfile, onOpenProfile }) {
   const [filtersSidebarOpen, setFiltersSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('indicadores')
   const [isDataImportOpen, setIsDataImportOpen] = useState(false)
@@ -149,6 +149,7 @@ function DashboardApp({ onLogout, accessProfile }) {
           summary={kpis}
           onOpenFilters={() => setFiltersSidebarOpen(true)}
           onLogout={onLogout}
+          onOpenProfile={onOpenProfile}
           uniodontoMode={uniodontoMode}
           onUniodontoModeChange={setUniodontoMode}
           onOpenDataImport={() => setIsDataImportOpen(true)}
@@ -318,6 +319,7 @@ function AppContent() {
     completeEmailLinkSignIn,
     isEmailLink,
     signOut,
+    sendPasswordReset,
   } = useAuth()
   const [authMessage, setAuthMessage] = useState(null)
   const [isAuthLoading, setIsAuthLoading] = useState(false)
@@ -329,6 +331,9 @@ function AppContent() {
   const [isOperatorCatalogLoading, setIsOperatorCatalogLoading] = useState(false)
   const [profileCompletionError, setProfileCompletionError] = useState(null)
   const [isSavingProfileCompletion, setIsSavingProfileCompletion] = useState(false)
+  const [isProfileSettingsOpen, setIsProfileSettingsOpen] = useState(false)
+  const [isSendingPasswordReset, setIsSendingPasswordReset] = useState(false)
+  const [passwordResetMessage, setPasswordResetMessage] = useState(null)
   const allowSignUp = import.meta.env?.VITE_ALLOW_SIGNUP !== 'false'
   const requiresProfileCompletion = accessProfile?.requiresProfileCompletion === true
   const userUid = user?.uid ?? null
@@ -357,6 +362,8 @@ function AppContent() {
       setIsAccessProfileLoading(false)
       setOperatorCatalog([])
       setProfileCompletionError(null)
+      setIsProfileSettingsOpen(false)
+      setPasswordResetMessage(null)
       return
     }
     let cancelled = false
@@ -381,12 +388,8 @@ function AppContent() {
   }, [userUid, userEmail])
 
   useEffect(() => {
-    if (!requiresProfileCompletion) {
-      setOperatorCatalog([])
-      setIsOperatorCatalogLoading(false)
-      setProfileCompletionError(null)
-      return
-    }
+    const shouldLoadOperators = requiresProfileCompletion || isProfileSettingsOpen
+    if (!shouldLoadOperators) return
     let cancelled = false
     setIsOperatorCatalogLoading(true)
     fetchOperatorsCatalog()
@@ -405,7 +408,7 @@ function AppContent() {
     return () => {
       cancelled = true
     }
-  }, [requiresProfileCompletion])
+  }, [requiresProfileCompletion, isProfileSettingsOpen])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -488,14 +491,31 @@ function AppContent() {
   async function handleProfileCompletionSubmit(formData) {
     setIsSavingProfileCompletion(true)
     setProfileCompletionError(null)
+    setPasswordResetMessage(null)
     try {
       const nextProfile = await saveProfileCompletion(formData)
       setAccessProfile(nextProfile)
-      setOperatorCatalog([])
+      if (isProfileSettingsOpen) {
+        setIsProfileSettingsOpen(false)
+      }
     } catch (err) {
       setProfileCompletionError(err?.message ?? 'Falha ao salvar cadastro.')
     } finally {
       setIsSavingProfileCompletion(false)
+    }
+  }
+
+  async function handlePasswordReset() {
+    setIsSendingPasswordReset(true)
+    setProfileCompletionError(null)
+    setPasswordResetMessage(null)
+    try {
+      const targetEmail = await sendPasswordReset(accessProfile?.email ?? userEmail)
+      setPasswordResetMessage(`E-mail de redefinição enviado para ${targetEmail}.`)
+    } catch (err) {
+      setProfileCompletionError(err?.message ?? 'Falha ao enviar e-mail de redefinição de senha.')
+    } finally {
+      setIsSendingPasswordReset(false)
     }
   }
 
@@ -540,15 +560,42 @@ function AppContent() {
 
   return (
     <>
-      <DashboardApp onLogout={signOut} accessProfile={accessProfile} />
+      <DashboardApp onLogout={signOut} accessProfile={accessProfile} onOpenProfile={() => setIsProfileSettingsOpen(true)} />
       <ProfileCompletionDialog
-        open={requiresProfileCompletion}
+        open={isProfileSettingsOpen}
+        onOpenChange={setIsProfileSettingsOpen}
         defaultProfile={accessProfile?.registrationProfile ?? null}
         defaultEmail={accessProfile?.email ?? ''}
         operatorOptions={operatorCatalog}
         isLoadingOperators={isOperatorCatalogLoading}
         isSubmitting={isSavingProfileCompletion}
+        isSendingPasswordReset={isSendingPasswordReset}
+        passwordResetMessage={passwordResetMessage}
         errorMessage={profileCompletionError}
+        title="Perfil"
+        description="Atualize seus dados cadastrais e senha."
+        submitLabel="Salvar alterações"
+        lockOpen={false}
+        regAnsRequired={!accessProfile?.isAdmin}
+        onSendPasswordReset={handlePasswordReset}
+        onSubmit={handleProfileCompletionSubmit}
+      />
+      <ProfileCompletionDialog
+        open={requiresProfileCompletion}
+        onOpenChange={() => {}}
+        defaultProfile={accessProfile?.registrationProfile ?? null}
+        defaultEmail={accessProfile?.email ?? ''}
+        operatorOptions={operatorCatalog}
+        isLoadingOperators={isOperatorCatalogLoading}
+        isSubmitting={isSavingProfileCompletion}
+        isSendingPasswordReset={false}
+        passwordResetMessage={null}
+        errorMessage={profileCompletionError}
+        title="Complete seu cadastro"
+        description='Para enviar dados no menu "Atualize seus dados", informe seu vínculo com a Uniodonto e seus dados de contato.'
+        submitLabel="Salvar cadastro"
+        lockOpen={true}
+        regAnsRequired={!accessProfile?.isAdmin}
         onSubmit={handleProfileCompletionSubmit}
       />
     </>

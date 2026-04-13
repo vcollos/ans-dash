@@ -23,12 +23,21 @@ function buildInitialState(defaultProfile = {}, defaultEmail = '') {
 
 export default function ProfileCompletionDialog({
   open,
+  onOpenChange,
   defaultProfile = null,
   defaultEmail = '',
   operatorOptions = [],
   isLoadingOperators = false,
   isSubmitting = false,
   errorMessage = null,
+  title = 'Complete seu cadastro',
+  description = 'Para enviar dados no menu "Atualize seus dados", informe seu vínculo com a Uniodonto e seus dados de contato.',
+  submitLabel = 'Salvar cadastro',
+  lockOpen = false,
+  regAnsRequired = true,
+  onSendPasswordReset,
+  isSendingPasswordReset = false,
+  passwordResetMessage = null,
   onSubmit,
 }) {
   const [form, setForm] = useState(() => buildInitialState(defaultProfile, defaultEmail))
@@ -49,6 +58,7 @@ export default function ProfileCompletionDialog({
 
   const canSubmit =
     !isSubmitting &&
+    !isSendingPasswordReset &&
     !isLoadingOperators &&
     toText(form.firstName) &&
     toText(form.lastName) &&
@@ -56,7 +66,7 @@ export default function ProfileCompletionDialog({
     toText(form.email) &&
     toText(form.jobTitle) &&
     toText(form.department) &&
-    toText(form.regAns)
+    (regAnsRequired ? toText(form.regAns) : true)
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }))
@@ -77,17 +87,19 @@ export default function ProfileCompletionDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={() => {}}>
+    <Dialog open={open} onOpenChange={lockOpen ? () => {} : onOpenChange}>
       <DialogContent
-        className="max-w-xl [&>button]:hidden"
-        onEscapeKeyDown={(event) => event.preventDefault()}
-        onInteractOutside={(event) => event.preventDefault()}
+        className={`max-w-xl ${lockOpen ? '[&>button]:hidden' : ''}`}
+        onEscapeKeyDown={(event) => {
+          if (lockOpen) event.preventDefault()
+        }}
+        onInteractOutside={(event) => {
+          if (lockOpen) event.preventDefault()
+        }}
       >
         <DialogHeader>
-          <DialogTitle>Complete seu cadastro</DialogTitle>
-          <DialogDescription>
-            Para enviar dados no menu "Atualize seus dados", informe seu vínculo com a Uniodonto e seus dados de contato.
-          </DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -164,10 +176,16 @@ export default function ProfileCompletionDialog({
               value={form.regAns}
               onChange={(event) => updateField('regAns', event.target.value)}
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              disabled={isSubmitting || isLoadingOperators}
-              required
+              disabled={isSubmitting || isLoadingOperators || isSendingPasswordReset}
+              required={regAnsRequired}
             >
-              <option value="">{isLoadingOperators ? 'Carregando operadoras...' : 'Selecione a Uniodonto'}</option>
+              <option value="">
+                {isLoadingOperators
+                  ? 'Carregando operadoras...'
+                  : regAnsRequired
+                    ? 'Selecione a Uniodonto'
+                    : 'Selecione a Uniodonto (opcional)'}
+              </option>
               {normalizedOptions.map((item) => (
                 <option key={item.regAns} value={item.regAns}>
                   {item.operatorName ?? item.regAns} ({item.regAns})
@@ -175,8 +193,21 @@ export default function ProfileCompletionDialog({
               ))}
             </select>
           </div>
+          {passwordResetMessage ? <p className="text-sm text-emerald-600">{passwordResetMessage}</p> : null}
           {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
           <DialogFooter>
+            {onSendPasswordReset ? (
+              <Button type="button" variant="outline" onClick={onSendPasswordReset} disabled={isSubmitting || isSendingPasswordReset}>
+                {isSendingPasswordReset ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Enviando...
+                  </>
+                ) : (
+                  'Redefinir senha'
+                )}
+              </Button>
+            ) : null}
             <Button type="submit" disabled={!canSubmit}>
               {isSubmitting ? (
                 <>
@@ -184,7 +215,7 @@ export default function ProfileCompletionDialog({
                   Salvando...
                 </>
               ) : (
-                'Salvar cadastro'
+                submitLabel
               )}
             </Button>
           </DialogFooter>

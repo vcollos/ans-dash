@@ -16,6 +16,7 @@ function AppHeader({
   summary,
   onOpenFilters,
   onLogout,
+  onOpenProfile,
   uniodontoMode = false,
   onUniodontoModeChange,
   onOpenDataImport,
@@ -86,6 +87,15 @@ function AppHeader({
               className="rounded-md border border-border bg-background px-3 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:bg-muted"
             >
               Sair
+            </button>
+          ) : null}
+          {onOpenProfile ? (
+            <button
+              type="button"
+              onClick={onOpenProfile}
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:bg-muted"
+            >
+              Perfil
             </button>
           ) : null}
         </div>
