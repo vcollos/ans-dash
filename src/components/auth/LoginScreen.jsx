@@ -10,6 +10,7 @@ function LoginScreen({
   onSignUp,
   onGoogleLogin,
   onSendEmailLink,
+  onForgotPassword,
   onCompleteEmailLink,
   isEmailLinkFlow = false,
   isLoading = false,
@@ -67,6 +68,19 @@ function LoginScreen({
                 required
               />
             </div>
+            {onForgotPassword ? (
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-auto p-0 text-xs"
+                  onClick={() => onForgotPassword({ email: email.trim() })}
+                  disabled={!canSendLink}
+                >
+                  Esqueci a senha
+                </Button>
+              </div>
+            ) : null}
             {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
             <Button type="submit" className="w-full" disabled={!canSubmit}>
               {isLoading ? 'Entrando...' : 'Entrar'}

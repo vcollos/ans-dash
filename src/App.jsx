@@ -488,6 +488,19 @@ function AppContent() {
     }
   }
 
+  async function handleForgotPassword({ email }) {
+    setIsAuthLoading(true)
+    setAuthMessage(null)
+    try {
+      const targetEmail = await sendPasswordReset(email)
+      setAuthMessage(`E-mail de redefinição enviado para ${targetEmail}.`)
+    } catch (err) {
+      setAuthMessage(err?.message ?? 'Falha ao enviar e-mail de redefinição de senha.')
+    } finally {
+      setIsAuthLoading(false)
+    }
+  }
+
   async function handleProfileCompletionSubmit(formData) {
     setIsSavingProfileCompletion(true)
     setProfileCompletionError(null)
@@ -534,6 +547,7 @@ function AppContent() {
         onSignUp={allowSignUp ? handleSignUp : null}
         onGoogleLogin={handleGoogleLogin}
         onSendEmailLink={handleSendEmailLink}
+        onForgotPassword={handleForgotPassword}
         onCompleteEmailLink={handleCompleteEmailLink}
         isEmailLinkFlow={isEmailLinkFlow}
         isLoading={isAuthLoading}
