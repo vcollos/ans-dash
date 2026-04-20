@@ -136,6 +136,12 @@ const operatorCatalogCache = {
 }
 
 const RAW_ALLOWED_VIEWS = process.env.BQ_ALLOWED_VIEWS
+const LEGACY_BQ_COMPAT_REWRITES = new Map([
+  ['bigdata-467917.dash_ans_uploads.indicadores_curados_snapshot_consolidado', 'bigdata-467917.dash_ans.indicadores_curados_snapshot'],
+  ['bigdata-467917.dash_ans_uploads.indicadores_mart_ans_consolidado', 'bigdata-467917.dash_ans.indicadores_mart_ans'],
+  ['bigdata-467917.dash_ans_uploads.indicadores_mart_uniodonto_consolidado', 'bigdata-467917.dash_ans.indicadores_mart_uniodonto'],
+  ['bigdata-467917.dash_ans_uploads.vw_demonstracoes_contabeis_consolidada', 'bigdata-467917.dash_ans.demonstracoes_contabeis'],
+])
 const ALLOWED_TABLES = (() => {
   const allowed = new Set()
   const add = (value) => {
@@ -177,6 +183,14 @@ const ALLOWED_TABLES = (() => {
   }
   return allowed
 })()
+
+function rewriteLegacyBigQueryRefs(sql) {
+  let rewritten = sql
+  for (const [from, to] of LEGACY_BQ_COMPAT_REWRITES.entries()) {
+    rewritten = rewritten.replaceAll(`\`${from}\``, `\`${to}\``).replaceAll(from, to)
+  }
+  return rewritten
+}
 
 const SERVER_BOOT_ID = process.env.K_REVISION ?? crypto.randomBytes(8).toString('hex')
 
@@ -2348,8 +2362,9 @@ app.post('/api/query', async (req, res) => {
   if (sanitized.includes(';')) {
     return res.status(400).json({ error: 'Somente uma instrução por requisição é permitida.' })
   }
-  const cteNames = extractCteNames(sanitized)
-  const tableRefs = extractTableRefs(sanitized, cteNames)
+  const rewrittenSql = rewriteLegacyBigQueryRefs(sanitized)
+  const cteNames = extractCteNames(rewrittenSql)
+  const tableRefs = extractTableRefs(rewrittenSql, cteNames)
   const disallowed = [...tableRefs].filter((ref) => !ALLOWED_TABLES.has(ref))
   if (disallowed.length) {
     return res.status(403).json({
@@ -2357,9 +2372,9 @@ app.post('/api/query', async (req, res) => {
       tables: disallowed,
     })
   }
-  let scopedSql = sanitized
+  let scopedSql = rewrittenSql
   try {
-    scopedSql = applyUserAccessScopeToSql(sanitized, req.accessContext)
+    scopedSql = applyUserAccessScopeToSql(rewrittenSql, req.accessContext)
   } catch (err) {
     if (err?.code === 'NO_OPERATOR_ACCESS' || err?.code === 'NO_SCOPE_TABLE') {
       return res.status(403).json({ error: err.message, code: err.code })
