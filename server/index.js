@@ -14,7 +14,7 @@ const PORT = process.env.SERVER_PORT ?? process.env.PORT ?? 4000
 const BQ_PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
 const BQ_DATASET = process.env.BQ_DATASET ?? 'dash_ans'
 const BQ_MART_DATASET = process.env.BQ_MART_DATASET ?? 'dash_ans'
-const BQ_LOCATION = process.env.BQ_LOCATION ?? 'US'
+const BQ_LOCATION = process.env.BQ_LOCATION ?? 'southamerica-east1'
 const BQ_EXPORT_VIEW =
   process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? `${BQ_MART_DATASET}.indicadores_curados_snapshot`
 const BQ_MART_ANS_TABLE = process.env.BQ_MART_ANS_TABLE ?? process.env.BQ_DATASET_VIEW_ANS ?? ''

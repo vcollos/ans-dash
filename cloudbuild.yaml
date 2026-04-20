@@ -87,12 +87,12 @@ options:
 
 substitutions:
   _SERVICE: ans-dashboard
-  _REGION: us-central1
+  _REGION: southamerica-east1
   _RUN_SERVICE_ACCOUNT: ans-dashboard-run@bigdata-467917.iam.gserviceaccount.com
   _BQ_PROJECT_ID: bigdata-467917
-  _BQ_DATASET: datalake_ans
+  _BQ_DATASET: dash_ans
   _BQ_DATASET_VIEW: dash_ans.indicadores_curados_snapshot
-  _BQ_LOCATION: US
+  _BQ_LOCATION: southamerica-east1
   _BQ_MART_DATASET: dash_ans
   _BQ_MART_ANS_TABLE: indicadores_mart_ans
   _BQ_MART_UNIODONTO_TABLE: indicadores_mart_uniodonto

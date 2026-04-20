@@ -130,7 +130,7 @@ Implicação prática: **um clone do último commit remoto não representa exata
 - A topologia de datasets está parcialmente divergente entre:
   - exemplos locais (`dash_ans`);
   - defaults do backend (`dash_ans`);
-  - `cloudbuild.yaml` (`BQ_DATASET=datalake_ans`, derivados em `dash_ans`).
+  - `cloudbuild.yaml` (`BQ_DATASET=dash_ans`, com compatibilidade via views no `dash_ans`).
 
 #### ❌ Quebradas / não implementadas
 
@@ -667,7 +667,7 @@ Esse serviço:
 | `BQ_PROJECT_ID` | projeto BigQuery | `bigdata-467917` |
 | `BQ_DATASET` | dataset padrão do BigQuery | `dash_ans` |
 | `BQ_MART_DATASET` | dataset derivado | `dash_ans` |
-| `BQ_LOCATION` | localização do BigQuery | `US` |
+| `BQ_LOCATION` | localização do BigQuery | `southamerica-east1` |
 | `BQ_DATASET_VIEW` | view/tabela de export/runtime no backend | `${BQ_MART_DATASET}.indicadores_curados_snapshot` |
 | `BQ_EXPORT_VIEW` | view/tabela usada pelo CSV | `${BQ_MART_DATASET}.indicadores_curados_snapshot` |
 | `BQ_DATASET_VIEW_ANS` | alias legado do backend para mart ANS | vazio |
@@ -936,7 +936,7 @@ Existe apenas:
 - Dataset local configurado em `.env.local.server`: `dash_ans`.
 - Projeto local configurado em `.env.local.server`: `bigdata-467917`.
 - Em `cloudbuild.yaml`, o deploy de produção usa:
-  - `BQ_DATASET=datalake_ans`
+  - `BQ_DATASET=dash_ans`
   - `BQ_MART_DATASET=dash_ans`
   - `BQ_DATASET_VIEW=dash_ans.indicadores_curados_snapshot`
 

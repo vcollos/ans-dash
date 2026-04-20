@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename)
 const PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
 const DATASET_ID = process.env.BQ_DATASET ?? 'dash_ans'
 const MART_DATASET_ID = process.env.BQ_MART_DATASET ?? 'dash_ans'
-const LOCATION = process.env.BQ_LOCATION ?? 'US'
+const LOCATION = process.env.BQ_LOCATION ?? 'southamerica-east1'
 const BQ_EXPORT_VIEW =
   process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? `${MART_DATASET_ID}.indicadores_curados_snapshot`
 const BQ_PRESTADORES_TABLE =

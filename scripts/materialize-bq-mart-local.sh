@@ -19,7 +19,7 @@ set -a
 : "${BQ_SOURCE_TABLE:=${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_EXPORT_VIEW}}"
 : "${BQ_MART_ANS_TABLE:=indicadores_mart_ans}"
 : "${BQ_MART_UNIODONTO_TABLE:=indicadores_mart_uniodonto}"
-: "${BQ_LOCATION:=US}"
+: "${BQ_LOCATION:=southamerica-east1}"
 : "${GOOGLE_APPLICATION_CREDENTIALS:=${ROOT_DIR}/.cert/bigdata-467917-16c1318c138a.json}"
 set +a
 

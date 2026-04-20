@@ -90,7 +90,7 @@ Arquivos de referência:
 - `BQ_DATASET` (ex.: `dash_ans`) dataset padrão das tabelas/views usadas pelo projeto.
 - `BQ_MART_DATASET` (ex.: `dash_ans`) dataset dos artefatos derivados do dashboard.
 - `BQ_DATASET_VIEW` ou `BQ_EXPORT_VIEW` (ex.: `dash_ans.indicadores_curados_snapshot`)
-- `BQ_LOCATION` (ex.: `US`)
+- `BQ_LOCATION` (ex.: `southamerica-east1`)
 - `BQ_ALLOWED_VIEWS` (opcional): lista de views/tabelas permitidas no `/api/query` (ex.: `bigdata-467917.dash_ans.indicadores_curados_snapshot,bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem`).
 - `BQ_PRESTADORES_TABLE` (opcional): tabela de prestadores usada na complementação de dados.
 - `BQ_AUX_DATASET` (opcional): dataset da tabela auxiliar de importação (default: `dash_ans_uploads`).

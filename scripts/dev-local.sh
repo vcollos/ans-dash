@@ -33,7 +33,7 @@ set -a
 : "${BQ_MART_UNIODONTO_TABLE:=indicadores_mart_uniodonto}"
 : "${BQ_MART_DATASET:=dash_ans}"
 : "${BQ_AUX_DATASET:=dash_ans_uploads}"
-: "${BQ_LOCATION:=US}"
+: "${BQ_LOCATION:=southamerica-east1}"
 : "${FIREBASE_PROJECT_ID:=${BQ_PROJECT_ID}}"
 : "${FIREBASE_SERVICE_ACCOUNT_PATH:=}"
 : "${GOOGLE_APPLICATION_CREDENTIALS:=${ROOT_DIR}/.cert/bigdata-467917-16c1318c138a.json}"

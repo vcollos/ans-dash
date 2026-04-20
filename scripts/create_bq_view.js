@@ -8,7 +8,7 @@ const FULL_SOURCE_TABLE = process.env.BQ_FULL_SOURCE_TABLE ?? 'demonstracoes_con
 const RAW_TABLE = process.env.BQ_RAW_TABLE ?? 'demonstracoes_contabeis_raw'
 const SOURCE_TABLE = process.env.BQ_SOURCE_TABLE ?? FULL_VIEW
 const TARGET_VIEW = process.env.BQ_VIEW ?? 'indicadores_curados'
-const LOCATION = process.env.BQ_LOCATION ?? 'US'
+const LOCATION = process.env.BQ_LOCATION ?? 'southamerica-east1'
 const SHOULD_CREATE_FULL_VIEW = (process.env.BQ_CREATE_FULL_VIEW ?? 'false').toLowerCase() === 'true'
 
 function parseTableRef(name, defaultDataset = DERIVED_DATASET_ID) {

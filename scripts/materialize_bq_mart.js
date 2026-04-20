@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename)
 const PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
 const DATASET_ID = process.env.BQ_DATASET ?? 'dash_ans'
 const MART_DATASET_ID = process.env.BQ_MART_DATASET ?? 'dash_ans'
-const LOCATION = process.env.BQ_LOCATION ?? 'US'
+const LOCATION = process.env.BQ_LOCATION ?? 'southamerica-east1'
 const SOURCE_TABLE =
   process.env.BQ_SOURCE_TABLE ?? process.env.BQ_DATASET_VIEW ?? `${MART_DATASET_ID}.indicadores_curados_snapshot`
 const ANS_TABLE = process.env.BQ_MART_ANS_TABLE ?? 'indicadores_mart_ans'
@@ -31,6 +31,40 @@ function formatTableRef(name, datasetId = DATASET_ID) {
   return `\`${PROJECT_ID}.${datasetId}.${name}\``
 }
 
+function normalizeTableRef(name, datasetId = DATASET_ID) {
+  const normalized = String(name ?? '')
+    .trim()
+    .replace(/^`|`$/g, '')
+    .replace(/^"|"$/g, '')
+  if (!normalized) {
+    throw new Error('Referencia de tabela/view vazia.')
+  }
+  const parts = normalized.split('.').filter(Boolean)
+  if (parts.length === 1) return { projectId: PROJECT_ID, datasetId, objectId: parts[0] }
+  if (parts.length === 2) return { projectId: PROJECT_ID, datasetId: parts[0], objectId: parts[1] }
+  return { projectId: parts[0], datasetId: parts[1], objectId: parts[2] }
+}
+
+async function dropObjectIfExists(bigquery, name, datasetId = DATASET_ID) {
+  const ref = normalizeTableRef(name, datasetId)
+  const [rows] = await bigquery.query({
+    query: `
+      SELECT table_type
+      FROM \`${ref.projectId}.${ref.datasetId}.INFORMATION_SCHEMA.TABLES\`
+      WHERE table_name = @tableName
+      LIMIT 1
+    `,
+    location: LOCATION,
+    params: { tableName: ref.objectId },
+  })
+  const tableType = rows?.[0]?.table_type ?? null
+  if (tableType === 'BASE TABLE') {
+    await bigquery.query({ query: `DROP TABLE ${formatTableRef(name, datasetId)}`, location: LOCATION })
+  } else if (tableType === 'VIEW') {
+    await bigquery.query({ query: `DROP VIEW ${formatTableRef(name, datasetId)}`, location: LOCATION })
+  }
+}
+
 function applyTemplate(template) {
   const clusterValue = CLUSTER_FIELDS.length ? CLUSTER_FIELDS.join(', ') : ''
   if (!clusterValue) {
@@ -48,9 +82,11 @@ async function materializeMart() {
   const queryTemplate = fs.readFileSync(QUERY_PATH, 'utf8').trim().replace(/;\s*$/, '')
   const query = applyTemplate(queryTemplate)
   const bigquery = new BigQuery({ projectId: PROJECT_ID })
-  console.log('[bq-mart] Materializando tabelas de indicadores (ANS + Uniodonto)...')
+  await dropObjectIfExists(bigquery, ANS_TABLE, MART_DATASET_ID)
+  await dropObjectIfExists(bigquery, UNIODONTO_TABLE, MART_DATASET_ID)
+  console.log('[bq-mart] Garantindo views de indicadores (ANS + Uniodonto)...')
   await bigquery.query({ query, location: LOCATION, defaultDataset: { projectId: PROJECT_ID, datasetId: DATASET_ID } })
-  console.log('[bq-mart] Tabelas materializadas com sucesso.')
+  console.log('[bq-mart] Views criadas/atualizadas com sucesso.')
 }
 
 materializeMart().catch((err) => {

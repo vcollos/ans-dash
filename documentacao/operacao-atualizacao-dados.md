@@ -51,7 +51,7 @@ BQ_MART_ANS_TABLE=indicadores_mart_ans
 BQ_MART_UNIODONTO_TABLE=indicadores_mart_uniodonto
 BQ_MART_DATASET=dash_ans
 BQ_ALLOWED_VIEWS=bigdata-467917.dash_ans.indicadores_curados_snapshot,bigdata-467917.dash_ans.indicadores_mart_ans,bigdata-467917.dash_ans.indicadores_mart_uniodonto,bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem
-BQ_LOCATION=US
+BQ_LOCATION=southamerica-east1
 GOOGLE_APPLICATION_CREDENTIALS=/Users/vitor/Documents/Dev/ans-dash/.cert/bigdata-467917-16c1318c138a.json
 ```
 
@@ -73,7 +73,7 @@ Passos:
 
 Exemplo (via console ou `bq`):
 ```
-bq --location=US mk --dataset bigdata-467917:dash_ans
+bq --location=southamerica-east1 mk --dataset bigdata-467917:dash_ans
 ```
 
 

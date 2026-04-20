@@ -5,7 +5,9 @@ const SOURCE_DATASET_ID = process.env.BQ_SOURCE_DATASET ?? 'datalake_ans'
 const SOURCE_VIEW = process.env.BQ_SOURCE_NORM_VIEW ?? 'vw_demonstracoes_contabeis_norm'
 const TARGET_DATASET_ID = process.env.BQ_DATASET ?? 'dash_ans'
 const TARGET_TABLE = process.env.BQ_BASE_DEMONSTRACOES_TABLE ?? `${TARGET_DATASET_ID}.demonstracoes_contabeis`
-const LOCATION = process.env.BQ_LOCATION ?? 'US'
+const TARGET_RAW_VIEW = process.env.BQ_BASE_RAW_VIEW ?? `${TARGET_DATASET_ID}.demonstracoes_contabeis_raw`
+const SOURCE_RAW_TABLE = process.env.BQ_SOURCE_RAW_TABLE ?? `${SOURCE_DATASET_ID}.demonstracoes_contabeis_raw`
+const LOCATION = process.env.BQ_LOCATION ?? 'southamerica-east1'
 
 function qualify(name, defaultDataset = TARGET_DATASET_ID) {
   if (!name) {
@@ -14,6 +16,40 @@ function qualify(name, defaultDataset = TARGET_DATASET_ID) {
   if (name.includes('`')) return name
   if (name.includes('.')) return `\`${name}\``
   return `\`${PROJECT_ID}.${defaultDataset}.${name}\``
+}
+
+function normalizeRef(name, defaultDataset = TARGET_DATASET_ID) {
+  const normalized = String(name ?? '')
+    .trim()
+    .replace(/^`|`$/g, '')
+    .replace(/^"|"$/g, '')
+  if (!normalized) {
+    throw new Error('Nome de tabela/view nao informado.')
+  }
+  const parts = normalized.split('.').filter(Boolean)
+  if (parts.length === 1) return { projectId: PROJECT_ID, datasetId: defaultDataset, objectId: parts[0] }
+  if (parts.length === 2) return { projectId: PROJECT_ID, datasetId: parts[0], objectId: parts[1] }
+  return { projectId: parts[0], datasetId: parts[1], objectId: parts[2] }
+}
+
+async function dropObjectIfExists(bigquery, name, defaultDataset = TARGET_DATASET_ID) {
+  const ref = normalizeRef(name, defaultDataset)
+  const [rows] = await bigquery.query({
+    query: `
+      SELECT table_type
+      FROM \`${ref.projectId}.${ref.datasetId}.INFORMATION_SCHEMA.TABLES\`
+      WHERE table_name = @tableName
+      LIMIT 1
+    `,
+    location: LOCATION,
+    params: { tableName: ref.objectId },
+  })
+  const tableType = rows?.[0]?.table_type ?? null
+  if (tableType === 'BASE TABLE') {
+    await bigquery.query({ query: `DROP TABLE ${qualify(name, defaultDataset)}`, location: LOCATION })
+  } else if (tableType === 'VIEW') {
+    await bigquery.query({ query: `DROP VIEW ${qualify(name, defaultDataset)}`, location: LOCATION })
+  }
 }
 
 const RN518_CATEGORY_BY_GROUP = {
@@ -47,15 +83,16 @@ function buildRn518CategoryCase() {
   `.trim()
 }
 
-async function refreshBaseTable() {
+async function refreshBaseView() {
   const bigquery = new BigQuery({ projectId: PROJECT_ID })
   const source = qualify(SOURCE_VIEW, SOURCE_DATASET_ID)
   const target = qualify(TARGET_TABLE, TARGET_DATASET_ID)
+  const sourceRaw = qualify(SOURCE_RAW_TABLE, SOURCE_DATASET_ID)
+  const targetRaw = qualify(TARGET_RAW_VIEW, TARGET_DATASET_ID)
   const rn518CategoryCase = buildRn518CategoryCase()
 
   const query = `
-CREATE OR REPLACE TABLE ${target}
-AS
+CREATE VIEW ${target} AS
 WITH source AS (
   SELECT
     CAST(reg_ans AS STRING) AS reg_ans,
@@ -113,13 +150,17 @@ SELECT
   CAST(NULL AS STRING) AS Singular
 FROM classified
 `
+  const rawQuery = `CREATE VIEW ${targetRaw} AS SELECT * FROM ${sourceRaw}`
 
-  console.log(`[bq-base] Atualizando ${TARGET_TABLE} a partir de ${SOURCE_DATASET_ID}.${SOURCE_VIEW}...`)
+  await dropObjectIfExists(bigquery, TARGET_TABLE, TARGET_DATASET_ID)
+  await dropObjectIfExists(bigquery, TARGET_RAW_VIEW, TARGET_DATASET_ID)
+  console.log(`[bq-base] Garantindo views ${TARGET_TABLE} e ${TARGET_RAW_VIEW} a partir de ${SOURCE_DATASET_ID}...`)
   await bigquery.query({ query, location: LOCATION })
-  console.log('[bq-base] Base de demonstracoes atualizada com sucesso.')
+  await bigquery.query({ query: rawQuery, location: LOCATION })
+  console.log('[bq-base] Views de compatibilidade criadas/atualizadas com sucesso.')
 }
 
-refreshBaseTable().catch((error) => {
-  console.error('[bq-base] Falha ao atualizar base de demonstracoes', error)
+refreshBaseView().catch((error) => {
+  console.error('[bq-base] Falha ao atualizar views de demonstracoes', error)
   process.exit(1)
 })

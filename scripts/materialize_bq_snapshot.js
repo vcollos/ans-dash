@@ -5,13 +5,7 @@ const DATASET_ID = process.env.BQ_DATASET ?? 'dash_ans'
 const MART_DATASET_ID = process.env.BQ_MART_DATASET ?? 'dash_ans'
 const SOURCE_VIEW = process.env.BQ_SOURCE_VIEW ?? `${MART_DATASET_ID}.indicadores_curados`
 const TARGET_TABLE = process.env.BQ_SNAPSHOT_TABLE ?? `${MART_DATASET_ID}.indicadores_curados_snapshot`
-const LOCATION = process.env.BQ_LOCATION ?? 'US'
-const PARTITION_EXPR = process.env.BQ_PARTITION_EXPR ?? process.env.BQ_PARTITION_FIELD ?? 'periodo_raw'
-const CLUSTER_FIELDS = (process.env.BQ_CLUSTER_FIELDS ?? 'periodo_id,reg_ans,modalidade,uniodonto')
-  .split(',')
-  .map((field) => field.trim())
-  .filter(Boolean)
-  .slice(0, 4)
+const LOCATION = process.env.BQ_LOCATION ?? 'southamerica-east1'
 
 function qualify(name, datasetId = DATASET_ID) {
   if (!name) {
@@ -26,17 +20,36 @@ async function materializeSnapshot() {
   const bigquery = new BigQuery({ projectId: PROJECT_ID })
   const source = qualify(SOURCE_VIEW, MART_DATASET_ID)
   const target = qualify(TARGET_TABLE, MART_DATASET_ID)
-  const clusterClause = CLUSTER_FIELDS.length ? `\nCLUSTER BY ${CLUSTER_FIELDS.join(', ')}` : ''
+  const normalizedTarget = String(TARGET_TABLE).trim().replace(/^`|`$/g, '')
+  const targetParts = normalizedTarget.includes('.')
+    ? normalizedTarget.split('.').filter(Boolean)
+    : [PROJECT_ID, MART_DATASET_ID, normalizedTarget]
+  const [projectId, datasetId, objectId] =
+    targetParts.length === 3 ? targetParts : [PROJECT_ID, targetParts[0], targetParts[1]]
+  const [existingRows] = await bigquery.query({
+    query: `
+      SELECT table_type
+      FROM \`${projectId}.${datasetId}.INFORMATION_SCHEMA.TABLES\`
+      WHERE table_name = @tableName
+      LIMIT 1
+    `,
+    location: LOCATION,
+    params: { tableName: objectId },
+  })
+  const tableType = existingRows?.[0]?.table_type ?? null
+  if (tableType === 'BASE TABLE') {
+    await bigquery.query({ query: `DROP TABLE ${target}`, location: LOCATION })
+  } else if (tableType === 'VIEW') {
+    await bigquery.query({ query: `DROP VIEW ${target}`, location: LOCATION })
+  }
   const query = `
-CREATE OR REPLACE TABLE ${target}
-PARTITION BY ${PARTITION_EXPR}${clusterClause}
-AS
+CREATE VIEW ${target} AS
 SELECT *
 FROM ${source}
 `
-  console.log(`[bq-snapshot] Materializando ${TARGET_TABLE} a partir de ${SOURCE_VIEW}...`)
+  console.log(`[bq-snapshot] Garantindo view ${TARGET_TABLE} a partir de ${SOURCE_VIEW}...`)
   await bigquery.query({ query, location: LOCATION })
-  console.log('[bq-snapshot] Snapshot criado/atualizado com sucesso.')
+  console.log('[bq-snapshot] View criada/atualizada com sucesso.')
 }
 
 materializeSnapshot().catch((err) => {
