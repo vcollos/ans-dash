@@ -71,15 +71,15 @@ const formatTableRef = (value) => {
 }
 
 const BASE_VIEW_RAW =
-  import.meta.env?.VITE_DATASET_VIEW ?? 'bigdata-467917.dash_ans_uploads.indicadores_curados_snapshot_consolidado'
+  import.meta.env?.VITE_DATASET_VIEW ?? 'bigdata-467917.dash_ans.indicadores_curados_snapshot'
 const MART_ANS_VIEW_RAW =
   import.meta.env?.VITE_MART_ANS_TABLE ??
   import.meta.env?.VITE_DATASET_VIEW_ANS ??
-  'bigdata-467917.dash_ans_uploads.indicadores_mart_ans_consolidado'
+  'bigdata-467917.dash_ans.indicadores_mart_ans'
 const MART_UNIODONTO_VIEW_RAW =
   import.meta.env?.VITE_MART_UNIODONTO_TABLE ??
   import.meta.env?.VITE_DATASET_VIEW_UNIODONTO ??
-  'bigdata-467917.dash_ans_uploads.indicadores_mart_uniodonto_consolidado'
+  'bigdata-467917.dash_ans.indicadores_mart_uniodonto'
 const DEFAULT_VIEW_RAW = MART_ANS_VIEW_RAW || BASE_VIEW_RAW
 const UNIODONTO_VIEW_RAW = MART_UNIODONTO_VIEW_RAW || BASE_VIEW_RAW
 const DEFAULT_VIEW = formatTableRef(DEFAULT_VIEW_RAW)
