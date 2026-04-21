@@ -26,7 +26,7 @@ const BQ_OPERADORAS_TABLE = process.env.BQ_OPERADORAS_TABLE ?? `${BQ_PROJECT_ID}
 const EXPORT_SQL_PATH = path.resolve(__dirname, '../db/export_indicadores.sql')
 const MART_SQL_PATH = path.resolve(__dirname, '../db/materialize_indicadores_mart.sql')
 const DIST_DIR = path.resolve(__dirname, '../dist')
-const DEFAULT_BQ_AUX_DATASET = 'dash_ans_uploads'
+const DEFAULT_BQ_AUX_DATASET = 'dash_ans'
 const DEMONSTRACOES_TEMPLATE_CSV = `cd_conta_contabil;vl_saldo_final`
 const DEMONSTRACOES_EXAMPLE_CSV = `cd_conta_contabil;vl_saldo_final
 311;1200000.00
@@ -137,6 +137,10 @@ const operatorCatalogCache = {
 
 const RAW_ALLOWED_VIEWS = process.env.BQ_ALLOWED_VIEWS
 const LEGACY_BQ_COMPAT_REWRITES = new Map([
+  ['bigdata-467917.dash_ans.indicadores_curados_snapshot_consolidado', 'bigdata-467917.dash_ans.indicadores_curados_snapshot'],
+  ['bigdata-467917.dash_ans.indicadores_mart_ans_consolidado', 'bigdata-467917.dash_ans.indicadores_mart_ans'],
+  ['bigdata-467917.dash_ans.indicadores_mart_uniodonto_consolidado', 'bigdata-467917.dash_ans.indicadores_mart_uniodonto'],
+  ['bigdata-467917.dash_ans.vw_demonstracoes_contabeis_consolidada', 'bigdata-467917.dash_ans.demonstracoes_contabeis'],
   ['bigdata-467917.dash_ans_uploads.indicadores_curados_snapshot_consolidado', 'bigdata-467917.dash_ans.indicadores_curados_snapshot'],
   ['bigdata-467917.dash_ans_uploads.indicadores_mart_ans_consolidado', 'bigdata-467917.dash_ans.indicadores_mart_ans'],
   ['bigdata-467917.dash_ans_uploads.indicadores_mart_uniodonto_consolidado', 'bigdata-467917.dash_ans.indicadores_mart_uniodonto'],

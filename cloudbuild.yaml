@@ -96,7 +96,7 @@ substitutions:
   _BQ_MART_DATASET: dash_ans
   _BQ_MART_ANS_TABLE: indicadores_mart_ans
   _BQ_MART_UNIODONTO_TABLE: indicadores_mart_uniodonto
-  _BQ_ALLOWED_VIEWS: "bigdata-467917.dash_ans.indicadores_curados_snapshot,bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem,bigdata-467917.dash_ans.indicadores_mart_ans,bigdata-467917.dash_ans.indicadores_mart_uniodonto,bigdata-467917.dash_ans_uploads.indicadores_curados_snapshot_consolidado,bigdata-467917.dash_ans_uploads.indicadores_mart_ans_consolidado,bigdata-467917.dash_ans_uploads.indicadores_mart_uniodonto_consolidado"
+  _BQ_ALLOWED_VIEWS: "bigdata-467917.dash_ans.indicadores_curados_snapshot,bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem,bigdata-467917.dash_ans.indicadores_mart_ans,bigdata-467917.dash_ans.indicadores_mart_uniodonto,bigdata-467917.dash_ans.indicadores_curados_snapshot_consolidado,bigdata-467917.dash_ans.indicadores_mart_ans_consolidado,bigdata-467917.dash_ans.indicadores_mart_uniodonto_consolidado"
   _BQ_PRESTADORES_TABLE: "bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem"
   _FIREBASE_PROJECT_ID: bigdata-467917
   _VITE_FIREBASE_API_KEY: "AIzaSyDGszlkE1Jo_guXMs_QUGow8EK4pYgrp4Y"
