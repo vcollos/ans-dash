@@ -4,6 +4,7 @@ import { useDashboardController } from './hooks/useDashboardController'
 import AppHeader from './components/layout/AppHeader'
 import LoginScreen from './components/auth/LoginScreen'
 import ProfileCompletionDialog from './components/auth/ProfileCompletionDialog'
+import AdminAccountsDialog from './components/auth/AdminAccountsDialog'
 import FiltersPanel from './components/filters/FiltersPanel'
 import KpiCards from './components/dashboard/KpiCards'
 import UniodontoKpiCards from './components/dashboard/UniodontoKpiCards'
@@ -63,7 +64,7 @@ function ErrorState({ error, onRetry }) {
   )
 }
 
-function DashboardApp({ onLogout, accessProfile, onOpenProfile }) {
+function DashboardApp({ onLogout, accessProfile, onOpenProfile, onOpenAdminAccounts }) {
   const [filtersSidebarOpen, setFiltersSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('indicadores')
   const [isDataImportOpen, setIsDataImportOpen] = useState(false)
@@ -150,6 +151,7 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile }) {
           onOpenFilters={() => setFiltersSidebarOpen(true)}
           onLogout={onLogout}
           onOpenProfile={onOpenProfile}
+          onOpenAdminAccounts={accessProfile?.isAdmin ? onOpenAdminAccounts : null}
           uniodontoMode={uniodontoMode}
           onUniodontoModeChange={setUniodontoMode}
           onOpenDataImport={() => setIsDataImportOpen(true)}
@@ -332,6 +334,7 @@ function AppContent() {
   const [profileCompletionError, setProfileCompletionError] = useState(null)
   const [isSavingProfileCompletion, setIsSavingProfileCompletion] = useState(false)
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = useState(false)
+  const [isAdminAccountsOpen, setIsAdminAccountsOpen] = useState(false)
   const [isSendingPasswordReset, setIsSendingPasswordReset] = useState(false)
   const [passwordResetMessage, setPasswordResetMessage] = useState(null)
   const allowSignUp = import.meta.env?.VITE_ALLOW_SIGNUP !== 'false'
@@ -363,6 +366,7 @@ function AppContent() {
       setOperatorCatalog([])
       setProfileCompletionError(null)
       setIsProfileSettingsOpen(false)
+      setIsAdminAccountsOpen(false)
       setPasswordResetMessage(null)
       return
     }
@@ -476,11 +480,22 @@ function AppContent() {
     }
   }
 
-  async function handleSignUp({ email, password }) {
+  async function handleSignUp(formData) {
     setIsAuthLoading(true)
     setAuthMessage(null)
     try {
-      await signUpWithEmail(email, password)
+      await signUpWithEmail(formData.email, formData.password)
+      const nextProfile = await saveProfileCompletion({
+        regAns: formData.regAns,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        jobTitle: formData.jobTitle,
+        roleFunction: formData.roleFunction,
+        phone: formData.phone,
+        phoneIsWhatsapp: formData.phoneIsWhatsapp === true,
+        email: formData.email,
+      })
+      setAccessProfile(nextProfile)
     } catch (err) {
       setAuthMessage(err?.message ?? 'Falha ao criar conta.')
     } finally {
@@ -572,9 +587,62 @@ function AppContent() {
     )
   }
 
+  if (requiresProfileCompletion) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-muted/20 px-4 py-12">
+        <Button type="button" variant="outline" className="fixed right-4 top-4" onClick={signOut}>
+          Sair
+        </Button>
+        <ProfileCompletionDialog
+          open={true}
+          onOpenChange={() => {}}
+          defaultProfile={accessProfile?.registrationProfile ?? null}
+          defaultEmail={accessProfile?.email ?? userEmail ?? ''}
+          operatorOptions={operatorCatalog}
+          isLoadingOperators={isOperatorCatalogLoading}
+          isSubmitting={isSavingProfileCompletion}
+          isSendingPasswordReset={false}
+          passwordResetMessage={null}
+          errorMessage={profileCompletionError}
+          title="Complete seu cadastro"
+          description="Informe seu vínculo com a Uniodonto e seus dados cadastrais para validação de acesso."
+          submitLabel="Salvar cadastro"
+          lockOpen={true}
+          regAnsRequired={!accessProfile?.isAdmin}
+          onSubmit={handleProfileCompletionSubmit}
+        />
+      </main>
+    )
+  }
+
+  if (accessProfile?.canAccess === false) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-muted/20 px-4 py-12">
+        <div className="w-full max-w-md rounded-lg border bg-background p-6 text-center shadow-sm">
+          <h1 className="text-lg font-semibold">Conta em ativação</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Seu cadastro foi recebido e passará por ativação pela Uniodonto do Brasil.
+          </p>
+          {accessProfile?.approvalReason ? (
+            <p className="mt-3 text-xs text-muted-foreground">Status: {accessProfile.approvalReason}</p>
+          ) : null}
+          <Button type="button" variant="outline" className="mt-5 w-full" onClick={signOut}>
+            Sair
+          </Button>
+        </div>
+      </main>
+    )
+  }
+
   return (
     <>
-      <DashboardApp onLogout={signOut} accessProfile={accessProfile} onOpenProfile={() => setIsProfileSettingsOpen(true)} />
+      <DashboardApp
+        onLogout={signOut}
+        accessProfile={accessProfile}
+        onOpenProfile={() => setIsProfileSettingsOpen(true)}
+        onOpenAdminAccounts={() => setIsAdminAccountsOpen(true)}
+      />
+      <AdminAccountsDialog open={isAdminAccountsOpen} onOpenChange={setIsAdminAccountsOpen} />
       <ProfileCompletionDialog
         open={isProfileSettingsOpen}
         onOpenChange={setIsProfileSettingsOpen}
@@ -592,24 +660,6 @@ function AppContent() {
         lockOpen={false}
         regAnsRequired={!accessProfile?.isAdmin}
         onSendPasswordReset={handlePasswordReset}
-        onSubmit={handleProfileCompletionSubmit}
-      />
-      <ProfileCompletionDialog
-        open={requiresProfileCompletion}
-        onOpenChange={() => {}}
-        defaultProfile={accessProfile?.registrationProfile ?? null}
-        defaultEmail={accessProfile?.email ?? ''}
-        operatorOptions={operatorCatalog}
-        isLoadingOperators={isOperatorCatalogLoading}
-        isSubmitting={isSavingProfileCompletion}
-        isSendingPasswordReset={false}
-        passwordResetMessage={null}
-        errorMessage={profileCompletionError}
-        title="Complete seu cadastro"
-        description='Para enviar dados no menu "Atualize seus dados", informe seu vínculo com a Uniodonto e seus dados de contato.'
-        submitLabel="Salvar cadastro"
-        lockOpen={true}
-        regAnsRequired={!accessProfile?.isAdmin}
         onSubmit={handleProfileCompletionSubmit}
       />
     </>

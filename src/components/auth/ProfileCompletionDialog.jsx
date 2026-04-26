@@ -4,6 +4,7 @@ import { Button } from '../ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
+import { Checkbox } from '../ui/checkbox'
 
 function toText(value) {
   return String(value ?? '').trim()
@@ -14,9 +15,10 @@ function buildInitialState(defaultProfile = {}, defaultEmail = '') {
     firstName: toText(defaultProfile?.firstName),
     lastName: toText(defaultProfile?.lastName),
     phone: toText(defaultProfile?.phone),
+    phoneIsWhatsapp: defaultProfile?.phoneIsWhatsapp === true,
     email: toText(defaultProfile?.email) || toText(defaultEmail),
     jobTitle: toText(defaultProfile?.jobTitle),
-    department: toText(defaultProfile?.department),
+    roleFunction: toText(defaultProfile?.roleFunction) || toText(defaultProfile?.department),
     regAns: toText(defaultProfile?.regAns),
   }
 }
@@ -65,7 +67,7 @@ export default function ProfileCompletionDialog({
     toText(form.phone) &&
     toText(form.email) &&
     toText(form.jobTitle) &&
-    toText(form.department) &&
+    toText(form.roleFunction) &&
     (regAnsRequired ? toText(form.regAns) : true)
 
   function updateField(field, value) {
@@ -79,9 +81,11 @@ export default function ProfileCompletionDialog({
       firstName: toText(form.firstName),
       lastName: toText(form.lastName),
       phone: toText(form.phone),
+      phoneIsWhatsapp: form.phoneIsWhatsapp === true,
       email: toText(form.email),
       jobTitle: toText(form.jobTitle),
-      department: toText(form.department),
+      roleFunction: toText(form.roleFunction),
+      department: toText(form.roleFunction),
       regAns: toText(form.regAns),
     })
   }
@@ -131,9 +135,18 @@ export default function ProfileCompletionDialog({
                 id="profile-phone"
                 value={form.phone}
                 onChange={(event) => updateField('phone', event.target.value)}
+                placeholder="(11) 99999-9999 ou (11) 3333-3333"
                 disabled={isSubmitting}
                 required
               />
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Checkbox
+                  checked={form.phoneIsWhatsapp}
+                  onCheckedChange={(checked) => updateField('phoneIsWhatsapp', checked === true)}
+                  disabled={isSubmitting}
+                />
+                Este telefone é WhatsApp
+              </label>
             </div>
             <div className="space-y-2">
               <Label htmlFor="profile-email">E-mail</Label>
@@ -149,7 +162,7 @@ export default function ProfileCompletionDialog({
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="profile-job-title">Cargo/Função</Label>
+              <Label htmlFor="profile-job-title">Cargo</Label>
               <Input
                 id="profile-job-title"
                 value={form.jobTitle}
@@ -159,11 +172,11 @@ export default function ProfileCompletionDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="profile-department">Departamento</Label>
+              <Label htmlFor="profile-role-function">Função</Label>
               <Input
-                id="profile-department"
-                value={form.department}
-                onChange={(event) => updateField('department', event.target.value)}
+                id="profile-role-function"
+                value={form.roleFunction}
+                onChange={(event) => updateField('roleFunction', event.target.value)}
                 disabled={isSubmitting}
                 required
               />

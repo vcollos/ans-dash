@@ -5,6 +5,16 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import crypto from 'crypto'
 import admin from 'firebase-admin'
+import nodemailer from 'nodemailer'
+import {
+  APPROVAL_STATUS,
+  decideUhubMatch,
+  isInactiveUhubPerson,
+  last4,
+  normalizeEmailForUhub,
+  normalizePhoneForUhub,
+  safeHash,
+} from './uhubOnboarding.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -23,6 +33,9 @@ const BQ_MART_UNIODONTO_TABLE =
 const BQ_PRESTADORES_TABLE =
   process.env.BQ_PRESTADORES_TABLE ?? `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.prestadores_ativos_uniodonto_origem`
 const BQ_OPERADORAS_TABLE = process.env.BQ_OPERADORAS_TABLE ?? `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.operadoras`
+const BQ_BENEFICIARIOS_ODONTO_TABLE =
+  process.env.BQ_BENEFICIARIOS_ODONTO_TABLE ??
+  `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.beneficiarios_odontologicas_por_operadora`
 const EXPORT_SQL_PATH = path.resolve(__dirname, '../db/export_indicadores.sql')
 const MART_SQL_PATH = path.resolve(__dirname, '../db/materialize_indicadores_mart.sql')
 const DIST_DIR = path.resolve(__dirname, '../dist')
@@ -44,6 +57,22 @@ const ENFORCE_USER_ACCESS = (process.env.BQ_ENFORCE_USER_ACCESS ?? 'true')
   .toLowerCase()
   .trim() === 'true'
 const USER_ACCESS_CACHE_TTL_MS = Number(process.env.USER_ACCESS_CACHE_TTL_MS ?? 60_000)
+const UHUB_API_BASE_URL = String(process.env.UHUB_API_BASE_URL ?? 'https://uhub.uniodonto.coop.br')
+  .trim()
+  .replace(/\/+$/, '')
+const UHUB_API_TOKEN = String(process.env.UHUB_API_TOKEN ?? process.env.UHUB_TOKEN ?? '').trim()
+const UHUB_API_TOKEN_PREFIX =
+  String(process.env.UHUB_API_TOKEN_PREFIX ?? '').trim() || (UHUB_API_TOKEN ? UHUB_API_TOKEN.slice(0, 8) : null)
+const UHUB_API_TIMEOUT_MS = Number(process.env.UHUB_API_TIMEOUT_MS ?? 5_000)
+const UHUB_OPERATOR_CACHE_TTL_MS = Number(process.env.UHUB_OPERATOR_CACHE_TTL_MS ?? 10 * 60_000)
+const PFC_ONBOARDING_COLLECTION = process.env.PFC_ONBOARDING_COLLECTION ?? 'pfc_users_uhub_link'
+const PFC_ONBOARDING_LOG_COLLECTION = process.env.PFC_ONBOARDING_LOG_COLLECTION ?? 'pfc_onboarding_audit_logs'
+const PFC_MARKETING_EMAIL = process.env.PFC_MARKETING_EMAIL ?? 'marketing@uniodonto.coop.br'
+const SMTP_HOST = String(process.env.SMTP_HOST ?? '').trim()
+const SMTP_PORT = Number(process.env.SMTP_PORT ?? 587)
+const SMTP_USER = String(process.env.SMTP_USER ?? '').trim()
+const SMTP_PASS = String(process.env.SMTP_PASS ?? '').trim()
+const SMTP_FROM = String(process.env.SMTP_FROM ?? '').trim()
 const ADMIN_EMAIL_DOMAINS = String(
   process.env.ACCESS_ADMIN_EMAIL_DOMAINS ?? 'uniodonto.coop.br,collos.com.br,contagbr.com.br',
 )
@@ -131,6 +160,10 @@ const queryCache = new Map()
 const inFlightQueries = new Map()
 const userAccessCache = new Map()
 const operatorCatalogCache = {
+  entries: [],
+  expiresAt: 0,
+}
+const uhubOperatorCatalogCache = {
   entries: [],
   expiresAt: 0,
 }
@@ -230,7 +263,28 @@ if (!admin.apps.length) {
   admin.initializeApp(buildFirebaseAdminOptions())
 }
 
-const AUTH_PUBLIC_PATHS = new Set(['/api/health', '/api/auth/status'])
+const firestore = admin.firestore()
+let mailTransporter = null
+
+function getMailTransporter() {
+  if (!SMTP_HOST || !SMTP_FROM) return null
+  if (mailTransporter) return mailTransporter
+  mailTransporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465,
+    auth: SMTP_USER && SMTP_PASS ? { user: SMTP_USER, pass: SMTP_PASS } : undefined,
+  })
+  return mailTransporter
+}
+
+const AUTH_PUBLIC_PATHS = new Set(['/api/health', '/api/auth/status', '/api/onboarding/operators'])
+const AUTH_SKIP_ACCESS_CONTEXT_PATHS = new Set([
+  '/api/auth/profile',
+  '/api/auth/profile/complete',
+  '/api/operators',
+  '/api/onboarding/operators',
+])
 function extractToken(req) {
   const header = req.headers.authorization
   if (typeof header === 'string' && header.startsWith('Bearer ')) {
@@ -257,7 +311,17 @@ async function authMiddleware(req, res, next) {
       email: decoded.email ?? null,
       claims: decoded,
     }
-    req.accessContext = await resolveUserAccessContext(req.user)
+    if (AUTH_SKIP_ACCESS_CONTEXT_PATHS.has(req.path) || req.path.startsWith('/api/admin/accounts')) {
+      req.accessContext = {
+        enforced: ENFORCE_USER_ACCESS,
+        isAdmin: isPrivilegedDomainEmail(req.user.email),
+        operators: [],
+        allowedRegAns: [],
+        canUploadRegAns: [],
+      }
+    } else {
+      req.accessContext = await resolveUserAccessContext(req.user)
+    }
     return next()
   } catch (err) {
     if (err?.code === 'NO_OPERATOR_ACCESS') {
@@ -570,6 +634,301 @@ async function listOperatorCatalog({ forceRefresh = false } = {}) {
   operatorCatalogCache.entries = entries
   operatorCatalogCache.expiresAt = now + Math.max(USER_ACCESS_CACHE_TTL_MS, 60_000)
   return entries
+}
+
+function requireUhubConfig() {
+  if (!UHUB_API_BASE_URL || !UHUB_API_TOKEN) {
+    const error = new Error('Integração UHub não configurada.')
+    error.code = 'UHUB_CONFIG_MISSING'
+    throw error
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function uhubRequest(pathname, { method = 'GET', body = null } = {}) {
+  requireUhubConfig()
+  let lastError = null
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), UHUB_API_TIMEOUT_MS)
+    try {
+      const response = await fetch(`${UHUB_API_BASE_URL}${pathname}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${UHUB_API_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      })
+      clearTimeout(timeout)
+      if (response.status === 429 && attempt === 0) {
+        const retryAfter = Number(response.headers.get('retry-after'))
+        await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 500)
+        continue
+      }
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) {
+        const error = new Error(payload?.error ?? `UHub respondeu HTTP ${response.status}.`)
+        error.status = response.status
+        error.payload = payload
+        throw error
+      }
+      return payload
+    } catch (err) {
+      clearTimeout(timeout)
+      lastError = err
+      if (attempt === 0) {
+        await sleep(250)
+        continue
+      }
+    }
+  }
+  throw lastError
+}
+
+async function uhubSearchPessoaContatos(q) {
+  if (!q) return []
+  const payload = await uhubRequest('/api/external/catalogo/pessoa_contatos/search', {
+    method: 'POST',
+    body: { q },
+  })
+  return Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : []
+}
+
+async function uhubPessoaByKey(pessoaId) {
+  const payload = await uhubRequest('/api/external/catalogo/pessoas/by-key', {
+    method: 'POST',
+    body: { id: pessoaId },
+  })
+  return payload
+}
+
+function mapUhubCooperativa(row = {}) {
+  const regAns = normalizeRegAns(row.reg_ans_operadora ?? row.codigo_ans ?? row.reg_ans ?? row.REG_ANS)
+  const operatorName =
+    toNullableString(row.uniodonto) ||
+    toNullableString(row.razao_social) ||
+    toNullableString(row.raz_social) ||
+    toNullableString(row.nome) ||
+    toNullableString(row.name)
+  const tipo = String(row.tipo ?? row.papel_rede ?? '').trim().toUpperCase()
+  if (!regAns || !operatorName) return null
+  if (tipo && tipo !== 'SINGULAR') return null
+  return {
+    regAns,
+    operatorName,
+    cnpj: normalizeDigits(row.cnpj),
+  }
+}
+
+async function listUhubOperatorCatalog({ forceRefresh = false } = {}) {
+  const now = Date.now()
+  if (!forceRefresh && uhubOperatorCatalogCache.entries.length && uhubOperatorCatalogCache.expiresAt > now) {
+    return uhubOperatorCatalogCache.entries
+  }
+  const payload = await uhubRequest('/api/external/catalogo/cooperativas/search', {
+    method: 'POST',
+    body: { limit: 500 },
+  })
+  const rows = Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : []
+  const entries = rows
+    .map(mapUhubCooperativa)
+    .filter(Boolean)
+    .sort((a, b) => a.operatorName.localeCompare(b.operatorName))
+  uhubOperatorCatalogCache.entries = entries
+  uhubOperatorCatalogCache.expiresAt = now + Math.max(UHUB_OPERATOR_CACHE_TTL_MS, 60_000)
+  return entries
+}
+
+async function resolveOperatorMetadata(regAns) {
+  const normalizedRegAns = normalizeRegAns(regAns)
+  if (!normalizedRegAns) return null
+  try {
+    const fromUhub = (await listUhubOperatorCatalog()).find((item) => item.regAns === normalizedRegAns)
+    if (fromUhub) return fromUhub
+  } catch (err) {
+    console.warn('[server] Falha ao resolver operadora no UHub', err?.message ?? err)
+  }
+  return fetchOperatorRegistryMetadata(normalizedRegAns)
+}
+
+function getOnboardingDocRef(uid) {
+  return firestore.collection(PFC_ONBOARDING_COLLECTION).doc(String(uid))
+}
+
+function serializeFirestoreTimestamp(value) {
+  if (!value) return null
+  if (typeof value.toDate === 'function') return value.toDate().toISOString()
+  if (value instanceof Date) return value.toISOString()
+  return value
+}
+
+function mapOnboardingDoc(snapshot) {
+  if (!snapshot?.exists) return null
+  const data = snapshot.data() ?? {}
+  return {
+    uid: snapshot.id,
+    statusAprovacao: data.status_aprovacao ?? APPROVAL_STATUS.PENDING,
+    approvalReason: data.approval_reason ?? null,
+    uhubPessoaId: data.uhub_pessoa_id ?? null,
+    uhubVerificadoEm: serializeFirestoreTimestamp(data.uhub_verificado_em),
+    uhubMatchPor: data.uhub_match_por ?? null,
+    uhubTokenPrefix: data.uhub_token_prefix ?? null,
+    uhubRevalidadoEm: serializeFirestoreTimestamp(data.uhub_revalidado_em),
+    firstName: data.first_name ?? null,
+    lastName: data.last_name ?? null,
+    phone: data.phone ?? null,
+    phoneNormalized: data.phone_normalized ?? null,
+    phoneIsWhatsapp: data.phone_is_whatsapp === true,
+    email: data.user_email ?? null,
+    jobTitle: data.job_title ?? null,
+    roleFunction: data.role_function ?? null,
+    department: data.department ?? null,
+    regAns: data.reg_ans ?? null,
+    operatorName: data.operator_name ?? null,
+    createdAt: serializeFirestoreTimestamp(data.created_at),
+    updatedAt: serializeFirestoreTimestamp(data.updated_at),
+  }
+}
+
+async function fetchOnboardingLink(uid) {
+  if (!uid) return null
+  const snapshot = await getOnboardingDocRef(uid).get()
+  return mapOnboardingDoc(snapshot)
+}
+
+function canAccessFromApprovalStatus(status) {
+  return [APPROVAL_STATUS.AUTO_APPROVED, APPROVAL_STATUS.MANUAL_APPROVED].includes(status)
+}
+
+async function auditOnboardingAttempt({ uid, email, phone, result, requestId }) {
+  try {
+    await firestore.collection(PFC_ONBOARDING_LOG_COLLECTION).add({
+      uid: uid ?? null,
+      request_id: requestId,
+      email_hash: safeHash(email),
+      phone_last4: last4(phone),
+      status_aprovacao: result?.status ?? null,
+      approval_reason: result?.reason ?? null,
+      uhub_pessoa_id: result?.uhubPessoaId ?? null,
+      uhub_match_por: result?.matchBy ?? null,
+      uhub_token_prefix: UHUB_API_TOKEN_PREFIX ?? null,
+      created_at: admin.firestore.FieldValue.serverTimestamp(),
+    })
+  } catch (err) {
+    console.warn('[server] Falha ao persistir auditoria de onboarding', err?.message ?? err)
+  }
+}
+
+async function sendOnboardingEmails({ profile, status, reason }) {
+  const transporter = getMailTransporter()
+  if (!transporter) return
+  const userEmail = normalizeEmail(profile?.email)
+  const operatorName = profile?.operatorName ?? profile?.regAns ?? 'Não informado'
+  const statusLabel = status === APPROVAL_STATUS.AUTO_APPROVED ? 'auto-aprovada' : 'pendente de aprovação'
+  const text = [
+    `Cadastro PFC ${statusLabel}.`,
+    `Nome: ${profile?.firstName ?? ''} ${profile?.lastName ?? ''}`.trim(),
+    `Email: ${userEmail ?? ''}`,
+    `Uniodonto: ${operatorName}`,
+    `Motivo: ${reason ?? 'match_seguro'}`,
+  ].join('\n')
+  const messages = []
+  if (userEmail) {
+    messages.push({
+      from: SMTP_FROM,
+      to: userEmail,
+      subject:
+        status === APPROVAL_STATUS.AUTO_APPROVED
+          ? 'Cadastro PFC liberado'
+          : 'Cadastro PFC recebido para ativação',
+      text:
+        status === APPROVAL_STATUS.AUTO_APPROVED
+          ? 'Seu cadastro foi validado no UHub e o acesso ao PFC foi liberado.'
+          : 'Seu cadastro foi recebido e passará por ativação pela Uniodonto do Brasil.',
+    })
+  }
+  messages.push({
+    from: SMTP_FROM,
+    to: PFC_MARKETING_EMAIL,
+    subject: `Cadastro PFC ${statusLabel}`,
+    text,
+  })
+  await Promise.all(messages.map((message) => transporter.sendMail(message)))
+}
+
+async function verifyUhubOnboarding({ email, phone }) {
+  const normalizedEmail = normalizeEmailForUhub(email)
+  const normalizedPhone = normalizePhoneForUhub(phone)
+  if (!normalizedEmail && !normalizedPhone) {
+    return { status: APPROVAL_STATUS.PENDING, reason: 'entrada_invalida' }
+  }
+
+  try {
+    const [emailResults, phoneResults] = await Promise.all([
+      normalizedEmail ? uhubSearchPessoaContatos(normalizedEmail) : Promise.resolve([]),
+      normalizedPhone ? uhubSearchPessoaContatos(normalizedPhone) : Promise.resolve([]),
+    ])
+    const decision = decideUhubMatch({ emailResults, phoneResults })
+    if (!decision.approved) {
+      return { status: APPROVAL_STATUS.PENDING, reason: decision.reason }
+    }
+    const person = await uhubPessoaByKey(decision.pessoaId)
+    if (!person || isInactiveUhubPerson(person)) {
+      return { status: APPROVAL_STATUS.PENDING, reason: 'pessoa_inativa' }
+    }
+    return {
+      status: APPROVAL_STATUS.AUTO_APPROVED,
+      reason: 'match_seguro',
+      uhubPessoaId: decision.pessoaId,
+      matchBy: decision.matchBy,
+    }
+  } catch (err) {
+    console.warn('[server] Verificação UHub caiu para fila manual', err?.message ?? err)
+    return { status: APPROVAL_STATUS.PENDING, reason: 'uhub_indisponivel' }
+  }
+}
+
+async function saveOnboardingLink(user = {}, profile = {}, verification = {}) {
+  const uid = String(user.uid ?? '').trim()
+  if (!uid) throw new Error('UID Firebase ausente.')
+  const now = admin.firestore.FieldValue.serverTimestamp()
+  const status = verification.status ?? APPROVAL_STATUS.PENDING
+  const payload = {
+    user_uid: uid,
+    user_email: normalizeEmail(profile.email ?? user.email),
+    first_name: profile.firstName,
+    last_name: profile.lastName,
+    phone: profile.phone,
+    phone_normalized: normalizePhoneForUhub(profile.phone),
+    phone_is_whatsapp: profile.phoneIsWhatsapp === true,
+    job_title: profile.jobTitle,
+    role_function: profile.roleFunction,
+    department: profile.roleFunction,
+    reg_ans: normalizeRegAns(profile.regAns),
+    operator_name: profile.operatorName ?? null,
+    status_aprovacao: status,
+    approval_reason: verification.reason ?? null,
+    uhub_pessoa_id: verification.uhubPessoaId ?? null,
+    uhub_match_por: verification.matchBy ?? null,
+    uhub_token_prefix: verification.uhubPessoaId ? UHUB_API_TOKEN_PREFIX : null,
+    updated_at: now,
+  }
+  if (verification.uhubPessoaId) {
+    payload.uhub_verificado_em = now
+  }
+  await getOnboardingDocRef(uid).set(
+    {
+      ...payload,
+      created_at: now,
+    },
+    { merge: true },
+  )
+  return fetchOnboardingLink(uid)
 }
 
 async function resolveOperatorByName(operatorName) {
@@ -957,97 +1316,29 @@ async function upsertUserProfile(user = {}, payload = {}) {
   })
 }
 
-async function upsertUserUploadAccess(user = {}, { regAns, operatorName }) {
-  const normalizedRegAns = normalizeRegAns(regAns)
-  if (!normalizedRegAns) return
-  await ensureUserAccessTable()
-  const uid = String(user.uid ?? '').trim() || null
-  const email = normalizeEmail(user.email)
-  await bigquery.query({
-    query: `
-      MERGE \`${USER_ACCESS_TABLE_REF.fqn}\` target
-      USING (
-        SELECT
-          @uid AS user_uid,
-          @email AS user_email,
-          @reg_ans AS reg_ans
-      ) source
-      ON (
-        REGEXP_REPLACE(CAST(target.reg_ans AS STRING), r'\\D', '') = source.reg_ans
-        AND (
-          (source.user_uid IS NOT NULL AND CAST(target.user_uid AS STRING) = source.user_uid)
-          OR (
-            source.user_email IS NOT NULL
-            AND LOWER(TRIM(CAST(target.user_email AS STRING))) = source.user_email
-          )
-        )
-      )
-      WHEN MATCHED THEN
-        UPDATE SET
-          operator_name = COALESCE(@operator_name, target.operator_name),
-          can_upload = TRUE,
-          role = COALESCE(NULLIF(TRIM(CAST(target.role AS STRING)), ''), 'user'),
-          active = TRUE,
-          updated_at = CURRENT_TIMESTAMP(),
-          user_uid = COALESCE(target.user_uid, source.user_uid),
-          user_email = COALESCE(target.user_email, source.user_email)
-      WHEN NOT MATCHED THEN
-        INSERT (
-          user_uid,
-          user_email,
-          reg_ans,
-          operator_name,
-          can_upload,
-          role,
-          active,
-          created_at,
-          updated_at
-        )
-        VALUES (
-          source.user_uid,
-          source.user_email,
-          source.reg_ans,
-          @operator_name,
-          TRUE,
-          'user',
-          TRUE,
-          CURRENT_TIMESTAMP(),
-          CURRENT_TIMESTAMP()
-        )
-    `,
-    params: {
-      uid,
-      email,
-      reg_ans: normalizedRegAns,
-      operator_name: toNullableString(operatorName),
-    },
-    location: BQ_LOCATION,
-  })
-}
-
-function buildProfileCompletionFlag(accessContext = {}) {
-  if (!accessContext?.enforced) return false
-  if (accessContext?.isAdmin) return false
-  return (accessContext?.canUploadRegAns ?? []).length === 0
-}
-
 async function buildAuthProfilePayload(reqUser = {}, accessContext = {}) {
   let registrationProfile = null
+  let onboardingLink = null
   try {
-    registrationProfile = await fetchUserProfile(reqUser)
+    onboardingLink = await fetchOnboardingLink(reqUser?.uid)
   } catch (err) {
-    console.warn('[server] Falha ao carregar perfil complementar do usuário', err?.message ?? err)
+    console.warn('[server] Falha ao carregar status de aprovação do usuário', err?.message ?? err)
+  }
+  if (!onboardingLink && (accessContext?.canUploadRegAns ?? []).length > 0) {
+    try {
+      registrationProfile = await fetchUserProfile(reqUser)
+    } catch (err) {
+      console.warn('[server] Falha ao carregar perfil complementar do usuário', err?.message ?? err)
+    }
   }
   let operators = accessContext?.operators ?? []
   if (accessContext?.isAdmin) {
     try {
-      const allOperators = (await listOperatorCatalog())
-        .filter((item) => item.normalizedName.includes('uniodonto'))
-        .map((item) => ({
-          regAns: item.regAns,
-          operatorName: item.operatorName,
-          canUpload: true,
-        }))
+      const allOperators = (await listUhubOperatorCatalog()).map((item) => ({
+        regAns: item.regAns,
+        operatorName: item.operatorName,
+        canUpload: true,
+      }))
       operators = allOperators
     } catch (err) {
       console.warn('[server] Falha ao carregar catálogo de operadoras para perfil admin', err?.message ?? err)
@@ -1068,17 +1359,48 @@ async function buildAuthProfilePayload(reqUser = {}, accessContext = {}) {
     allowedRegAns,
     canUploadRegAns,
     noAccess: false,
-    requiresProfileCompletion: buildProfileCompletionFlag(accessContext),
-    registrationProfile: registrationProfile
+    approvalStatus: onboardingLink?.statusAprovacao ?? null,
+    approvalReason: onboardingLink?.approvalReason ?? null,
+    canAccess: onboardingLink
+      ? canAccessFromApprovalStatus(onboardingLink.statusAprovacao)
+      : accessContext?.isAdmin === true || (accessContext?.canUploadRegAns ?? []).length > 0,
+    uhubLink: onboardingLink
       ? {
-          firstName: registrationProfile.firstName ?? null,
-          lastName: registrationProfile.lastName ?? null,
-          phone: registrationProfile.phone ?? null,
-          email: registrationProfile.email ?? null,
-          jobTitle: registrationProfile.jobTitle ?? null,
-          department: registrationProfile.department ?? null,
-          regAns: registrationProfile.regAns ?? null,
-          operatorName: registrationProfile.operatorName ?? null,
+          uhubPessoaId: onboardingLink.uhubPessoaId,
+          uhubVerificadoEm: onboardingLink.uhubVerificadoEm,
+          uhubMatchPor: onboardingLink.uhubMatchPor,
+          uhubRevalidadoEm: onboardingLink.uhubRevalidadoEm,
+        }
+      : null,
+    requiresProfileCompletion: accessContext?.isAdmin || (!onboardingLink && (accessContext?.canUploadRegAns ?? []).length > 0)
+      ? false
+      : !onboardingLink || !onboardingLink.statusAprovacao || onboardingLink.statusAprovacao === APPROVAL_STATUS.REJECTED,
+    registrationProfile: onboardingLink
+      ? {
+          firstName: onboardingLink.firstName ?? null,
+          lastName: onboardingLink.lastName ?? null,
+          phone: onboardingLink.phone ?? null,
+          phoneIsWhatsapp: onboardingLink.phoneIsWhatsapp === true,
+          email: onboardingLink.email ?? null,
+          jobTitle: onboardingLink.jobTitle ?? null,
+          roleFunction: onboardingLink.roleFunction ?? null,
+          department: onboardingLink.department ?? null,
+          regAns: onboardingLink.regAns ?? null,
+          operatorName: onboardingLink.operatorName ?? null,
+          isCompleted: true,
+        }
+      : registrationProfile
+        ? {
+            firstName: registrationProfile.firstName ?? null,
+            lastName: registrationProfile.lastName ?? null,
+            phone: registrationProfile.phone ?? null,
+            phoneIsWhatsapp: false,
+            email: registrationProfile.email ?? null,
+            jobTitle: registrationProfile.jobTitle ?? null,
+            roleFunction: registrationProfile.department ?? null,
+            department: registrationProfile.department ?? null,
+            regAns: registrationProfile.regAns ?? null,
+            operatorName: registrationProfile.operatorName ?? null,
           isCompleted: registrationProfile.isCompleted === true,
         }
       : null,
@@ -1101,10 +1423,32 @@ async function resolveUserAccessContext(user = {}) {
     return cached
   }
 
-  await ensureUserAccessTable()
   const uid = String(user.uid ?? '').trim() || null
   const email = normalizeEmail(user.email)
   const isDomainAdmin = isPrivilegedDomainEmail(email)
+  if (isDomainAdmin) {
+    const context = createAccessContextFromRows([], { ...user, isDomainAdmin })
+    setCachedUserAccess(cacheKey, context)
+    return context
+  }
+  const onboardingLink = await fetchOnboardingLink(uid).catch(() => null)
+  if (onboardingLink && canAccessFromApprovalStatus(onboardingLink.statusAprovacao) && onboardingLink.regAns) {
+    const context = createAccessContextFromRows(
+      [
+        {
+          reg_ans: onboardingLink.regAns,
+          operator_name: onboardingLink.operatorName,
+          can_upload: true,
+          role: 'user',
+        },
+      ],
+      { ...user, isDomainAdmin: false },
+    )
+    setCachedUserAccess(cacheKey, context)
+    return context
+  }
+
+  await ensureUserAccessTable()
   const query = `
     SELECT
       REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', '') AS reg_ans,
@@ -1296,7 +1640,7 @@ function formatMaterializeTableRef(name, datasetId = BQ_DATASET) {
 function buildConsolidatedIndicatorSnapshotQuery() {
   const auxLatest = quoteTableRef(AUX_DEMONSTRACOES_LATEST_VIEW_REF)
   const officialSnapshot = quoteTableRef(OFFICIAL_INDICATOR_SNAPSHOT_REF)
-  const obm = `\`${BQ_PROJECT_ID}.${BQ_DATASET}.operadoras_beneficiarios_modalidade\``
+  const obm = formatMaterializeTableRef(BQ_BENEFICIARIOS_ODONTO_TABLE, BQ_MART_DATASET)
   const operadoras = `\`${BQ_PROJECT_ID}.${BQ_DATASET}.operadoras\``
   const uniodontosAtivas = `\`${BQ_PROJECT_ID}.${BQ_DATASET}.uniodontos_ativas\``
   const target = quoteTableRef(CONSOLIDATED_INDICATOR_SNAPSHOT_REF)
@@ -1314,7 +1658,8 @@ function buildConsolidatedIndicatorSnapshotQuery() {
         Beneficiarios,
         Uniodonto,
         ATIVA,
-        modalidade
+        modalidade,
+        porte
       FROM ${obm}
       QUALIFY ROW_NUMBER() OVER (
         PARTITION BY reg_ans, Periodo
@@ -1328,7 +1673,8 @@ function buildConsolidatedIndicatorSnapshotQuery() {
         Beneficiarios,
         Uniodonto,
         ATIVA,
-        modalidade
+        modalidade,
+        porte
       FROM ${obm}
       QUALIFY ROW_NUMBER() OVER (
         PARTITION BY reg_ans
@@ -1437,7 +1783,11 @@ function buildConsolidatedIndicatorSnapshotQuery() {
           END
         ) AS ativa,
         MAX(SAFE_CAST(src.qt_beneficiarios AS INT64)) AS qt_beneficiarios,
-        MAX(IF(src.porte IS NOT NULL AND src.porte <> '', CAST(src.porte AS STRING), NULL)) AS porte,
+        COALESCE(
+          MAX(IF(src.porte IS NOT NULL AND src.porte <> '', CAST(src.porte AS STRING), NULL)),
+          MAX(IF(obm_p.porte IS NOT NULL AND obm_p.porte <> '', CAST(obm_p.porte AS STRING), NULL)),
+          MAX(IF(obm_l.porte IS NOT NULL AND obm_l.porte <> '', CAST(obm_l.porte AS STRING), NULL))
+        ) AS porte,
         SAFE_CAST(src.ano AS INT64) AS ano,
         SAFE_CAST(src.trimestre AS INT64) AS trimestre,
         MAX(DATE(SAFE_CAST(src.ano AS INT64), 1 + (SAFE_CAST(src.trimestre AS INT64) - 1) * 3, 1)) AS periodo_data,
@@ -1971,10 +2321,9 @@ app.get('/api/auth/profile', async (req, res) => {
   }
 })
 
-app.get('/api/operators', async (_req, res) => {
+async function handleOperatorsList(_req, res) {
   try {
-    const operators = (await listOperatorCatalog())
-      .filter((item) => item.normalizedName.includes('uniodonto'))
+    const operators = (await listUhubOperatorCatalog())
       .map((item) => ({
         regAns: item.regAns,
         operatorName: item.operatorName,
@@ -1982,25 +2331,30 @@ app.get('/api/operators', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store')
     return res.json({ operators })
   } catch (err) {
-    console.error('[server] Falha ao listar operadoras', err)
+    console.error('[server] Falha ao listar Uniodontos pelo UHub', err)
     return res.status(500).json({ error: 'Falha ao carregar lista de operadoras.' })
   }
-})
+}
+
+app.get('/api/onboarding/operators', handleOperatorsList)
+app.get('/api/operators', handleOperatorsList)
 
 app.post('/api/auth/profile/complete', async (req, res) => {
   const firstName = toNullableString(req.body?.firstName)
   const lastName = toNullableString(req.body?.lastName)
   const phone = toNullableString(req.body?.phone)
+  const phoneIsWhatsapp = req.body?.phoneIsWhatsapp === true
   const profileEmail = normalizeEmail(req.body?.email ?? req.user?.email)
   const jobTitle = toNullableString(req.body?.jobTitle)
-  const department = toNullableString(req.body?.department)
+  const roleFunction = toNullableString(req.body?.roleFunction ?? req.body?.department)
+  const department = roleFunction
   const regAns = normalizeRegAns(req.body?.regAns)
   const authenticatedEmail = normalizeEmail(req.user?.email)
   const isPrivilegedUser = isPrivilegedDomainEmail(authenticatedEmail)
 
-  if (!firstName || !lastName || !phone || !profileEmail || !jobTitle || !department) {
+  if (!firstName || !lastName || !phone || !profileEmail || !jobTitle || !roleFunction) {
     return res.status(400).json({
-      error: 'Preencha todos os campos obrigatórios: Nome, Sobrenome, Telefone, E-mail, Cargo/Função e Departamento.',
+      error: 'Preencha todos os campos obrigatórios: Nome, Sobrenome, Telefone, E-mail, Cargo e Função.',
     })
   }
   if (authenticatedEmail && profileEmail !== authenticatedEmail) {
@@ -2013,38 +2367,155 @@ app.post('/api/auth/profile/complete', async (req, res) => {
   try {
     let operatorMetadata = null
     if (regAns) {
-      operatorMetadata = await fetchOperatorRegistryMetadata(regAns)
+      operatorMetadata = await resolveOperatorMetadata(regAns)
       if (!operatorMetadata && !isPrivilegedUser) {
         return res.status(400).json({ error: 'Operadora inválida para o vínculo informado.' })
       }
     }
-
-    await upsertUserProfile(req.user, {
+    const requestId = crypto.randomUUID()
+    const profilePayload = {
       firstName,
       lastName,
       phone,
+      phoneIsWhatsapp,
       email: profileEmail,
       jobTitle,
+      roleFunction,
       department,
       regAns: regAns ?? null,
       operatorName: operatorMetadata?.operatorName ?? null,
+    }
+    const verification = isPrivilegedUser
+      ? { status: APPROVAL_STATUS.MANUAL_APPROVED, reason: 'usuario_admin' }
+      : await verifyUhubOnboarding({ email: profileEmail, phone })
+
+    await upsertUserProfile(req.user, {
+      ...profilePayload,
     })
 
-    if (!isPrivilegedUser && regAns) {
-      await upsertUserUploadAccess(req.user, {
-        regAns,
-        operatorName: operatorMetadata?.operatorName ?? null,
-      })
-    }
+    const onboardingLink = await saveOnboardingLink(req.user, profilePayload, verification)
+    await auditOnboardingAttempt({
+      uid: req.user?.uid,
+      email: profileEmail,
+      phone: normalizePhoneForUhub(phone),
+      result: {
+        status: verification.status,
+        reason: verification.reason,
+        uhubPessoaId: verification.uhubPessoaId,
+        matchBy: verification.matchBy,
+      },
+      requestId,
+    })
+
+    sendOnboardingEmails({
+      profile: profilePayload,
+      status: verification.status,
+      reason: verification.reason,
+    }).catch((err) => {
+      console.warn('[server] Falha ao enviar e-mail de onboarding', err?.message ?? err)
+    })
 
     userAccessCache.delete(getUserAccessCacheKey(req.user))
-    const accessContext = await resolveUserAccessContext(req.user)
+    const accessContext = canAccessFromApprovalStatus(verification.status)
+      ? await resolveUserAccessContext(req.user)
+      : {
+          enforced: ENFORCE_USER_ACCESS,
+          isAdmin: isPrivilegedUser,
+          operators: [],
+          allowedRegAns: [],
+          canUploadRegAns: [],
+        }
     const payload = await buildAuthProfilePayload(req.user, accessContext)
+    payload.approvalStatus = onboardingLink?.statusAprovacao ?? payload.approvalStatus
     res.setHeader('Cache-Control', 'no-store')
     return res.json(payload)
   } catch (err) {
     console.error('[server] Falha ao concluir perfil do usuário', err)
     return res.status(500).json({ error: 'Falha ao concluir cadastro do usuário.' })
+  }
+})
+
+function ensureAdminRequest(req, res) {
+  if (isPrivilegedDomainEmail(req.user?.email) || req.user?.claims?.admin === true || req.user?.claims?.isAdmin === true) {
+    return true
+  }
+  res.status(403).json({ error: 'Acesso administrativo necessário.' })
+  return false
+}
+
+app.get('/api/admin/accounts/pending', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    const [pendingSnapshot, reviewSnapshot] = await Promise.all([
+      firestore
+        .collection(PFC_ONBOARDING_COLLECTION)
+        .where('status_aprovacao', '==', APPROVAL_STATUS.PENDING)
+        .limit(100)
+        .get(),
+      firestore
+        .collection(PFC_ONBOARDING_COLLECTION)
+        .where('status_aprovacao', '==', APPROVAL_STATUS.PENDING_REVIEW)
+        .limit(100)
+        .get(),
+    ])
+    const accounts = [...pendingSnapshot.docs, ...reviewSnapshot.docs].map(mapOnboardingDoc)
+    res.setHeader('Cache-Control', 'no-store')
+    return res.json({ accounts })
+  } catch (err) {
+    console.error('[server] Falha ao listar contas pendentes', err)
+    return res.status(500).json({ error: 'Falha ao listar contas pendentes.' })
+  }
+})
+
+app.post('/api/admin/accounts/:uid/approve', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  const uid = String(req.params.uid ?? '').trim()
+  if (!uid) return res.status(400).json({ error: 'UID inválido.' })
+  try {
+    const ref = getOnboardingDocRef(uid)
+    const snapshot = await ref.get()
+    if (!snapshot.exists) return res.status(404).json({ error: 'Conta não encontrada.' })
+    const current = mapOnboardingDoc(snapshot)
+    await ref.set(
+      {
+        status_aprovacao: APPROVAL_STATUS.MANUAL_APPROVED,
+        approval_reason: 'aprovado_admin',
+        approved_by_email: normalizeEmail(req.user?.email),
+        approved_at: admin.firestore.FieldValue.serverTimestamp(),
+        updated_at: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    )
+    userAccessCache.delete(getUserAccessCacheKey({ uid, email: current?.email }))
+    return res.json({ account: await fetchOnboardingLink(uid) })
+  } catch (err) {
+    console.error('[server] Falha ao aprovar conta', err)
+    return res.status(500).json({ error: 'Falha ao aprovar conta.' })
+  }
+})
+
+app.post('/api/admin/accounts/:uid/reject', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  const uid = String(req.params.uid ?? '').trim()
+  if (!uid) return res.status(400).json({ error: 'UID inválido.' })
+  try {
+    const ref = getOnboardingDocRef(uid)
+    const snapshot = await ref.get()
+    if (!snapshot.exists) return res.status(404).json({ error: 'Conta não encontrada.' })
+    await ref.set(
+      {
+        status_aprovacao: APPROVAL_STATUS.REJECTED,
+        approval_reason: toNullableString(req.body?.reason) ?? 'rejeitado_admin',
+        rejected_by_email: normalizeEmail(req.user?.email),
+        rejected_at: admin.firestore.FieldValue.serverTimestamp(),
+        updated_at: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    )
+    return res.json({ account: await fetchOnboardingLink(uid) })
+  } catch (err) {
+    console.error('[server] Falha ao rejeitar conta', err)
+    return res.status(500).json({ error: 'Falha ao rejeitar conta.' })
   }
 })
 

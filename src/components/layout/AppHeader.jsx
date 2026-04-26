@@ -17,6 +17,7 @@ function AppHeader({
   onOpenFilters,
   onLogout,
   onOpenProfile,
+  onOpenAdminAccounts,
   uniodontoMode = false,
   onUniodontoModeChange,
   onOpenDataImport,
@@ -87,6 +88,15 @@ function AppHeader({
               className="rounded-md border border-border bg-background px-3 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:bg-muted"
             >
               Sair
+            </button>
+          ) : null}
+          {onOpenAdminAccounts ? (
+            <button
+              type="button"
+              onClick={onOpenAdminAccounts}
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:bg-muted"
+            >
+              Contas
             </button>
           ) : null}
           {onOpenProfile ? (

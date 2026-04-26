@@ -135,6 +135,10 @@ Outras variáveis Vite (opcionais):
 **Firebase (API):**
 - `FIREBASE_PROJECT_ID` (normalmente o mesmo do GCP)
 - `FIREBASE_SERVICE_ACCOUNT_PATH` (opcional, recomendado quando a validação de token exigir chave dedicada do Firebase Admin, ex.: `.cert/bigdata-467917-firebase-adminsdk-*.json`)
+- `UHUB_API_BASE_URL` e `UHUB_API_TOKEN`: API externa do UHub para onboarding/auto-aprovação de contas PFC. O token deve ser de contexto Confederação, com escopos `cooperativas.pessoas` e `tabelas.read`.
+- `UHUB_API_TOKEN_PREFIX` (opcional): prefixo do token para auditoria sem expor o segredo.
+- `PFC_ONBOARDING_COLLECTION` e `PFC_ONBOARDING_LOG_COLLECTION`: coleções Firestore para status de aprovação e logs sem PII completa.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`: envio de e-mails de cadastro; `PFC_MARKETING_EMAIL` default `marketing@uniodonto.coop.br`.
 
 No Docker dev, o `scripts/dev-local.sh` detecta automaticamente um arquivo `*firebase-adminsdk*.json` em `.cert/` e exporta `FIREBASE_SERVICE_ACCOUNT_PATH`.
 
@@ -143,6 +147,14 @@ No Docker dev, o `scripts/dev-local.sh` detecta automaticamente um arquivo `*fir
 O login é feito via **Firebase Auth** (email/senha, link por email ou Google). O frontend envia o ID token e o backend valida com o Admin SDK. Sem token válido, as rotas `/api/*` retornam 401.
 
 Com `BQ_ENFORCE_USER_ACCESS=true`, o backend valida o vínculo do usuário na tabela `BQ_USER_ACCESS_TABLE` para upload/importação (`Atualize seus dados`). As consultas do dashboard permanecem liberadas para usuários autenticados.
+
+O cadastro usa Firebase Auth + Firestore e tenta auto-aprovação via UHub uma única vez. Se email/telefone normalizados baterem com uma pessoa canônica ativa no UHub, o usuário recebe `status_aprovacao=auto_aprovado`; caso contrário fica `pendente` para aprovação manual. Esse fluxo não consulta BigQuery no login/cadastro.
+
+Revalidação periódica dos vínculos UHub:
+
+```bash
+npm run auth:revalidate-uhub
+```
 
 Para **login por link**, o app envia um link para o email informado. Ao abrir o link, o navegador conclui o login automaticamente (ou solicita o email usado, se não estiver salvo).
 
