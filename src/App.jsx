@@ -24,6 +24,7 @@ import { AuthProvider } from './contexts/AuthProvider'
 import { useAuth } from './contexts/useAuth'
 import { UNIODONTO_INDICATORS } from './lib/uniodontoMetrics'
 import { fetchAccessProfile, fetchOperatorsCatalog, saveProfileCompletion } from './lib/accessProfile'
+import { getAuthErrorMessage } from './lib/auth'
 
 function LoadingState() {
   return (
@@ -424,7 +425,7 @@ function AppContent() {
     setIsAuthLoading(true)
     completeEmailLinkSignIn(storedEmail, window.location.href)
       .catch((err) => {
-        setAuthMessage(err?.message ?? 'Falha ao concluir login por link.')
+        setAuthMessage(getAuthErrorMessage(err, 'Falha ao concluir login por link.'))
       })
       .finally(() => {
         setIsAuthLoading(false)
@@ -437,7 +438,7 @@ function AppContent() {
     try {
       await signInWithEmail(email, password)
     } catch (err) {
-      setAuthMessage(err?.message ?? 'Falha ao autenticar.')
+      setAuthMessage(getAuthErrorMessage(err, 'Falha ao autenticar.'))
     } finally {
       setIsAuthLoading(false)
     }
@@ -449,7 +450,7 @@ function AppContent() {
     try {
       await signInWithGoogle()
     } catch (err) {
-      setAuthMessage(err?.message ?? 'Falha ao autenticar com Google.')
+      setAuthMessage(getAuthErrorMessage(err, 'Falha ao autenticar com Google.'))
     } finally {
       setIsAuthLoading(false)
     }
@@ -462,7 +463,7 @@ function AppContent() {
       await sendEmailLink(email)
       setAuthMessage('Link enviado. Verifique o email para continuar.')
     } catch (err) {
-      setAuthMessage(err?.message ?? 'Falha ao enviar link de acesso.')
+      setAuthMessage(getAuthErrorMessage(err, 'Falha ao enviar link de acesso.'))
     } finally {
       setIsAuthLoading(false)
     }
@@ -474,7 +475,7 @@ function AppContent() {
     try {
       await completeEmailLinkSignIn(email, window.location.href)
     } catch (err) {
-      setAuthMessage(err?.message ?? 'Falha ao concluir login por link.')
+      setAuthMessage(getAuthErrorMessage(err, 'Falha ao concluir login por link.'))
     } finally {
       setIsAuthLoading(false)
     }
@@ -497,7 +498,7 @@ function AppContent() {
       })
       setAccessProfile(nextProfile)
     } catch (err) {
-      setAuthMessage(err?.message ?? 'Falha ao criar conta.')
+      setAuthMessage(getAuthErrorMessage(err, 'Falha ao criar conta.'))
     } finally {
       setIsAuthLoading(false)
     }
@@ -510,7 +511,7 @@ function AppContent() {
       const targetEmail = await sendPasswordReset(email)
       setAuthMessage(`E-mail de redefinição enviado para ${targetEmail}.`)
     } catch (err) {
-      setAuthMessage(err?.message ?? 'Falha ao enviar e-mail de redefinição de senha.')
+      setAuthMessage(getAuthErrorMessage(err, 'Falha ao enviar e-mail de redefinição de senha.'))
     } finally {
       setIsAuthLoading(false)
     }
