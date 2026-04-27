@@ -20,6 +20,8 @@ const CONSOLIDATED_MART_ANS_TABLE =
   process.env.BQ_CONSOLIDATED_MART_ANS_TABLE ?? `${PROJECT_ID}.${AUX_DATASET_ID}.indicadores_mart_ans_consolidado`
 const CONSOLIDATED_MART_UNIODONTO_TABLE =
   process.env.BQ_CONSOLIDATED_MART_UNIODONTO_TABLE ?? `${PROJECT_ID}.${AUX_DATASET_ID}.indicadores_mart_uniodonto_consolidado`
+const BENEFICIARIOS_ODONTO_TABLE =
+  process.env.BQ_BENEFICIARIOS_ODONTO_TABLE ?? `${PROJECT_ID}.${DATASET_ID}.beneficiarios_odontologicas_por_operadora`
 
 const MART_SQL_PATH = path.resolve(__dirname, '../db/materialize_indicadores_mart.sql')
 
@@ -35,7 +37,7 @@ function quoteTableRef(name, defaultDataset = DATASET_ID) {
 function buildConsolidatedIndicatorSnapshotQuery() {
   const auxLatest = quoteTableRef(AUX_LATEST_VIEW, AUX_DATASET_ID)
   const officialSnapshot = quoteTableRef(OFFICIAL_INDICATOR_SNAPSHOT, DATASET_ID)
-  const obm = `\`${PROJECT_ID}.${DATASET_ID}.operadoras_beneficiarios_modalidade\``
+  const obm = quoteTableRef(BENEFICIARIOS_ODONTO_TABLE, DATASET_ID)
   const operadoras = `\`${PROJECT_ID}.${DATASET_ID}.operadoras\``
   const uniodontosAtivas = `\`${PROJECT_ID}.${DATASET_ID}.uniodontos_ativas\``
   const target = quoteTableRef(CONSOLIDATED_INDICATOR_SNAPSHOT, AUX_DATASET_ID)
@@ -53,7 +55,8 @@ function buildConsolidatedIndicatorSnapshotQuery() {
         Beneficiarios,
         Uniodonto,
         ATIVA,
-        modalidade
+        modalidade,
+        porte
       FROM ${obm}
       QUALIFY ROW_NUMBER() OVER (
         PARTITION BY reg_ans, Periodo
@@ -67,7 +70,8 @@ function buildConsolidatedIndicatorSnapshotQuery() {
         Beneficiarios,
         Uniodonto,
         ATIVA,
-        modalidade
+        modalidade,
+        porte
       FROM ${obm}
       QUALIFY ROW_NUMBER() OVER (
         PARTITION BY reg_ans
@@ -176,7 +180,11 @@ function buildConsolidatedIndicatorSnapshotQuery() {
           END
         ) AS ativa,
         MAX(SAFE_CAST(src.qt_beneficiarios AS INT64)) AS qt_beneficiarios,
-        MAX(IF(src.porte IS NOT NULL AND src.porte <> '', CAST(src.porte AS STRING), NULL)) AS porte,
+        COALESCE(
+          MAX(IF(src.porte IS NOT NULL AND src.porte <> '', CAST(src.porte AS STRING), NULL)),
+          MAX(IF(obm_p.porte IS NOT NULL AND obm_p.porte <> '', CAST(obm_p.porte AS STRING), NULL)),
+          MAX(IF(obm_l.porte IS NOT NULL AND obm_l.porte <> '', CAST(obm_l.porte AS STRING), NULL))
+        ) AS porte,
         SAFE_CAST(src.ano AS INT64) AS ano,
         SAFE_CAST(src.trimestre AS INT64) AS trimestre,
         MAX(DATE(SAFE_CAST(src.ano AS INT64), 1 + (SAFE_CAST(src.trimestre AS INT64) - 1) * 3, 1)) AS periodo_data,

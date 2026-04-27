@@ -21,6 +21,7 @@
     "data:create-bq-view": "node scripts/create_bq_view.js",
     "data:refresh-bq-demonstracoes-base": "node scripts/refresh_bq_demonstracoes_base.js",
     "data:refresh-bq-consolidated-indicators": "node scripts/refresh_bq_consolidated_indicators.js",
+    "data:sync-beneficiarios-odontologicas": "node scripts/sync_bq_beneficiarios_odontologicas.js",
     "auth:revalidate-uhub": "node scripts/revalidate_pfc_uhub_links.js",
     "data:materialize-bq-snapshot": "node scripts/materialize_bq_snapshot.js",
     "data:materialize-bq-mart": "node scripts/materialize_bq_mart.js",

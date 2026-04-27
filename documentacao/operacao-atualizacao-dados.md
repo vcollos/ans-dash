@@ -88,6 +88,13 @@ npm run data:refresh-bq-demonstracoes-base
 
 Esse comando recria `bigdata-467917.dash_ans.demonstracoes_contabeis` a partir da view oficial normalizada e preserva o schema esperado pelos fluxos do projeto.
 
+Para atualizar beneficiarios por operadora odontologica a partir da view oficial do datalake:
+```
+npm run data:sync-beneficiarios-odontologicas
+```
+
+Esse comando faz upsert idempotente por `(competencia, reg_ans)` em `bigdata-467917.dash_ans.beneficiarios_odontologicas_por_operadora`.
+
 ### 2) Atualizar a view base (se necessario)
 Se a view `indicadores_curados` precisa ser recriada:
 ```

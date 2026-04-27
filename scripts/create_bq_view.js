@@ -8,6 +8,8 @@ const FULL_SOURCE_TABLE = process.env.BQ_FULL_SOURCE_TABLE ?? 'demonstracoes_con
 const RAW_TABLE = process.env.BQ_RAW_TABLE ?? 'demonstracoes_contabeis_raw'
 const SOURCE_TABLE = process.env.BQ_SOURCE_TABLE ?? FULL_VIEW
 const TARGET_VIEW = process.env.BQ_VIEW ?? 'indicadores_curados'
+const BENEFICIARIOS_ODONTO_TABLE =
+  process.env.BQ_BENEFICIARIOS_ODONTO_TABLE ?? 'beneficiarios_odontologicas_por_operadora'
 const LOCATION = process.env.BQ_LOCATION ?? 'southamerica-east1'
 const SHOULD_CREATE_FULL_VIEW = (process.env.BQ_CREATE_FULL_VIEW ?? 'false').toLowerCase() === 'true'
 
@@ -45,7 +47,7 @@ function safeInt(expr) {
 function buildFullViewSql(sourceTableName, mode) {
   const target = qualified(FULL_VIEW, DERIVED_DATASET_ID)
   const source = qualified(sourceTableName, SOURCE_DATASET_ID)
-  const obm = qualified('operadoras_beneficiarios_modalidade', SOURCE_DATASET_ID)
+  const obm = qualified(BENEFICIARIOS_ODONTO_TABLE, DERIVED_DATASET_ID)
   const prestadores = qualified('prestadores_proprios', SOURCE_DATASET_ID)
   const operadoras = qualified('operadoras', SOURCE_DATASET_ID)
   const uniodontosAtivas = qualified('uniodontos_ativas', SOURCE_DATASET_ID)
@@ -134,7 +136,8 @@ obm_period AS (
     Beneficiarios,
     Uniodonto,
     ATIVA,
-    modalidade
+    modalidade,
+    porte
   FROM ${obm}
   QUALIFY ROW_NUMBER() OVER (
     PARTITION BY reg_ans, Periodo
@@ -149,7 +152,8 @@ obm_latest AS (
     Beneficiarios,
     Uniodonto,
     ATIVA,
-    modalidade
+    modalidade,
+    porte
   FROM ${obm}
   QUALIFY ROW_NUMBER() OVER (
     PARTITION BY reg_ans
@@ -198,6 +202,8 @@ SELECT
   COALESCE(NULLIF(dc.modalidade, ''), obm_p.modalidade, obm_l.modalidade, op.modalidade) AS modalidade,
   COALESCE(
     NULLIF(dc.porte, ''),
+    obm_p.porte,
+    obm_l.porte,
     CASE
       WHEN COALESCE(dc.Beneficiarios, obm_p.Beneficiarios, obm_l.Beneficiarios) IS NULL THEN NULL
       WHEN COALESCE(dc.Beneficiarios, obm_p.Beneficiarios, obm_l.Beneficiarios) <= 19999 THEN 'Pequeno Porte'
