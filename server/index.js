@@ -1414,7 +1414,7 @@ async function buildAuthProfilePayload(reqUser = {}, accessContext = {}) {
   } catch (err) {
     console.warn('[server] Falha ao carregar status de aprovação do usuário', err?.message ?? err)
   }
-  if (!onboardingLink && (accessContext?.canUploadRegAns ?? []).length > 0) {
+  if (!onboardingLink) {
     try {
       registrationProfile = await fetchUserProfile(reqUser)
     } catch (err) {
@@ -1440,6 +1440,16 @@ async function buildAuthProfilePayload(reqUser = {}, accessContext = {}) {
   const canUploadRegAns = accessContext?.isAdmin
     ? operators.map((item) => item.regAns)
     : accessContext?.canUploadRegAns ?? []
+  const hasUploadAccess = (accessContext?.canUploadRegAns ?? []).length > 0
+  const hasCompletedRegistrationProfile = registrationProfile?.isCompleted === true
+  const canAccess = onboardingLink
+    ? canAccessFromApprovalStatus(onboardingLink.statusAprovacao)
+    : accessContext?.isAdmin === true || hasUploadAccess
+  const requiresProfileCompletion =
+    accessContext?.isAdmin || hasUploadAccess || hasCompletedRegistrationProfile
+      ? false
+      : !onboardingLink || !onboardingLink.statusAprovacao || onboardingLink.statusAprovacao === APPROVAL_STATUS.REJECTED
+
   return {
     uid: reqUser?.uid ?? null,
     email: reqUser?.email ?? null,
@@ -1451,9 +1461,7 @@ async function buildAuthProfilePayload(reqUser = {}, accessContext = {}) {
     noAccess: false,
     approvalStatus: onboardingLink?.statusAprovacao ?? null,
     approvalReason: onboardingLink?.approvalReason ?? null,
-    canAccess: onboardingLink
-      ? canAccessFromApprovalStatus(onboardingLink.statusAprovacao)
-      : accessContext?.isAdmin === true || (accessContext?.canUploadRegAns ?? []).length > 0,
+    canAccess,
     uhubLink: onboardingLink
       ? {
           uhubPessoaId: onboardingLink.uhubPessoaId,
@@ -1462,9 +1470,7 @@ async function buildAuthProfilePayload(reqUser = {}, accessContext = {}) {
           uhubRevalidadoEm: onboardingLink.uhubRevalidadoEm,
         }
       : null,
-    requiresProfileCompletion: accessContext?.isAdmin || (!onboardingLink && (accessContext?.canUploadRegAns ?? []).length > 0)
-      ? false
-      : !onboardingLink || !onboardingLink.statusAprovacao || onboardingLink.statusAprovacao === APPROVAL_STATUS.REJECTED,
+    requiresProfileCompletion,
     registrationProfile: onboardingLink
       ? {
           firstName: onboardingLink.firstName ?? null,
