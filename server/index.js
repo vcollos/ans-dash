@@ -1406,6 +1406,101 @@ function createOnboardingLinkFallback(user = {}, profile = {}, verification = {}
   }
 }
 
+function mapPendingProfileRow(row = {}) {
+  return {
+    uid: String(row?.user_uid ?? '').trim() || null,
+    statusAprovacao: APPROVAL_STATUS.PENDING,
+    approvalReason: 'pendente_admin',
+    uhubPessoaId: null,
+    uhubVerificadoEm: null,
+    uhubMatchPor: null,
+    uhubTokenPrefix: null,
+    uhubRevalidadoEm: null,
+    firstName: toNullableString(row?.first_name),
+    lastName: toNullableString(row?.last_name),
+    phone: toNullableString(row?.phone),
+    phoneNormalized: normalizePhoneForUhub(row?.phone),
+    phoneIsWhatsapp: row?.phone_is_whatsapp === true,
+    email: normalizeEmail(row?.user_email),
+    jobTitle: toNullableString(row?.job_title),
+    roleFunction: toNullableString(row?.department),
+    department: toNullableString(row?.department),
+    regAns: normalizeRegAns(row?.reg_ans),
+    operatorName: toNullableString(row?.operator_name),
+    createdAt: serializeFirestoreTimestamp(row?.created_at),
+    updatedAt: serializeFirestoreTimestamp(row?.updated_at),
+  }
+}
+
+async function listPendingAccountsFromBigQuery() {
+  await Promise.all([ensureUserProfileTable(), ensureUserAccessTable()])
+  const [rows] = await bigquery.query({
+    query: `
+      SELECT
+        p.user_uid,
+        p.user_email,
+        p.first_name,
+        p.last_name,
+        p.phone,
+        p.job_title,
+        p.department,
+        p.reg_ans,
+        p.operator_name,
+        p.created_at,
+        p.updated_at
+      FROM \`${USER_PROFILE_TABLE_REF.fqn}\` p
+      LEFT JOIN \`${USER_ACCESS_TABLE_REF.fqn}\` a
+        ON REGEXP_REPLACE(CAST(a.reg_ans AS STRING), r'\\D', '') = REGEXP_REPLACE(CAST(p.reg_ans AS STRING), r'\\D', '')
+        AND COALESCE(a.active, TRUE) IS TRUE
+        AND (
+          (p.user_uid IS NOT NULL AND CAST(a.user_uid AS STRING) = CAST(p.user_uid AS STRING))
+          OR (
+            p.user_email IS NOT NULL
+            AND LOWER(TRIM(CAST(a.user_email AS STRING))) = LOWER(TRIM(CAST(p.user_email AS STRING)))
+          )
+        )
+      WHERE COALESCE(p.is_completed, FALSE) IS TRUE
+        AND NULLIF(TRIM(CAST(p.user_uid AS STRING)), '') IS NOT NULL
+        AND a.user_uid IS NULL
+        AND a.user_email IS NULL
+      ORDER BY p.updated_at DESC
+      LIMIT 100
+    `,
+    location: BQ_LOCATION,
+  })
+  return normalizeBigQueryRows(rows).map(mapPendingProfileRow).filter((item) => item.uid)
+}
+
+async function fetchPendingAccountFromBigQuery(uid) {
+  const normalizedUid = String(uid ?? '').trim()
+  if (!normalizedUid) return null
+  await ensureUserProfileTable()
+  const [rows] = await bigquery.query({
+    query: `
+      SELECT
+        user_uid,
+        user_email,
+        first_name,
+        last_name,
+        phone,
+        job_title,
+        department,
+        reg_ans,
+        operator_name,
+        created_at,
+        updated_at
+      FROM \`${USER_PROFILE_TABLE_REF.fqn}\`
+      WHERE CAST(user_uid AS STRING) = @uid
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT 1
+    `,
+    params: { uid: normalizedUid },
+    location: BQ_LOCATION,
+  })
+  const row = normalizeBigQueryRows(rows)[0]
+  return row ? mapPendingProfileRow(row) : null
+}
+
 async function buildAuthProfilePayload(reqUser = {}, accessContext = {}) {
   let registrationProfile = null
   let onboardingLink = null
@@ -2552,19 +2647,25 @@ function ensureAdminRequest(req, res) {
 app.get('/api/admin/accounts/pending', async (req, res) => {
   if (!ensureAdminRequest(req, res)) return
   try {
-    const [pendingSnapshot, reviewSnapshot] = await Promise.all([
-      firestore
-        .collection(PFC_ONBOARDING_COLLECTION)
-        .where('status_aprovacao', '==', APPROVAL_STATUS.PENDING)
-        .limit(100)
-        .get(),
-      firestore
-        .collection(PFC_ONBOARDING_COLLECTION)
-        .where('status_aprovacao', '==', APPROVAL_STATUS.PENDING_REVIEW)
-        .limit(100)
-        .get(),
-    ])
-    const accounts = [...pendingSnapshot.docs, ...reviewSnapshot.docs].map(mapOnboardingDoc)
+    let accounts = []
+    try {
+      const [pendingSnapshot, reviewSnapshot] = await Promise.all([
+        firestore
+          .collection(PFC_ONBOARDING_COLLECTION)
+          .where('status_aprovacao', '==', APPROVAL_STATUS.PENDING)
+          .limit(100)
+          .get(),
+        firestore
+          .collection(PFC_ONBOARDING_COLLECTION)
+          .where('status_aprovacao', '==', APPROVAL_STATUS.PENDING_REVIEW)
+          .limit(100)
+          .get(),
+      ])
+      accounts = [...pendingSnapshot.docs, ...reviewSnapshot.docs].map(mapOnboardingDoc)
+    } catch (err) {
+      console.warn('[server] Listagem admin caiu para BigQuery', err?.message ?? err)
+      accounts = await listPendingAccountsFromBigQuery()
+    }
     res.setHeader('Cache-Control', 'no-store')
     return res.json({ accounts })
   } catch (err) {
@@ -2578,22 +2679,46 @@ app.post('/api/admin/accounts/:uid/approve', async (req, res) => {
   const uid = String(req.params.uid ?? '').trim()
   if (!uid) return res.status(400).json({ error: 'UID inválido.' })
   try {
-    const ref = getOnboardingDocRef(uid)
-    const snapshot = await ref.get()
-    if (!snapshot.exists) return res.status(404).json({ error: 'Conta não encontrada.' })
-    const current = mapOnboardingDoc(snapshot)
-    await ref.set(
+    let current = null
+    try {
+      const ref = getOnboardingDocRef(uid)
+      const snapshot = await ref.get()
+      if (snapshot.exists) {
+        current = mapOnboardingDoc(snapshot)
+        await ref.set(
+          {
+            status_aprovacao: APPROVAL_STATUS.MANUAL_APPROVED,
+            approval_reason: 'aprovado_admin',
+            approved_by_email: normalizeEmail(req.user?.email),
+            approved_at: admin.firestore.FieldValue.serverTimestamp(),
+            updated_at: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        )
+      }
+    } catch (err) {
+      console.warn('[server] Aprovação admin caiu para BigQuery', err?.message ?? err)
+    }
+    if (!current) {
+      current = await fetchPendingAccountFromBigQuery(uid)
+    }
+    if (!current) return res.status(404).json({ error: 'Conta não encontrada.' })
+    await upsertApprovedUserAccess(
+      { uid, email: current.email },
       {
-        status_aprovacao: APPROVAL_STATUS.MANUAL_APPROVED,
-        approval_reason: 'aprovado_admin',
-        approved_by_email: normalizeEmail(req.user?.email),
-        approved_at: admin.firestore.FieldValue.serverTimestamp(),
-        updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        email: current.email,
+        regAns: current.regAns,
+        operatorName: current.operatorName,
       },
-      { merge: true },
     )
     userAccessCache.delete(getUserAccessCacheKey({ uid, email: current?.email }))
-    return res.json({ account: await fetchOnboardingLink(uid) })
+    return res.json({
+      account: {
+        ...current,
+        statusAprovacao: APPROVAL_STATUS.MANUAL_APPROVED,
+        approvalReason: 'aprovado_admin',
+      },
+    })
   } catch (err) {
     console.error('[server] Falha ao aprovar conta', err)
     return res.status(500).json({ error: 'Falha ao aprovar conta.' })
