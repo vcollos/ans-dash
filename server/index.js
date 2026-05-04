@@ -22,9 +22,11 @@ const __dirname = path.dirname(__filename)
 const HOST = process.env.SERVER_HOST ?? '0.0.0.0'
 const PORT = process.env.SERVER_PORT ?? process.env.PORT ?? 4000
 const BQ_PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
-const BQ_DATASET = process.env.BQ_DATASET ?? 'dash_ans'
+const rawBqDataset = String(process.env.BQ_DATASET ?? 'dash_ans').trim()
+const BQ_DATASET = BQ_PROJECT_ID === 'bigdata-467917' && rawBqDataset === 'datalake_ans' ? 'dash_ans' : rawBqDataset
 const BQ_MART_DATASET = process.env.BQ_MART_DATASET ?? 'dash_ans'
-const BQ_LOCATION = process.env.BQ_LOCATION ?? 'southamerica-east1'
+const rawBqLocation = String(process.env.BQ_LOCATION ?? 'southamerica-east1').trim()
+const BQ_LOCATION = BQ_PROJECT_ID === 'bigdata-467917' && rawBqLocation.toUpperCase() === 'US' ? 'southamerica-east1' : rawBqLocation
 const BQ_EXPORT_VIEW =
   process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? `${BQ_MART_DATASET}.indicadores_curados_snapshot`
 const BQ_MART_ANS_TABLE = process.env.BQ_MART_ANS_TABLE ?? process.env.BQ_DATASET_VIEW_ANS ?? ''
