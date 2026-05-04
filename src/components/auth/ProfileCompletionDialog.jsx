@@ -91,12 +91,21 @@ export default function ProfileCompletionDialog({
     })
   }
 
+  const header = inline ? (
+    <div className="flex flex-col space-y-1.5 text-center sm:text-left">
+      <h1 className="text-lg font-semibold leading-none tracking-tight">{title}</h1>
+      <p className="text-sm text-muted-foreground">{description}</p>
+    </div>
+  ) : (
+    <DialogHeader>
+      <DialogTitle>{title}</DialogTitle>
+      <DialogDescription>{description}</DialogDescription>
+    </DialogHeader>
+  )
+
   const content = (
     <>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
+        {header}
         <form className="space-y-4" onSubmit={handleSubmit} autoComplete="off">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">

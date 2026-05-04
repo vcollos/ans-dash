@@ -1316,6 +1316,96 @@ async function upsertUserProfile(user = {}, payload = {}) {
   })
 }
 
+async function upsertApprovedUserAccess(user = {}, payload = {}) {
+  const uid = String(user.uid ?? '').trim() || null
+  const email = normalizeEmail(payload.email ?? user.email)
+  const regAns = normalizeRegAns(payload.regAns)
+  if (!regAns || (!uid && !email)) return
+  await ensureUserAccessTable()
+  await bigquery.query({
+    query: `
+      MERGE \`${USER_ACCESS_TABLE_REF.fqn}\` target
+      USING (
+        SELECT
+          @uid AS user_uid,
+          @email AS user_email,
+          @reg_ans AS reg_ans
+      ) source
+      ON (
+        REGEXP_REPLACE(CAST(target.reg_ans AS STRING), r'\\D', '') = source.reg_ans
+        AND (
+          (source.user_uid IS NOT NULL AND CAST(target.user_uid AS STRING) = source.user_uid)
+          OR (source.user_email IS NOT NULL AND LOWER(TRIM(CAST(target.user_email AS STRING))) = source.user_email)
+        )
+      )
+      WHEN MATCHED THEN
+        UPDATE SET
+          operator_name = @operator_name,
+          can_upload = TRUE,
+          role = 'user',
+          active = TRUE,
+          updated_at = CURRENT_TIMESTAMP(),
+          user_uid = COALESCE(target.user_uid, source.user_uid),
+          user_email = COALESCE(target.user_email, source.user_email)
+      WHEN NOT MATCHED THEN
+        INSERT (
+          user_uid,
+          user_email,
+          reg_ans,
+          operator_name,
+          can_upload,
+          role,
+          active,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          source.user_uid,
+          source.user_email,
+          source.reg_ans,
+          @operator_name,
+          TRUE,
+          'user',
+          TRUE,
+          CURRENT_TIMESTAMP(),
+          CURRENT_TIMESTAMP()
+        )
+    `,
+    params: {
+      uid,
+      email,
+      reg_ans: regAns,
+      operator_name: toNullableString(payload.operatorName),
+    },
+    location: BQ_LOCATION,
+  })
+}
+
+function createOnboardingLinkFallback(user = {}, profile = {}, verification = {}) {
+  return {
+    uid: String(user.uid ?? '').trim() || null,
+    statusAprovacao: verification.status ?? APPROVAL_STATUS.PENDING,
+    approvalReason: verification.reason ?? null,
+    uhubPessoaId: verification.uhubPessoaId ?? null,
+    uhubVerificadoEm: verification.uhubPessoaId ? new Date().toISOString() : null,
+    uhubMatchPor: verification.matchBy ?? null,
+    uhubTokenPrefix: verification.uhubPessoaId ? UHUB_API_TOKEN_PREFIX : null,
+    firstName: profile.firstName ?? null,
+    lastName: profile.lastName ?? null,
+    phone: profile.phone ?? null,
+    phoneNormalized: normalizePhoneForUhub(profile.phone),
+    phoneIsWhatsapp: profile.phoneIsWhatsapp === true,
+    email: normalizeEmail(profile.email ?? user.email),
+    jobTitle: profile.jobTitle ?? null,
+    roleFunction: profile.roleFunction ?? null,
+    department: profile.department ?? profile.roleFunction ?? null,
+    regAns: normalizeRegAns(profile.regAns),
+    operatorName: profile.operatorName ?? null,
+    createdAt: null,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
 async function buildAuthProfilePayload(reqUser = {}, accessContext = {}) {
   let registrationProfile = null
   let onboardingLink = null
@@ -2393,7 +2483,17 @@ app.post('/api/auth/profile/complete', async (req, res) => {
       ...profilePayload,
     })
 
-    const onboardingLink = await saveOnboardingLink(req.user, profilePayload, verification)
+    if (canAccessFromApprovalStatus(verification.status)) {
+      await upsertApprovedUserAccess(req.user, profilePayload)
+    }
+
+    let onboardingLink = createOnboardingLinkFallback(req.user, profilePayload, verification)
+    try {
+      onboardingLink = await saveOnboardingLink(req.user, profilePayload, verification)
+    } catch (err) {
+      console.warn('[server] Falha ao persistir vínculo de onboarding no Firestore', err?.message ?? err)
+    }
+
     await auditOnboardingAttempt({
       uid: req.user?.uid,
       email: profileEmail,
