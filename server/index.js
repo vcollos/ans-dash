@@ -2495,14 +2495,8 @@ app.get('/api/auth/status', (req, res) => {
 })
 
 app.get('/api/auth/profile', async (req, res) => {
-  const accessContext = req.accessContext ?? {
-    enforced: ENFORCE_USER_ACCESS,
-    isAdmin: false,
-    operators: [],
-    allowedRegAns: [],
-    canUploadRegAns: [],
-  }
   try {
+    const accessContext = await resolveUserAccessContext(req.user)
     const payload = await buildAuthProfilePayload(req.user, accessContext)
     res.setHeader('Cache-Control', 'no-store')
     return res.json(payload)
