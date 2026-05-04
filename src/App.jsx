@@ -608,6 +608,7 @@ function AppContent() {
           title="Complete seu cadastro"
           description="Informe seu vínculo com a Uniodonto e seus dados cadastrais para validação de acesso."
           submitLabel="Salvar cadastro"
+          inline={true}
           lockOpen={true}
           regAnsRequired={!accessProfile?.isAdmin}
           onSubmit={handleProfileCompletionSubmit}

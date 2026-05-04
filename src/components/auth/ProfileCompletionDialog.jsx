@@ -35,6 +35,7 @@ export default function ProfileCompletionDialog({
   title = 'Complete seu cadastro',
   description = 'Para enviar dados no menu "Atualize seus dados", informe seu vínculo com a Uniodonto e seus dados de contato.',
   submitLabel = 'Salvar cadastro',
+  inline = false,
   lockOpen = false,
   regAnsRequired = true,
   onSendPasswordReset,
@@ -90,27 +91,20 @@ export default function ProfileCompletionDialog({
     })
   }
 
-  return (
-    <Dialog open={open} onOpenChange={lockOpen ? () => {} : onOpenChange}>
-      <DialogContent
-        className={`max-w-xl ${lockOpen ? '[&>button]:hidden' : ''}`}
-        onEscapeKeyDown={(event) => {
-          if (lockOpen) event.preventDefault()
-        }}
-        onInteractOutside={(event) => {
-          if (lockOpen) event.preventDefault()
-        }}
-      >
+  const content = (
+    <>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <form className="space-y-4" onSubmit={handleSubmit}>
+        <form className="space-y-4" onSubmit={handleSubmit} autoComplete="off">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="profile-first-name">Nome</Label>
               <Input
                 id="profile-first-name"
+                name="profile-first-name"
+                autoComplete="off"
                 value={form.firstName}
                 onChange={(event) => updateField('firstName', event.target.value)}
                 disabled={isSubmitting}
@@ -121,6 +115,8 @@ export default function ProfileCompletionDialog({
               <Label htmlFor="profile-last-name">Sobrenome</Label>
               <Input
                 id="profile-last-name"
+                name="profile-last-name"
+                autoComplete="off"
                 value={form.lastName}
                 onChange={(event) => updateField('lastName', event.target.value)}
                 disabled={isSubmitting}
@@ -133,6 +129,8 @@ export default function ProfileCompletionDialog({
               <Label htmlFor="profile-phone">Telefone</Label>
               <Input
                 id="profile-phone"
+                name="profile-phone"
+                autoComplete="off"
                 value={form.phone}
                 onChange={(event) => updateField('phone', event.target.value)}
                 placeholder="(11) 99999-9999 ou (11) 3333-3333"
@@ -152,6 +150,8 @@ export default function ProfileCompletionDialog({
               <Label htmlFor="profile-email">E-mail</Label>
               <Input
                 id="profile-email"
+                name="profile-email"
+                autoComplete="off"
                 type="email"
                 value={form.email}
                 onChange={(event) => updateField('email', event.target.value)}
@@ -165,6 +165,8 @@ export default function ProfileCompletionDialog({
               <Label htmlFor="profile-job-title">Cargo</Label>
               <Input
                 id="profile-job-title"
+                name="profile-job-title"
+                autoComplete="off"
                 value={form.jobTitle}
                 onChange={(event) => updateField('jobTitle', event.target.value)}
                 disabled={isSubmitting}
@@ -175,6 +177,8 @@ export default function ProfileCompletionDialog({
               <Label htmlFor="profile-role-function">Função</Label>
               <Input
                 id="profile-role-function"
+                name="profile-role-function"
+                autoComplete="off"
                 value={form.roleFunction}
                 onChange={(event) => updateField('roleFunction', event.target.value)}
                 disabled={isSubmitting}
@@ -233,6 +237,25 @@ export default function ProfileCompletionDialog({
             </Button>
           </DialogFooter>
         </form>
+    </>
+  )
+
+  if (inline) {
+    return <section className="w-full max-w-xl border border-border/60 bg-background p-6 shadow-lg">{content}</section>
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={lockOpen ? () => {} : onOpenChange}>
+      <DialogContent
+        className={`max-w-xl ${lockOpen ? '[&>button]:hidden' : ''}`}
+        onEscapeKeyDown={(event) => {
+          if (lockOpen) event.preventDefault()
+        }}
+        onInteractOutside={(event) => {
+          if (lockOpen) event.preventDefault()
+        }}
+      >
+        {content}
       </DialogContent>
     </Dialog>
   )
