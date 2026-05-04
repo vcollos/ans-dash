@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  assertDatasetReady,
-  fetchOperatorOptions,
   fetchOperatorLatestSnapshot,
   fetchOperatorSnapshot,
   fetchKpiSummary,
@@ -15,7 +13,7 @@ import {
   fetchUniodontoPerCapitaSeries,
   fetchTrendSeriesBatch,
   fetchTableData,
-  fetchAvailablePeriods,
+  fetchDashboardBootstrap,
   fetchRegulatoryReport,
   fetchRegulatoryScoreForFilters,
   VIRTUAL_OPERATOR_UNIODONTO,
@@ -99,6 +97,7 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
   const [options, setOptions] = useState(defaultOptions)
   const [periodOptions, setPeriodOptions] = useState([])
   const [kpis, setKpis] = useState(null)
+  const [dashboardSummary, setDashboardSummary] = useState(null)
   const [monetarySummary, setMonetarySummary] = useState(null)
   const [rankingMetricState, setRankingMetricState] = useState(DEFAULT_RANKING_METRIC)
   const [rankingData, setRankingData] = useState({ rows: [], operatorRow: null })
@@ -268,9 +267,7 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
     async function bootstrap() {
       try {
         setStatus('loading')
-        await assertDatasetReady()
-        if (cancelled) return
-        const [operatorNames, availablePeriods] = await Promise.all([fetchOperatorOptions(), fetchAvailablePeriods()])
+        const { operatorNames, availablePeriods } = await fetchDashboardBootstrap()
         if (cancelled) return
         setOptions({
           operadoras: operatorNames,
@@ -303,6 +300,37 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
     lastAutoOperatorRef.current = normalized
     applyOperatorSelection(match)
   }, [filters.search, operatorContext?.name, options.operadoras, applyOperatorSelection])
+
+  useEffect(() => {
+    if (status !== 'ready') return
+    let cancelled = false
+    async function loadDashboardSummary() {
+      try {
+        setDashboardSummary(null)
+        const periodFilters = {
+          anos: resolvedFilters.anos ?? [],
+          trimestres: resolvedFilters.trimestres ?? [],
+        }
+        const summaryFilters = applyUniodontoModeFilters(applyComparisonFilters(periodFilters))
+        const summary = await fetchKpiSummary(summaryFilters)
+        if (cancelled) return
+        setDashboardSummary(summary)
+      } catch (err) {
+        console.warn('[Dashboard] Falha ao carregar resumo geral', err)
+      }
+    }
+    loadDashboardSummary()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    status,
+    resolvedFilters.anos,
+    resolvedFilters.trimestres,
+    comparisonFilterQuery,
+    applyComparisonFilters,
+    applyUniodontoModeFilters,
+  ])
 
   useEffect(() => {
     if (status !== 'ready' || !isIndicatorsTab) return
@@ -815,6 +843,7 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
     options,
     periodOptions,
     kpis,
+    dashboardSummary,
     rankingMetric: rankingMetricState,
     setRankingMetric,
     rankingData,

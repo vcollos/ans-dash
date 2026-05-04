@@ -3,7 +3,8 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signInWithPopup,
+  getRedirectResult,
+  signInWithRedirect,
   signOut as firebaseSignOut,
   sendSignInLinkToEmail,
   isSignInWithEmailLink,
@@ -21,6 +22,11 @@ export function AuthProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
+    getRedirectResult(auth).catch((error) => {
+      console.warn('[auth] Falha ao concluir login Google por redirecionamento', error)
+      setAuthError(error)
+      setIsLoading(false)
+    })
     const unsub = onAuthStateChanged(
       auth,
       (currentUser) => {
@@ -50,8 +56,8 @@ export function AuthProvider({ children }) {
 
   const signInWithGoogle = useCallback(async () => {
     setAuthError(null)
-    const result = await signInWithPopup(auth, googleProvider)
-    return result.user
+    await signInWithRedirect(auth, googleProvider)
+    return null
   }, [])
 
   const sendEmailLink = useCallback(async (email, continueUrl) => {

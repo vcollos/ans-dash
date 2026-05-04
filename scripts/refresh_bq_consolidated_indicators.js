@@ -22,6 +22,8 @@ const CONSOLIDATED_MART_UNIODONTO_TABLE =
   process.env.BQ_CONSOLIDATED_MART_UNIODONTO_TABLE ?? `${PROJECT_ID}.${AUX_DATASET_ID}.indicadores_mart_uniodonto_consolidado`
 const BENEFICIARIOS_ODONTO_TABLE =
   process.env.BQ_BENEFICIARIOS_ODONTO_TABLE ?? `${PROJECT_ID}.${DATASET_ID}.beneficiarios_odontologicas_por_operadora`
+const BQ_MAX_BYTES_BILLED = parseBytesLimit(process.env.BQ_MAX_BYTES_BILLED, 1_073_741_824)
+const SHOULD_EXECUTE = process.env.BQ_EXECUTE === 'true'
 
 const MART_SQL_PATH = path.resolve(__dirname, '../db/materialize_indicadores_mart.sql')
 
@@ -32,6 +34,49 @@ function quoteTableRef(name, defaultDataset = DATASET_ID) {
   }
   if (normalized.includes('.')) return `\`${normalized}\``
   return `\`${PROJECT_ID}.${defaultDataset}.${normalized}\``
+}
+
+function parseBytesLimit(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback
+}
+
+function formatBytes(bytes) {
+  const numeric = Number(bytes)
+  if (!Number.isFinite(numeric)) return 'desconhecido'
+  if (numeric < 1024) return `${numeric} B`
+  if (numeric < 1024 ** 2) return `${(numeric / 1024).toFixed(2)} KiB`
+  if (numeric < 1024 ** 3) return `${(numeric / 1024 ** 2).toFixed(2)} MiB`
+  return `${(numeric / 1024 ** 3).toFixed(2)} GiB`
+}
+
+function assertWithinBytesLimit(bytes, label) {
+  if (!Number.isFinite(BQ_MAX_BYTES_BILLED) || BQ_MAX_BYTES_BILLED <= 0) return
+  if (Number(bytes) > BQ_MAX_BYTES_BILLED) {
+    throw new Error(
+      `${label} excede BQ_MAX_BYTES_BILLED=${BQ_MAX_BYTES_BILLED} (${formatBytes(BQ_MAX_BYTES_BILLED)}). ` +
+        `Estimado: ${bytes} (${formatBytes(bytes)}).`,
+    )
+  }
+}
+
+async function dryRunQuery(bigquery, query, label) {
+  const [job] = await bigquery.createQueryJob({
+    query,
+    location: LOCATION,
+    dryRun: true,
+    useQueryCache: false,
+    maximumBytesBilled:
+      Number.isFinite(BQ_MAX_BYTES_BILLED) && BQ_MAX_BYTES_BILLED > 0
+        ? String(Math.trunc(BQ_MAX_BYTES_BILLED))
+        : undefined,
+    defaultDataset: { projectId: PROJECT_ID, datasetId: DATASET_ID },
+  })
+  const bytes = Number(job.metadata?.statistics?.totalBytesProcessed ?? job.metadata?.statistics?.query?.totalBytesProcessed ?? 0)
+  console.log(`[bq-consolidated] dry-run ${label}: ${bytes} bytes (${formatBytes(bytes)})`)
+  assertWithinBytesLimit(bytes, label)
+  return bytes
 }
 
 function buildConsolidatedIndicatorSnapshotQuery() {
@@ -370,10 +415,31 @@ async function refreshConsolidatedIndicators() {
   const snapshotQuery = buildConsolidatedIndicatorSnapshotQuery()
   const martQuery = buildConsolidatedIndicatorMartsQuery()
 
+  await dryRunQuery(bigquery, snapshotQuery, CONSOLIDATED_INDICATOR_SNAPSHOT)
+  await dryRunQuery(bigquery, martQuery, `${CONSOLIDATED_MART_ANS_TABLE} + ${CONSOLIDATED_MART_UNIODONTO_TABLE}`)
+  if (!SHOULD_EXECUTE) {
+    console.log('[bq-consolidated] Dry-run concluido. Nenhum artefato foi atualizado. Defina BQ_EXECUTE=true para executar.')
+    return
+  }
+
   console.log(`[bq-consolidated] Atualizando ${CONSOLIDATED_INDICATOR_SNAPSHOT}...`)
-  await bigquery.query({ query: snapshotQuery, location: LOCATION })
+  await bigquery.query({
+    query: snapshotQuery,
+    location: LOCATION,
+    maximumBytesBilled:
+      Number.isFinite(BQ_MAX_BYTES_BILLED) && BQ_MAX_BYTES_BILLED > 0
+        ? String(Math.trunc(BQ_MAX_BYTES_BILLED))
+        : undefined,
+  })
   console.log(`[bq-consolidated] Atualizando ${CONSOLIDATED_MART_ANS_TABLE} e ${CONSOLIDATED_MART_UNIODONTO_TABLE}...`)
-  await bigquery.query({ query: martQuery, location: LOCATION })
+  await bigquery.query({
+    query: martQuery,
+    location: LOCATION,
+    maximumBytesBilled:
+      Number.isFinite(BQ_MAX_BYTES_BILLED) && BQ_MAX_BYTES_BILLED > 0
+        ? String(Math.trunc(BQ_MAX_BYTES_BILLED))
+        : undefined,
+  })
   console.log('[bq-consolidated] Artefatos consolidados atualizados com sucesso.')
 }
 

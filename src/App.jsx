@@ -76,6 +76,7 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile, onOpenAdminAccou
     options,
     periodOptions,
     kpis,
+    dashboardSummary,
     rankingMetric,
     setRankingMetric,
     rankingData,
@@ -115,6 +116,7 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile, onOpenAdminAccou
   const comparisonLabel = useMemo(() => describeComparisonFilters(comparisonFilters), [comparisonFilters])
   const trendPrimaryLabel = operatorInsight?.operatorName ?? 'Média dos filtros'
   const isRefreshingData = isQuerying || isTrendLoading
+  const headerSummary = dashboardSummary ?? (operatorContext?.name ? null : kpis)
   const uploadOperators = useMemo(
     () =>
       (accessProfile?.operators ?? [])
@@ -148,7 +150,7 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile, onOpenAdminAccou
     <div className="min-h-screen bg-muted/20">
       <main className="flex min-h-screen w-full flex-col gap-6 px-[3vw] py-[3vh]">
         <AppHeader
-          summary={kpis}
+          summary={headerSummary}
           onOpenFilters={() => setFiltersSidebarOpen(true)}
           onLogout={onLogout}
           onOpenProfile={onOpenProfile}

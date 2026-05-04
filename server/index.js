@@ -152,8 +152,16 @@ const bigquery = new BigQuery({
   projectId: BQ_PROJECT_ID,
 })
 
-const QUERY_CACHE_TTL_MS = Number(process.env.QUERY_CACHE_TTL_MS ?? 60_000)
+function parseBytesLimit(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback
+}
+
+const QUERY_CACHE_TTL_MS = Number(process.env.QUERY_CACHE_TTL_MS ?? 15 * 60_000)
 const QUERY_CACHE_MAX_ENTRIES = Number(process.env.QUERY_CACHE_MAX_ENTRIES ?? 250)
+const BQ_MAX_BYTES_BILLED = parseBytesLimit(process.env.BQ_MAX_BYTES_BILLED, 1_073_741_824)
+const BQ_EXECUTE = process.env.BQ_EXECUTE === 'true'
 const DEFAULT_DEMONSTRACOES_STATUS = 'FECHADO'
 const DEFAULT_DEMONSTRACOES_TIPO_ENVIO = 'NORMAL'
 const DEFAULT_DEMONSTRACOES_MODALIDADE = 'Cooperativa odontológica'
@@ -216,6 +224,11 @@ const ALLOWED_TABLES = (() => {
     add(CONSOLIDATED_MART_ANS_REF.fqn)
     add(CONSOLIDATED_MART_UNIODONTO_REF.fqn)
   }
+  add(AUX_DEMONSTRACOES_LATEST_VIEW_REF.fqn)
+  add(CONSOLIDATED_DEMONSTRACOES_VIEW_REF.fqn)
+  add(CONSOLIDATED_INDICATOR_SNAPSHOT_REF.fqn)
+  add(CONSOLIDATED_MART_ANS_REF.fqn)
+  add(CONSOLIDATED_MART_UNIODONTO_REF.fqn)
   return allowed
 })()
 
@@ -392,7 +405,12 @@ function getCachedEntry(key) {
 function setCachedEntry(key, entry) {
   if (!Number.isFinite(QUERY_CACHE_TTL_MS) || QUERY_CACHE_TTL_MS <= 0) return
   if (!Number.isFinite(QUERY_CACHE_MAX_ENTRIES) || QUERY_CACHE_MAX_ENTRIES <= 0) return
-  queryCache.set(key, { rows: entry.rows, fields: entry.fields ?? [], expiresAt: Date.now() + QUERY_CACHE_TTL_MS })
+  queryCache.set(key, {
+    rows: entry.rows,
+    fields: entry.fields ?? [],
+    stats: entry.stats ?? {},
+    expiresAt: Date.now() + QUERY_CACHE_TTL_MS,
+  })
   while (queryCache.size > QUERY_CACHE_MAX_ENTRIES) {
     const oldestKey = queryCache.keys().next().value
     if (!oldestKey) break
@@ -460,8 +478,14 @@ function normalizeBigQueryRows(rows) {
   return rows.map((row) => normalizeBigQueryScalar(row))
 }
 
-async function runBigQuery(queryText) {
-  const [rows, metadata] = await bigquery.query({
+function normalizeBigQueryStatNumber(value) {
+  if (value === null || value === undefined || value === '') return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+function buildQueryJobOptions(queryText) {
+  const options = {
     query: queryText,
     location: BQ_LOCATION,
     useQueryCache: true,
@@ -469,9 +493,87 @@ async function runBigQuery(queryText) {
       projectId: BQ_PROJECT_ID,
       datasetId: BQ_DATASET,
     },
+  }
+  if (Number.isFinite(BQ_MAX_BYTES_BILLED) && BQ_MAX_BYTES_BILLED > 0) {
+    options.maximumBytesBilled = String(Math.trunc(BQ_MAX_BYTES_BILLED))
+  }
+  return options
+}
+
+function formatBytes(bytes) {
+  const numeric = Number(bytes)
+  if (!Number.isFinite(numeric)) return 'desconhecido'
+  if (numeric < 1024) return `${numeric} B`
+  if (numeric < 1024 ** 2) return `${(numeric / 1024).toFixed(2)} KiB`
+  if (numeric < 1024 ** 3) return `${(numeric / 1024 ** 2).toFixed(2)} MiB`
+  return `${(numeric / 1024 ** 3).toFixed(2)} GiB`
+}
+
+function assertWithinBytesLimit(bytes, label) {
+  if (!Number.isFinite(BQ_MAX_BYTES_BILLED) || BQ_MAX_BYTES_BILLED <= 0) return
+  if (Number(bytes) > BQ_MAX_BYTES_BILLED) {
+    throw new Error(
+      `${label} excede BQ_MAX_BYTES_BILLED=${BQ_MAX_BYTES_BILLED} (${formatBytes(BQ_MAX_BYTES_BILLED)}). ` +
+        `Estimado: ${bytes} (${formatBytes(bytes)}).`,
+    )
+  }
+}
+
+async function dryRunBigQueryMutation(queryText, label) {
+  const [job] = await bigquery.createQueryJob({
+    query: queryText,
+    location: BQ_LOCATION,
+    dryRun: true,
+    useQueryCache: false,
+    defaultDataset: {
+      projectId: BQ_PROJECT_ID,
+      datasetId: BQ_DATASET,
+    },
+    maximumBytesBilled:
+      Number.isFinite(BQ_MAX_BYTES_BILLED) && BQ_MAX_BYTES_BILLED > 0
+        ? String(Math.trunc(BQ_MAX_BYTES_BILLED))
+        : undefined,
   })
-  const fields = metadata?.schema?.fields ?? []
-  return { rows: normalizeBigQueryRows(rows), fields }
+  const bytes = normalizeBigQueryStatNumber(
+    job.metadata?.statistics?.totalBytesProcessed ?? job.metadata?.statistics?.query?.totalBytesProcessed,
+  ) ?? 0
+  console.log(`[server] dry-run ${label}: ${bytes} bytes (${formatBytes(bytes)})`)
+  assertWithinBytesLimit(bytes, label)
+  return bytes
+}
+
+async function runBigQueryMutationWithGuard(queryText, label) {
+  await dryRunBigQueryMutation(queryText, label)
+  if (!BQ_EXECUTE) {
+    console.log(`[server] ${label}: dry-run concluido; escrita bloqueada. Defina BQ_EXECUTE=true para executar.`)
+    return { executed: false }
+  }
+  await bigquery.query({
+    query: queryText,
+    location: BQ_LOCATION,
+    maximumBytesBilled:
+      Number.isFinite(BQ_MAX_BYTES_BILLED) && BQ_MAX_BYTES_BILLED > 0
+        ? String(Math.trunc(BQ_MAX_BYTES_BILLED))
+        : undefined,
+  })
+  return { executed: true }
+}
+
+async function runBigQuery(queryText) {
+  const [job] = await bigquery.createQueryJob(buildQueryJobOptions(queryText))
+  const [rows, _nextQuery, apiResponse] = await job.getQueryResults()
+  const queryStats = job.metadata?.statistics?.query ?? {}
+  const fields = apiResponse?.schema?.fields ?? queryStats?.schema?.fields ?? []
+  return {
+    rows: normalizeBigQueryRows(rows),
+    fields,
+    stats: {
+      jobId: job.id ?? null,
+      cacheHit: Boolean(queryStats.cacheHit),
+      totalBytesProcessed: normalizeBigQueryStatNumber(queryStats.totalBytesProcessed),
+      totalBytesBilled: normalizeBigQueryStatNumber(queryStats.totalBytesBilled),
+    },
+  }
 }
 
 let userAccessTablePromise = null
@@ -2164,11 +2266,16 @@ function buildConsolidatedIndicatorMartsQuery() {
 }
 
 async function refreshConsolidatedIndicatorArtifacts() {
-  await ensureDataset(CONSOLIDATED_INDICATOR_SNAPSHOT_REF.datasetId)
   const snapshotQuery = buildConsolidatedIndicatorSnapshotQuery()
-  await bigquery.query({ query: snapshotQuery, location: BQ_LOCATION })
   const martQuery = buildConsolidatedIndicatorMartsQuery()
-  await bigquery.query({ query: martQuery, location: BQ_LOCATION })
+  const snapshotResult = await runBigQueryMutationWithGuard(snapshotQuery, CONSOLIDATED_INDICATOR_SNAPSHOT_REF.fqn)
+  const martResult = await runBigQueryMutationWithGuard(
+    martQuery,
+    `${CONSOLIDATED_MART_ANS_REF.fqn} + ${CONSOLIDATED_MART_UNIODONTO_REF.fqn}`,
+  )
+  return {
+    executed: snapshotResult.executed && martResult.executed,
+  }
 }
 
 async function ensureAuxDemonstracoesTable() {
@@ -3048,6 +3155,7 @@ app.post('/api/import/operadora-demonstracoes', handleOperadoraDemonstracoesUplo
 app.post('/api/import/singular-demonstracoes', handleOperadoraDemonstracoesUpload)
 
 app.post('/api/query', async (req, res) => {
+  const startedAt = Date.now()
   const sql = req.body?.sql
   if (!sql || typeof sql !== 'string') {
     return res.status(400).json({ error: 'SQL inválido.' })
@@ -3065,6 +3173,10 @@ app.post('/api/query', async (req, res) => {
   const tableRefs = extractTableRefs(rewrittenSql, cteNames)
   const disallowed = [...tableRefs].filter((ref) => !ALLOWED_TABLES.has(ref))
   if (disallowed.length) {
+    console.warn('[server] Consulta bloqueada por allowlist', {
+      tables: disallowed,
+      allowedTables: [...ALLOWED_TABLES],
+    })
     return res.status(403).json({
       error: 'Consulta bloqueada. Acesso permitido apenas às views/tabelas autorizadas.',
       tables: disallowed,
@@ -3087,6 +3199,17 @@ app.post('/api/query', async (req, res) => {
   if (cacheKey) {
     const cachedEntry = getCachedEntry(cacheKey)
     if (cachedEntry) {
+      console.log(
+        '[server] query',
+        JSON.stringify({
+          queryHash: cacheKey,
+          cache: 'hit',
+          durationMs: Date.now() - startedAt,
+          rows: cachedEntry.rows?.length ?? 0,
+          bytesProcessed: cachedEntry.stats?.totalBytesProcessed ?? null,
+          bytesBilled: cachedEntry.stats?.totalBytesBilled ?? null,
+        }),
+      )
       return res.json({
         rows: cachedEntry.rows,
         fields: includeFields ? cachedEntry.fields ?? [] : undefined,
@@ -3097,6 +3220,17 @@ app.post('/api/query', async (req, res) => {
     if (inflight) {
       try {
         const entry = await inflight
+        console.log(
+          '[server] query',
+          JSON.stringify({
+            queryHash: cacheKey,
+            cache: 'deduped',
+            durationMs: Date.now() - startedAt,
+            rows: entry.rows?.length ?? 0,
+            bytesProcessed: entry.stats?.totalBytesProcessed ?? null,
+            bytesBilled: entry.stats?.totalBytesBilled ?? null,
+          }),
+        )
         return res.json({
           rows: entry.rows,
           fields: includeFields ? entry.fields ?? [] : undefined,
@@ -3123,6 +3257,17 @@ app.post('/api/query', async (req, res) => {
     if (cacheKey) {
       setCachedEntry(cacheKey, entry)
     }
+    console.log(
+      '[server] query',
+      JSON.stringify({
+        queryHash: cacheKey,
+        cache: cacheKey ? 'miss' : 'disabled',
+        durationMs: Date.now() - startedAt,
+        rows: entry.rows?.length ?? 0,
+        bytesProcessed: entry.stats?.totalBytesProcessed ?? null,
+        bytesBilled: entry.stats?.totalBytesBilled ?? null,
+      }),
+    )
     res.json({
       rows: entry.rows,
       fields: includeFields ? entry.fields ?? [] : undefined,
@@ -3130,6 +3275,12 @@ app.post('/api/query', async (req, res) => {
     })
   } catch (err) {
     console.error('[server] erro ao executar consulta', err?.message ?? err, '\nSQL:', scopedSql)
+    const message = String(err?.message ?? '')
+    if (/maximum bytes billed|bytes billed|exceeded.*bytes/i.test(message)) {
+      return res.status(413).json({
+        error: `Consulta bloqueada pelo limite BQ_MAX_BYTES_BILLED=${BQ_MAX_BYTES_BILLED}. Refine filtros ou aumente o limite explicitamente.`,
+      })
+    }
     res.status(500).json({ error: 'Falha ao executar consulta' })
   }
 })
@@ -3149,13 +3300,19 @@ if (SHOULD_SERVE_STATIC) {
 
 if (SHOULD_REFRESH_CONSOLIDATED_INDICATORS) {
   refreshConsolidatedIndicatorArtifacts()
-    .then(() => {
+    .then((result) => {
+      const status = result?.executed ? 'atualizados' : 'verificados em dry-run'
       console.log(
-        `[server] Indicadores consolidados atualizados em ${CONSOLIDATED_INDICATOR_SNAPSHOT_REF.fqn}, ${CONSOLIDATED_MART_ANS_REF.fqn} e ${CONSOLIDATED_MART_UNIODONTO_REF.fqn}`,
+        `[server] Indicadores consolidados ${status} em ${CONSOLIDATED_INDICATOR_SNAPSHOT_REF.fqn}, ${CONSOLIDATED_MART_ANS_REF.fqn} e ${CONSOLIDATED_MART_UNIODONTO_REF.fqn}`,
       )
     })
     .catch((err) => {
-      console.error('[server] Falha ao atualizar indicadores consolidados no boot', err?.message ?? err)
+      const message = err?.message ?? String(err)
+      if (!BQ_EXECUTE && /excede BQ_MAX_BYTES_BILLED/i.test(message)) {
+        console.warn('[server] Refresh consolidado no boot bloqueado pelo guardrail de custo', message)
+        return
+      }
+      console.error('[server] Falha ao atualizar indicadores consolidados no boot', message)
     })
 }
 

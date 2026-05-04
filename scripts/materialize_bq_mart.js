@@ -19,6 +19,9 @@ const CLUSTER_FIELDS = (process.env.BQ_CLUSTER_FIELDS ?? 'periodo_id,reg_ans,mod
   .split(',')
   .map((field) => field.trim())
   .filter(Boolean)
+const BQ_MAX_BYTES_BILLED = parseBytesLimit(process.env.BQ_MAX_BYTES_BILLED, 1_073_741_824)
+const SHOULD_EXECUTE = process.env.BQ_EXECUTE === 'true'
+const SHOULD_REPLACE_EXISTING = process.env.BQ_REPLACE_EXISTING === 'true'
 
 const QUERY_PATH = process.env.MART_SQL_PATH
   ? path.resolve(process.cwd(), process.env.MART_SQL_PATH)
@@ -45,7 +48,67 @@ function normalizeTableRef(name, datasetId = DATASET_ID) {
   return { projectId: parts[0], datasetId: parts[1], objectId: parts[2] }
 }
 
-async function dropObjectIfExists(bigquery, name, datasetId = DATASET_ID) {
+function parseBytesLimit(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback
+}
+
+function formatBytes(bytes) {
+  const numeric = Number(bytes)
+  if (!Number.isFinite(numeric)) return 'desconhecido'
+  if (numeric < 1024) return `${numeric} B`
+  if (numeric < 1024 ** 2) return `${(numeric / 1024).toFixed(2)} KiB`
+  if (numeric < 1024 ** 3) return `${(numeric / 1024 ** 2).toFixed(2)} MiB`
+  return `${(numeric / 1024 ** 3).toFixed(2)} GiB`
+}
+
+function assertWithinBytesLimit(bytes, label) {
+  if (!Number.isFinite(BQ_MAX_BYTES_BILLED) || BQ_MAX_BYTES_BILLED <= 0) return
+  if (Number(bytes) > BQ_MAX_BYTES_BILLED) {
+    throw new Error(
+      `${label} excede BQ_MAX_BYTES_BILLED=${BQ_MAX_BYTES_BILLED} (${formatBytes(BQ_MAX_BYTES_BILLED)}). ` +
+        `Estimado: ${bytes} (${formatBytes(bytes)}).`,
+    )
+  }
+}
+
+async function dryRunQuery(bigquery, query, label) {
+  const [job] = await bigquery.createQueryJob({
+    query,
+    location: LOCATION,
+    dryRun: true,
+    useQueryCache: false,
+    maximumBytesBilled:
+      Number.isFinite(BQ_MAX_BYTES_BILLED) && BQ_MAX_BYTES_BILLED > 0
+        ? String(Math.trunc(BQ_MAX_BYTES_BILLED))
+        : undefined,
+    defaultDataset: { projectId: PROJECT_ID, datasetId: DATASET_ID },
+  })
+  const bytes = Number(job.metadata?.statistics?.totalBytesProcessed ?? job.metadata?.statistics?.query?.totalBytesProcessed ?? 0)
+  console.log(`[bq-mart] dry-run ${label}: ${bytes} bytes (${formatBytes(bytes)})`)
+  assertWithinBytesLimit(bytes, label)
+  return bytes
+}
+
+async function estimateMartQuery(bigquery, query) {
+  try {
+    return await dryRunQuery(bigquery, query, `${ANS_TABLE} + ${UNIODONTO_TABLE}`)
+  } catch (err) {
+    console.warn('[bq-mart] dry-run do DDL completo falhou; estimando leitura da origem.', err?.message ?? err)
+    const sourceBytes = await dryRunQuery(
+      bigquery,
+      `SELECT * FROM ${formatTableRef(SOURCE_TABLE, DATASET_ID)}`,
+      SOURCE_TABLE,
+    )
+    const estimatedBytes = sourceBytes * 2
+    console.log(`[bq-mart] estimativa conservadora para duas marts: ${estimatedBytes} bytes (${formatBytes(estimatedBytes)})`)
+    assertWithinBytesLimit(estimatedBytes, `${ANS_TABLE} + ${UNIODONTO_TABLE}`)
+    return estimatedBytes
+  }
+}
+
+async function getObjectType(bigquery, name, datasetId = DATASET_ID) {
   const ref = normalizeTableRef(name, datasetId)
   const [rows] = await bigquery.query({
     query: `
@@ -56,8 +119,20 @@ async function dropObjectIfExists(bigquery, name, datasetId = DATASET_ID) {
     `,
     location: LOCATION,
     params: { tableName: ref.objectId },
+    maximumBytesBilled:
+      Number.isFinite(BQ_MAX_BYTES_BILLED) && BQ_MAX_BYTES_BILLED > 0
+        ? String(Math.trunc(BQ_MAX_BYTES_BILLED))
+        : undefined,
   })
-  const tableType = rows?.[0]?.table_type ?? null
+  return rows?.[0]?.table_type ?? null
+}
+
+async function dropObjectIfAllowed(bigquery, name, datasetId = DATASET_ID) {
+  const tableType = await getObjectType(bigquery, name, datasetId)
+  if (!tableType) return
+  if (!SHOULD_REPLACE_EXISTING) {
+    throw new Error(`${name} ja existe como ${tableType}. Defina BQ_REPLACE_EXISTING=true junto de BQ_EXECUTE=true para substituir.`)
+  }
   if (tableType === 'BASE TABLE') {
     await bigquery.query({ query: `DROP TABLE ${formatTableRef(name, datasetId)}`, location: LOCATION })
   } else if (tableType === 'VIEW') {
@@ -82,11 +157,24 @@ async function materializeMart() {
   const queryTemplate = fs.readFileSync(QUERY_PATH, 'utf8').trim().replace(/;\s*$/, '')
   const query = applyTemplate(queryTemplate)
   const bigquery = new BigQuery({ projectId: PROJECT_ID })
-  await dropObjectIfExists(bigquery, ANS_TABLE, MART_DATASET_ID)
-  await dropObjectIfExists(bigquery, UNIODONTO_TABLE, MART_DATASET_ID)
-  console.log('[bq-mart] Garantindo views de indicadores (ANS + Uniodonto)...')
-  await bigquery.query({ query, location: LOCATION, defaultDataset: { projectId: PROJECT_ID, datasetId: DATASET_ID } })
-  console.log('[bq-mart] Views criadas/atualizadas com sucesso.')
+  await estimateMartQuery(bigquery, query)
+  if (!SHOULD_EXECUTE) {
+    console.log('[bq-mart] Dry-run concluido. Nenhuma tabela foi criada. Defina BQ_EXECUTE=true para executar.')
+    return
+  }
+  await dropObjectIfAllowed(bigquery, ANS_TABLE, MART_DATASET_ID)
+  await dropObjectIfAllowed(bigquery, UNIODONTO_TABLE, MART_DATASET_ID)
+  console.log('[bq-mart] Criando tabelas de indicadores (ANS + Uniodonto)...')
+  await bigquery.query({
+    query,
+    location: LOCATION,
+    defaultDataset: { projectId: PROJECT_ID, datasetId: DATASET_ID },
+    maximumBytesBilled:
+      Number.isFinite(BQ_MAX_BYTES_BILLED) && BQ_MAX_BYTES_BILLED > 0
+        ? String(Math.trunc(BQ_MAX_BYTES_BILLED))
+        : undefined,
+  })
+  console.log('[bq-mart] Tabelas criadas/atualizadas com sucesso.')
 }
 
 materializeMart().catch((err) => {

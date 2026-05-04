@@ -1,12 +1,15 @@
 -- Gerado automaticamente a partir das formulas em src/lib/metricFormulas.js e src/lib/metricFormulasModoUniodonto.js
 -- Placeholders:
 --   {{SOURCE_TABLE}} => tabela/view base (ex: `bigdata-467917.dash_ans.indicadores_curados_snapshot`)
---   {{ANS_TABLE}} => view destino ANS (ex: `bigdata-467917.dash_ans.indicadores_mart_ans`)
---   {{UNIODONTO_TABLE}} => view destino Uniodonto (ex: `bigdata-467917.dash_ans.indicadores_mart_uniodonto`)
+--   {{ANS_TABLE}} => tabela destino ANS (ex: `bigdata-467917.dash_ans.indicadores_mart_ans`)
+--   {{UNIODONTO_TABLE}} => tabela destino Uniodonto (ex: `bigdata-467917.dash_ans.indicadores_mart_uniodonto`)
 --   {{PARTITION_EXPR}} => campo de particao (default: periodo_raw)
 --   {{CLUSTER_FIELDS}} => campos de cluster (default: periodo_id,reg_ans,modalidade,uniodonto)
 
-CREATE VIEW {{UNIODONTO_TABLE}} AS
+CREATE OR REPLACE TABLE {{UNIODONTO_TABLE}}
+PARTITION BY {{PARTITION_EXPR}}
+CLUSTER BY {{CLUSTER_FIELDS}}
+AS
 SELECT
   base.*,
   (COALESCE(vr_contraprestacoes, 0) + COALESCE(vr_conta_332129111, 0)) - COALESCE(vr_conta_32, 0) AS receita_operacional,
@@ -2120,7 +2123,10 @@ SELECT
     END AS icu_score
 FROM {{SOURCE_TABLE}} base;
 
-CREATE VIEW {{ANS_TABLE}} AS
+CREATE OR REPLACE TABLE {{ANS_TABLE}}
+PARTITION BY {{PARTITION_EXPR}}
+CLUSTER BY {{CLUSTER_FIELDS}}
+AS
 SELECT
   base.*,
   CASE

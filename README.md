@@ -89,9 +89,9 @@ Arquivos de referência:
 - `BQ_PROJECT_ID` (ex.: `bigdata-467917`)
 - `BQ_DATASET` (ex.: `dash_ans`) dataset padrão das tabelas/views usadas pelo projeto.
 - `BQ_MART_DATASET` (ex.: `dash_ans`) dataset dos artefatos derivados do dashboard.
-- `BQ_DATASET_VIEW` ou `BQ_EXPORT_VIEW` (ex.: `dash_ans.indicadores_curados_snapshot`)
+- `BQ_DATASET_VIEW` ou `BQ_EXPORT_VIEW` (ex.: `dash_ans.indicadores_curados_snapshot_consolidado`)
 - `BQ_LOCATION` (ex.: `southamerica-east1`)
-- `BQ_ALLOWED_VIEWS` (opcional): lista de views/tabelas permitidas no `/api/query` (ex.: `bigdata-467917.dash_ans.indicadores_curados_snapshot,bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem`).
+- `BQ_ALLOWED_VIEWS` (opcional): lista de views/tabelas permitidas no `/api/query` (ex.: `bigdata-467917.dash_ans.indicadores_mart_ans_consolidado,bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem`).
 - `BQ_PRESTADORES_TABLE` (opcional): tabela de prestadores usada na complementação de dados.
 - `BQ_AUX_DATASET` (opcional): dataset da tabela auxiliar de importação (default: `dash_ans_uploads`).
 - `BQ_AUX_DEMONSTRACOES_TABLE` (opcional): tabela auxiliar de importação (default: `demonstracoes_contabeis_auxiliar`).
@@ -105,7 +105,9 @@ Arquivos de referência:
 - `BQ_ENFORCE_USER_ACCESS` (opcional): habilita vínculo por operadora para upload/importação (default: `true`).
 - `ACCESS_ADMIN_EMAIL_DOMAINS` (opcional): domínios com acesso completo (default: `uniodonto.coop.br,collos.com.br,contagbr.com.br`).
 - `USER_ACCESS_CACHE_TTL_MS` (opcional): cache do perfil de acesso em ms (default: `60000`).
-- `QUERY_CACHE_TTL_MS` (opcional): cache em ms para `/api/query` (default 60000).
+- `QUERY_CACHE_TTL_MS` (opcional): cache em ms para `/api/query` (default 900000).
+- `BQ_MAX_BYTES_BILLED` (opcional): limite de bytes faturados por query (default 1073741824).
+- `BQ_EXECUTE` (opcional): precisa ser `true` para scripts/refreshes que escrevem no BigQuery.
 - `QUERY_CACHE_MAX_ENTRIES` (opcional): tamanho máximo do cache (default 250).
 - `SERVER_PORT` ou `PORT` (opcional): porta da API (default 4000 em dev).
 - `SERVER_HOST` (opcional): host/bind da API (default `0.0.0.0`).

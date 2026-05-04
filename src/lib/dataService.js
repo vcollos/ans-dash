@@ -71,15 +71,15 @@ const formatTableRef = (value) => {
 }
 
 const BASE_VIEW_RAW =
-  import.meta.env?.VITE_DATASET_VIEW ?? 'bigdata-467917.dash_ans.indicadores_curados_snapshot'
+  import.meta.env?.VITE_DATASET_VIEW ?? 'bigdata-467917.dash_ans.indicadores_curados_snapshot_consolidado'
 const MART_ANS_VIEW_RAW =
   import.meta.env?.VITE_MART_ANS_TABLE ??
   import.meta.env?.VITE_DATASET_VIEW_ANS ??
-  'bigdata-467917.dash_ans.indicadores_mart_ans'
+  'bigdata-467917.dash_ans.indicadores_mart_ans_consolidado'
 const MART_UNIODONTO_VIEW_RAW =
   import.meta.env?.VITE_MART_UNIODONTO_TABLE ??
   import.meta.env?.VITE_DATASET_VIEW_UNIODONTO ??
-  'bigdata-467917.dash_ans.indicadores_mart_uniodonto'
+  'bigdata-467917.dash_ans.indicadores_mart_uniodonto_consolidado'
 const DEFAULT_VIEW_RAW = MART_ANS_VIEW_RAW || BASE_VIEW_RAW
 const UNIODONTO_VIEW_RAW = MART_UNIODONTO_VIEW_RAW || BASE_VIEW_RAW
 const DEFAULT_VIEW = formatTableRef(DEFAULT_VIEW_RAW)
@@ -99,6 +99,10 @@ const PRESTADORES_CACHE_ENABLED =
 let prestadoresCache = null
 let prestadoresCacheExpiresAt = 0
 let prestadoresCachePromise = null
+const QUERY_RESULT_CACHE_TTL_MS = Number(import.meta.env?.VITE_QUERY_CACHE_TTL_MS ?? 5 * 60 * 1000)
+const QUERY_RESULT_CACHE_MAX_ENTRIES = Number(import.meta.env?.VITE_QUERY_CACHE_MAX_ENTRIES ?? 150)
+const queryResultCache = new Map()
+const queryResultInFlight = new Map()
 
 const sanitizeList = (values = []) => values.filter((value) => value !== null && value !== undefined && value !== '')
 const sanitizeSql = (value) => (value ? value.replaceAll('\\', '\\\\').replaceAll("'", "''") : value)
@@ -612,19 +616,63 @@ async function attachPrestadores(rows = []) {
   })
 }
 
-async function runQuery(sql, options = {}) {
-  const response = await fetchWithAuth('/api/query', {
+function getCachedQueryPayload(cacheKey) {
+  if (!Number.isFinite(QUERY_RESULT_CACHE_TTL_MS) || QUERY_RESULT_CACHE_TTL_MS <= 0) return null
+  const cached = queryResultCache.get(cacheKey)
+  if (!cached) return null
+  if (cached.expiresAt <= Date.now()) {
+    queryResultCache.delete(cacheKey)
+    return null
+  }
+  queryResultCache.delete(cacheKey)
+  queryResultCache.set(cacheKey, cached)
+  return cached.payload
+}
+
+function setCachedQueryPayload(cacheKey, payload) {
+  if (!Number.isFinite(QUERY_RESULT_CACHE_TTL_MS) || QUERY_RESULT_CACHE_TTL_MS <= 0) return
+  queryResultCache.set(cacheKey, {
+    payload,
+    expiresAt: Date.now() + QUERY_RESULT_CACHE_TTL_MS,
+  })
+  while (queryResultCache.size > QUERY_RESULT_CACHE_MAX_ENTRIES) {
+    queryResultCache.delete(queryResultCache.keys().next().value)
+  }
+}
+
+async function fetchQueryPayload(sql, { includeFields = false } = {}) {
+  const cacheKey = `${includeFields ? 'fields' : 'rows'}:${sql}`
+  const cached = getCachedQueryPayload(cacheKey)
+  if (cached) return cached
+  const inflight = queryResultInFlight.get(cacheKey)
+  if (inflight) return inflight
+
+  const request = fetchWithAuth('/api/query', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ sql }),
+    body: JSON.stringify({ sql, includeFields }),
   })
-  if (!response.ok) {
-    const message = (await response.json().catch(() => ({}))).error ?? `Falha ao executar consulta: ${response.status}`
-    throw new Error(message)
-  }
-  const payload = await response.json()
+    .then(async (response) => {
+      if (!response.ok) {
+        const message = (await response.json().catch(() => ({}))).error ?? `Falha ao executar consulta: ${response.status}`
+        throw new Error(message)
+      }
+      const payload = await response.json()
+      setCachedQueryPayload(cacheKey, payload)
+      return payload
+    })
+    .finally(() => {
+      queryResultInFlight.delete(cacheKey)
+    })
+
+  queryResultInFlight.set(cacheKey, request)
+  return request
+}
+
+async function runQuery(sql, options = {}) {
+  const payload = await fetchQueryPayload(sql)
   const rows = payload.rows ?? []
   if (options.skipPrestadores) {
     return rows
@@ -633,18 +681,7 @@ async function runQuery(sql, options = {}) {
 }
 
 async function runQueryWithFields(sql) {
-  const response = await fetchWithAuth('/api/query', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ sql, includeFields: true }),
-  })
-  if (!response.ok) {
-    const message = (await response.json().catch(() => ({}))).error ?? `Falha ao executar consulta: ${response.status}`
-    throw new Error(message)
-  }
-  const payload = await response.json()
+  const payload = await fetchQueryPayload(sql, { includeFields: true })
   return {
     rows: payload.rows ?? [],
     fields: payload.fields ?? [],
@@ -712,6 +749,44 @@ export async function fetchOperatorOptions({ anos = [], trimestres = [] } = {}) 
   `)
   const options = rows.map((row) => row.nome_operadora).filter(Boolean)
   return [VIRTUAL_OPERATOR_UNIODONTO, ...options]
+}
+
+export async function fetchDashboardBootstrap() {
+  const viewRef = resolveView({ mode: 'ans' })
+  const rows = await runQuery(
+    `
+    WITH periodos AS (
+      SELECT DISTINCT ano, trimestre, CONCAT(ano, 'T', trimestre) AS periodo
+      FROM ${viewRef}
+      WHERE ano IS NOT NULL AND trimestre IS NOT NULL
+    ), operadoras AS (
+      SELECT DISTINCT nome_operadora
+      FROM ${viewRef}
+      WHERE nome_operadora IS NOT NULL
+    )
+    SELECT
+      (SELECT ARRAY_AGG(nome_operadora ORDER BY nome_operadora) FROM operadoras) AS operadoras,
+      (SELECT ARRAY_AGG(STRUCT(ano, trimestre, periodo) ORDER BY ano DESC, trimestre DESC) FROM periodos) AS periodos
+  `,
+    { skipPrestadores: true },
+  )
+  const row = rows[0] ?? {}
+  const operatorNames = Array.isArray(row.operadoras)
+    ? row.operadoras.filter((name) => name && name !== VIRTUAL_OPERATOR_UNIODONTO)
+    : []
+  const availablePeriods = Array.isArray(row.periodos)
+    ? row.periodos
+        .filter((period) => period?.ano !== null && period?.ano !== undefined && period?.trimestre)
+        .map((period) => ({
+          ano: period.ano,
+          trimestre: period.trimestre,
+          periodo: period.periodo ?? `${period.ano}T${period.trimestre}`,
+        }))
+    : []
+  return {
+    operatorNames: [VIRTUAL_OPERATOR_UNIODONTO, ...operatorNames],
+    availablePeriods,
+  }
 }
 
 export async function fetchOperatorPeriods(operatorName) {
