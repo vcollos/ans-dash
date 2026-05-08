@@ -34,6 +34,8 @@ const BQ_OPERADORAS_TABLE = process.env.BQ_OPERADORAS_TABLE ?? `${BQ_PROJECT_ID}
 const BQ_BENEFICIARIOS_ODONTO_TABLE =
   process.env.BQ_BENEFICIARIOS_ODONTO_TABLE ??
   `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.beneficiarios_odontologicas_por_operadora`
+const BQ_UHUB_COOPERATIVAS_CATALOG_TABLE =
+  process.env.BQ_UHUB_COOPERATIVAS_CATALOG_TABLE ?? `${BQ_PROJECT_ID}.${BQ_DATASET}.uhub_cooperativas_catalogo`
 const EXPORT_SQL_PATH = path.resolve(__dirname, '../db/export_indicadores.sql')
 const MART_SQL_PATH = path.resolve(__dirname, '../db/materialize_indicadores_mart.sql')
 const DIST_DIR = path.resolve(__dirname, '../dist')
@@ -848,17 +850,12 @@ async function listUhubOperatorCatalogFromBigQuery({ forceRefresh = false } = {}
   const [rows] = await bigquery.query({
     query: `
       SELECT
-        REGEXP_REPLACE(CAST(COALESCE(reg_ans_operadora, reg_ans) AS STRING), r'\\D', '') AS reg_ans,
+        REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', '') AS reg_ans,
         REGEXP_REPLACE(CAST(cnpj AS STRING), r'\\D', '') AS cnpj,
-        CONCAT(
-          'Uniodonto ',
-          REGEXP_REPLACE(INITCAP(LOWER(TRIM(nome_fantasia))), r'^Uniodonto\\s+', '')
-        ) AS operator_name
-      FROM \`${BQ_PROJECT_ID}.uhub.cooperativas\`
-      WHERE tipo = 'SINGULAR'
-        AND ativa IS TRUE
-        AND NULLIF(TRIM(CAST(nome_fantasia AS STRING)), '') IS NOT NULL
-        AND COALESCE(reg_ans_operadora, reg_ans) IS NOT NULL
+        TRIM(CAST(operator_name AS STRING)) AS operator_name
+      FROM ${formatMaterializeTableRef(BQ_UHUB_COOPERATIVAS_CATALOG_TABLE, BQ_DATASET)}
+      WHERE NULLIF(TRIM(CAST(operator_name AS STRING)), '') IS NOT NULL
+        AND reg_ans IS NOT NULL
       ORDER BY operator_name
     `,
     location: BQ_LOCATION,
@@ -1972,7 +1969,7 @@ function buildConsolidatedIndicatorSnapshotQuery() {
   const obm = formatMaterializeTableRef(BQ_BENEFICIARIOS_ODONTO_TABLE, BQ_MART_DATASET)
   const operadoras = `\`${BQ_PROJECT_ID}.${BQ_DATASET}.operadoras\``
   const uniodontosAtivas = `\`${BQ_PROJECT_ID}.${BQ_DATASET}.uniodontos_ativas\``
-  const uhubCooperativas = `\`${BQ_PROJECT_ID}.uhub.cooperativas\``
+  const uhubCooperativasCatalog = formatMaterializeTableRef(BQ_UHUB_COOPERATIVAS_CATALOG_TABLE, BQ_DATASET)
   const target = quoteTableRef(CONSOLIDATED_INDICATOR_SNAPSHOT_REF)
 
   return `
@@ -2013,17 +2010,14 @@ function buildConsolidatedIndicatorSnapshotQuery() {
     ), uhub_operadoras_dim AS (
       SELECT
         CAST(reg_ans AS STRING) AS reg_ans,
-        INITCAP(LOWER(TRIM(nome_fantasia))) AS nome_fantasia,
-        CONCAT(
-          'Uniodonto ',
-          REGEXP_REPLACE(INITCAP(LOWER(TRIM(nome_fantasia))), r'^Uniodonto\\s+', '')
-        ) AS operadora
-      FROM ${uhubCooperativas}
-      WHERE NULLIF(TRIM(nome_fantasia), '') IS NOT NULL
-        AND IFNULL(is_deleted, FALSE) IS FALSE
+        TRIM(CAST(operator_name AS STRING)) AS nome_fantasia,
+        TRIM(CAST(operator_name AS STRING)) AS operadora
+      FROM ${uhubCooperativasCatalog}
+      WHERE NULLIF(TRIM(CAST(operator_name AS STRING)), '') IS NOT NULL
+        AND reg_ans IS NOT NULL
       QUALIFY ROW_NUMBER() OVER (
         PARTITION BY CAST(reg_ans AS STRING)
-        ORDER BY IFNULL(ativa, FALSE) DESC, updated_at DESC
+        ORDER BY synced_at DESC
       ) = 1
     ), operadoras_dim AS (
       SELECT

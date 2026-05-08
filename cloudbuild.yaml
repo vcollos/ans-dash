@@ -49,6 +49,7 @@ steps:
         BQ_MART_UNIODONTO_TABLE: "${_BQ_MART_UNIODONTO_TABLE}"
         BQ_ALLOWED_VIEWS: "${_BQ_ALLOWED_VIEWS}"
         BQ_PRESTADORES_TABLE: "${_BQ_PRESTADORES_TABLE}"
+        BQ_UHUB_COOPERATIVAS_CATALOG_TABLE: "${_BQ_UHUB_COOPERATIVAS_CATALOG_TABLE}"
         QUERY_CACHE_TTL_MS: "${_QUERY_CACHE_TTL_MS}"
         BQ_MAX_BYTES_BILLED: "${_BQ_MAX_BYTES_BILLED}"
         BQ_EXECUTE: "${_BQ_EXECUTE}"
@@ -103,6 +104,7 @@ substitutions:
   _BQ_MART_UNIODONTO_TABLE: indicadores_mart_uniodonto_consolidado
   _BQ_ALLOWED_VIEWS: "bigdata-467917.dash_ans.indicadores_curados_snapshot_consolidado,bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem,bigdata-467917.dash_ans.indicadores_mart_ans_consolidado,bigdata-467917.dash_ans.indicadores_mart_uniodonto_consolidado"
   _BQ_PRESTADORES_TABLE: "bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem"
+  _BQ_UHUB_COOPERATIVAS_CATALOG_TABLE: "bigdata-467917.dash_ans.uhub_cooperativas_catalogo"
   _QUERY_CACHE_TTL_MS: "900000"
   _BQ_MAX_BYTES_BILLED: "1073741824"
   _BQ_EXECUTE: "false"

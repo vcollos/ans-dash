@@ -23,6 +23,8 @@ const CONSOLIDATED_MART_UNIODONTO_TABLE =
   process.env.BQ_CONSOLIDATED_MART_UNIODONTO_TABLE ?? `${PROJECT_ID}.${AUX_DATASET_ID}.indicadores_mart_uniodonto_consolidado`
 const BENEFICIARIOS_ODONTO_TABLE =
   process.env.BQ_BENEFICIARIOS_ODONTO_TABLE ?? `${PROJECT_ID}.${DATASET_ID}.beneficiarios_odontologicas_por_operadora`
+const UHUB_COOPERATIVAS_CATALOG_TABLE =
+  process.env.BQ_UHUB_COOPERATIVAS_CATALOG_TABLE ?? `${PROJECT_ID}.${DATASET_ID}.uhub_cooperativas_catalogo`
 const BQ_MAX_BYTES_BILLED = parseBytesLimit(process.env.BQ_MAX_BYTES_BILLED, 1_073_741_824)
 const SHOULD_EXECUTE = process.env.BQ_EXECUTE === 'true'
 
@@ -86,7 +88,7 @@ function buildConsolidatedIndicatorSnapshotQuery() {
   const obm = quoteTableRef(BENEFICIARIOS_ODONTO_TABLE, DATASET_ID)
   const operadoras = `\`${PROJECT_ID}.${DATASET_ID}.operadoras\``
   const uniodontosAtivas = `\`${PROJECT_ID}.${DATASET_ID}.uniodontos_ativas\``
-  const uhubCooperativas = `\`${PROJECT_ID}.uhub.cooperativas\``
+  const uhubCooperativasCatalog = quoteTableRef(UHUB_COOPERATIVAS_CATALOG_TABLE, DATASET_ID)
   const target = quoteTableRef(CONSOLIDATED_INDICATOR_SNAPSHOT, AUX_DATASET_ID)
 
   return `
@@ -127,17 +129,14 @@ function buildConsolidatedIndicatorSnapshotQuery() {
     ), uhub_operadoras_dim AS (
       SELECT
         CAST(reg_ans AS STRING) AS reg_ans,
-        INITCAP(LOWER(TRIM(nome_fantasia))) AS nome_fantasia,
-        CONCAT(
-          'Uniodonto ',
-          REGEXP_REPLACE(INITCAP(LOWER(TRIM(nome_fantasia))), r'^Uniodonto\\s+', '')
-        ) AS operadora
-      FROM ${uhubCooperativas}
-      WHERE NULLIF(TRIM(nome_fantasia), '') IS NOT NULL
-        AND IFNULL(is_deleted, FALSE) IS FALSE
+        TRIM(CAST(operator_name AS STRING)) AS nome_fantasia,
+        TRIM(CAST(operator_name AS STRING)) AS operadora
+      FROM ${uhubCooperativasCatalog}
+      WHERE NULLIF(TRIM(CAST(operator_name AS STRING)), '') IS NOT NULL
+        AND reg_ans IS NOT NULL
       QUALIFY ROW_NUMBER() OVER (
         PARTITION BY CAST(reg_ans AS STRING)
-        ORDER BY IFNULL(ativa, FALSE) DESC, updated_at DESC
+        ORDER BY synced_at DESC
       ) = 1
     ), operadoras_dim AS (
       SELECT
