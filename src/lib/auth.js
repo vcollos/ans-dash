@@ -5,6 +5,8 @@ const FIREBASE_AUTH_MESSAGES = {
   'auth/email-already-in-use': 'Este e-mail já está cadastrado. Faça login ou use a recuperação de senha.',
   'auth/invalid-email': 'Informe um e-mail válido.',
   'auth/invalid-api-key': 'Configuração de autenticação inválida. Avise a equipe responsável.',
+  'auth/unauthorized-domain': 'Domínio não autorizado no Firebase Auth. Avise a equipe responsável.',
+  'auth/operation-not-allowed': 'Login com Google não está habilitado no Firebase Auth.',
   'auth/user-disabled': 'Esta conta foi desativada. Entre em contato com a Uniodonto do Brasil.',
   'auth/user-not-found': 'Não encontramos uma conta com este e-mail.',
   'auth/wrong-password': 'E-mail ou senha inválidos.',

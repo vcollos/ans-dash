@@ -4,6 +4,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   getRedirectResult,
+  signInWithPopup,
   signInWithRedirect,
   signOut as firebaseSignOut,
   sendSignInLinkToEmail,
@@ -56,8 +57,16 @@ export function AuthProvider({ children }) {
 
   const signInWithGoogle = useCallback(async () => {
     setAuthError(null)
-    await signInWithRedirect(auth, googleProvider)
-    return null
+    try {
+      const result = await signInWithPopup(auth, googleProvider)
+      return result.user
+    } catch (error) {
+      if (!['auth/popup-blocked', 'auth/cancelled-popup-request'].includes(error?.code)) {
+        throw error
+      }
+      await signInWithRedirect(auth, googleProvider)
+      return null
+    }
   }, [])
 
   const sendEmailLink = useCallback(async (email, continueUrl) => {
