@@ -857,6 +857,49 @@ async function listUhubOperatorCatalog({ forceRefresh = false } = {}) {
   return entries
 }
 
+async function listUhubOperatorCatalogFromBigQuery({ forceRefresh = false } = {}) {
+  const now = Date.now()
+  if (!forceRefresh && uhubOperatorCatalogCache.entries.length && uhubOperatorCatalogCache.expiresAt > now) {
+    return uhubOperatorCatalogCache.entries
+  }
+
+  const [rows] = await bigquery.query({
+    query: `
+      SELECT
+        REGEXP_REPLACE(CAST(COALESCE(reg_ans_operadora, reg_ans) AS STRING), r'\\D', '') AS reg_ans,
+        REGEXP_REPLACE(CAST(cnpj AS STRING), r'\\D', '') AS cnpj,
+        CONCAT(
+          'Uniodonto ',
+          REGEXP_REPLACE(INITCAP(LOWER(TRIM(nome_fantasia))), r'^Uniodonto\\s+', '')
+        ) AS operator_name
+      FROM \`${BQ_PROJECT_ID}.uhub.cooperativas\`
+      WHERE tipo = 'SINGULAR'
+        AND ativa IS TRUE
+        AND NULLIF(TRIM(CAST(nome_fantasia AS STRING)), '') IS NOT NULL
+        AND COALESCE(reg_ans_operadora, reg_ans) IS NOT NULL
+      ORDER BY operator_name
+    `,
+    location: BQ_LOCATION,
+  })
+
+  const entries = normalizeBigQueryRows(rows)
+    .map((row) => {
+      const regAns = normalizeRegAns(row?.reg_ans)
+      const operatorName = toNullableString(row?.operator_name)
+      if (!regAns || !operatorName) return null
+      return {
+        regAns,
+        operatorName,
+        cnpj: normalizeDigits(row?.cnpj),
+      }
+    })
+    .filter(Boolean)
+
+  uhubOperatorCatalogCache.entries = entries
+  uhubOperatorCatalogCache.expiresAt = now + Math.max(UHUB_OPERATOR_CACHE_TTL_MS, 60_000)
+  return entries
+}
+
 async function resolveOperatorMetadata(regAns) {
   const normalizedRegAns = normalizeRegAns(regAns)
   if (!normalizedRegAns) return null
@@ -2652,15 +2695,27 @@ app.get('/api/auth/profile', async (req, res) => {
 
 async function handleOperatorsList(_req, res) {
   try {
-    const operators = (await listUhubOperatorCatalog())
+    let source = 'uhub_api'
+    let entries = []
+    try {
+      if (!UHUB_API_TOKEN) {
+        throw new Error('UHUB_API_TOKEN ausente no ambiente.')
+      }
+      entries = await listUhubOperatorCatalog()
+    } catch (err) {
+      source = 'bigquery_uhub'
+      console.warn('[server] Falha ao listar Uniodontos pelo UHub; usando BigQuery', err?.message ?? err)
+      entries = await listUhubOperatorCatalogFromBigQuery()
+    }
+    const operators = entries
       .map((item) => ({
         regAns: item.regAns,
         operatorName: item.operatorName,
       }))
     res.setHeader('Cache-Control', 'no-store')
-    return res.json({ operators })
+    return res.json({ operators, source })
   } catch (err) {
-    console.error('[server] Falha ao listar Uniodontos pelo UHub', err)
+    console.error('[server] Falha ao listar Uniodontos', err)
     return res.status(500).json({ error: 'Falha ao carregar lista de operadoras.' })
   }
 }
