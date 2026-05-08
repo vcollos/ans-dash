@@ -10,8 +10,7 @@ const PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'b
 const DATASET_ID = process.env.BQ_DATASET ?? 'dash_ans'
 const MART_DATASET_ID = process.env.BQ_MART_DATASET ?? 'dash_ans'
 const LOCATION = process.env.BQ_LOCATION ?? 'southamerica-east1'
-const BQ_EXPORT_VIEW =
-  process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? `${MART_DATASET_ID}.indicadores_curados_snapshot`
+const BQ_EXPORT_VIEW = process.env.BQ_EXPORT_VIEW ?? `${MART_DATASET_ID}.indicadores_curados_snapshot_consolidado`
 const BQ_PRESTADORES_TABLE =
   process.env.BQ_PRESTADORES_TABLE ?? `${PROJECT_ID}.${MART_DATASET_ID}.prestadores_ativos_uniodonto_origem`
 

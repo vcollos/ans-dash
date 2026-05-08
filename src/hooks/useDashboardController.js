@@ -127,7 +127,6 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
   const [comparisonFilters, setComparisonFilters] = useState(() => createDefaultComparisonFilters())
   const [comparisonFiltersDraft, setComparisonFiltersDraft] = useState(() => createDefaultComparisonFilters())
   const [operatorContext, setOperatorContext] = useState(null)
-  const lastAutoOperatorRef = useRef(null)
   const [operatorSnapshot, setOperatorSnapshot] = useState({
     operator: null,
     peers: null,
@@ -286,20 +285,6 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
       cancelled = true
     }
   }, [])
-
-  useEffect(() => {
-    if (operatorContext?.name) return
-    const normalized = (filters.search ?? '').trim().toLowerCase()
-    if (!normalized) {
-      lastAutoOperatorRef.current = null
-      return
-    }
-    if (lastAutoOperatorRef.current === normalized) return
-    const match = options.operadoras.find((option) => option?.toLowerCase() === normalized)
-    if (!match) return
-    lastAutoOperatorRef.current = normalized
-    applyOperatorSelection(match)
-  }, [filters.search, operatorContext?.name, options.operadoras, applyOperatorSelection])
 
   useEffect(() => {
     if (status !== 'ready') return
@@ -761,8 +746,6 @@ export function useDashboardController({ activeTab = 'indicadores' } = {}) {
         : {
             modalidades: latest.modalidade ? [latest.modalidade] : undefined,
             portes: resolvedPorte ? [resolvedPorte] : undefined,
-            uniodonto: typeof latest.uniodonto === 'boolean' ? [latest.uniodonto] : undefined,
-            ativa: typeof latest.ativa === 'boolean' ? [latest.ativa] : undefined,
           }
       syncComparisonFilters(nextComparison)
       setOperatorContext({

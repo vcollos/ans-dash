@@ -14,7 +14,7 @@ fi
 set -a
 : "${BQ_PROJECT_ID:=bigdata-467917}"
 : "${BQ_DATASET:=dash_ans}"
-: "${BQ_EXPORT_VIEW:=indicadores_curados_snapshot}"
+: "${BQ_EXPORT_VIEW:=indicadores_curados_snapshot_consolidado}"
 : "${BQ_MART_DATASET:=dash_ans}"
 : "${BQ_SOURCE_TABLE:=${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_EXPORT_VIEW}}"
 : "${BQ_MART_ANS_TABLE:=indicadores_mart_ans}"

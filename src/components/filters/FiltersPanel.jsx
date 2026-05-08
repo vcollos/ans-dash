@@ -119,8 +119,7 @@ function FiltersPanel({
           options={options.operadoras}
         />
         <p className="text-xs text-muted-foreground">
-          Selecione uma operadora para carregar automaticamente o último período disponível. Modalidade, porte, situação cadastral e
-          Uniodonto agora fazem parte das opções de comparação.
+          Selecione uma operadora para carregar automaticamente o último período disponível e comparar com operadoras de mesma modalidade e porte.
         </p>
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">

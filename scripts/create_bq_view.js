@@ -75,28 +75,6 @@ function buildFullViewSql(sourceTableName, mode) {
     CAST(NULL AS INT64) AS Prestadores
   FROM ${source}
 `
-  } else if (mode === 'legacy_registro_operadora') {
-    dcSelect = `
-  SELECT
-    data,
-    registro_operadora AS reg_ans,
-    cd_conta_contabil,
-    descricao,
-    vl_saldo_inicial,
-    vl_saldo_final,
-    ano,
-    trimestre,
-    arquivo_origem,
-    DATE(CAST(ano AS INT64), 1 + (CAST(trimestre AS INT64) - 1) * 3, 1) AS Periodo,
-    CAST(NULL AS STRING) AS Operadora,
-    CAST(NULL AS INT64) AS Beneficiarios,
-    CAST(NULL AS STRING) AS Uniodonto,
-    CAST(NULL AS STRING) AS ATIVA,
-    CAST(NULL AS STRING) AS modalidade,
-    CAST(NULL AS STRING) AS porte,
-    CAST(NULL AS INT64) AS Prestadores
-  FROM ${source}
-`
   } else if (mode === 'curated_valor') {
     dcSelect = `
   SELECT
@@ -421,7 +399,6 @@ async function main() {
     const colSet = new Set(columns.map((row) => row.column_name))
     const mode = (() => {
       if (colSet.has('reg_ans') && colSet.has('valor') && colSet.has('operadora')) return 'curated_valor'
-      if (colSet.has('registro_operadora')) return 'legacy_registro_operadora'
       if (colSet.has('reg_ans') && colSet.has('vl_saldo_final') && colSet.has('vl_saldo_inicial') && colSet.has('data')) {
         return 'raw_uppercase'
       }

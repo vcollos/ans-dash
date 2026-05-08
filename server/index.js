@@ -22,16 +22,12 @@ const __dirname = path.dirname(__filename)
 const HOST = process.env.SERVER_HOST ?? '0.0.0.0'
 const PORT = process.env.SERVER_PORT ?? process.env.PORT ?? 4000
 const BQ_PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
-const rawBqDataset = String(process.env.BQ_DATASET ?? 'dash_ans').trim()
-const BQ_DATASET = BQ_PROJECT_ID === 'bigdata-467917' && rawBqDataset === 'datalake_ans' ? 'dash_ans' : rawBqDataset
+const BQ_DATASET = String(process.env.BQ_DATASET ?? 'dash_ans').trim()
 const BQ_MART_DATASET = process.env.BQ_MART_DATASET ?? 'dash_ans'
-const rawBqLocation = String(process.env.BQ_LOCATION ?? 'southamerica-east1').trim()
-const BQ_LOCATION = BQ_PROJECT_ID === 'bigdata-467917' && rawBqLocation.toUpperCase() === 'US' ? 'southamerica-east1' : rawBqLocation
-const BQ_EXPORT_VIEW =
-  process.env.BQ_EXPORT_VIEW ?? process.env.BQ_DATASET_VIEW ?? `${BQ_MART_DATASET}.indicadores_curados_snapshot`
-const BQ_MART_ANS_TABLE = process.env.BQ_MART_ANS_TABLE ?? process.env.BQ_DATASET_VIEW_ANS ?? ''
-const BQ_MART_UNIODONTO_TABLE =
-  process.env.BQ_MART_UNIODONTO_TABLE ?? process.env.BQ_DATASET_VIEW_UNIODONTO ?? ''
+const BQ_LOCATION = String(process.env.BQ_LOCATION ?? 'southamerica-east1').trim()
+const BQ_EXPORT_VIEW = process.env.BQ_EXPORT_VIEW ?? `${BQ_MART_DATASET}.indicadores_curados_snapshot_consolidado`
+const BQ_MART_ANS_TABLE = process.env.BQ_MART_ANS_TABLE ?? ''
+const BQ_MART_UNIODONTO_TABLE = process.env.BQ_MART_UNIODONTO_TABLE ?? ''
 const BQ_PRESTADORES_TABLE =
   process.env.BQ_PRESTADORES_TABLE ?? `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.prestadores_ativos_uniodonto_origem`
 const BQ_OPERADORAS_TABLE = process.env.BQ_OPERADORAS_TABLE ?? `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.operadoras`
@@ -179,12 +175,6 @@ const uhubOperatorCatalogCache = {
 }
 
 const RAW_ALLOWED_VIEWS = process.env.BQ_ALLOWED_VIEWS
-const LEGACY_BQ_COMPAT_REWRITES = new Map([
-  ['bigdata-467917.dash_ans_uploads.indicadores_curados_snapshot_consolidado', 'bigdata-467917.dash_ans.indicadores_curados_snapshot'],
-  ['bigdata-467917.dash_ans_uploads.indicadores_mart_ans_consolidado', 'bigdata-467917.dash_ans.indicadores_mart_ans'],
-  ['bigdata-467917.dash_ans_uploads.indicadores_mart_uniodonto_consolidado', 'bigdata-467917.dash_ans.indicadores_mart_uniodonto'],
-  ['bigdata-467917.dash_ans_uploads.vw_demonstracoes_contabeis_consolidada', 'bigdata-467917.dash_ans.demonstracoes_contabeis'],
-])
 const ALLOWED_TABLES = (() => {
   const allowed = new Set()
   const add = (value) => {
@@ -231,14 +221,6 @@ const ALLOWED_TABLES = (() => {
   add(CONSOLIDATED_MART_UNIODONTO_REF.fqn)
   return allowed
 })()
-
-function rewriteLegacyBigQueryRefs(sql) {
-  let rewritten = sql
-  for (const [from, to] of LEGACY_BQ_COMPAT_REWRITES.entries()) {
-    rewritten = rewritten.replaceAll(`\`${from}\``, `\`${to}\``).replaceAll(from, to)
-  }
-  return rewritten
-}
 
 const SERVER_BOOT_ID = process.env.K_REVISION ?? crypto.randomBytes(8).toString('hex')
 
@@ -2471,7 +2453,6 @@ async function inferBaseDemonstracoesSchemaMode() {
 
   const columnSet = new Set(normalizeBigQueryRows(rows).map((row) => toNullableString(row?.column_name).toLowerCase()).filter(Boolean))
   if (columnSet.has('reg_ans') && columnSet.has('valor') && columnSet.has('operadora')) return 'curated_valor'
-  if (columnSet.has('registro_operadora')) return 'legacy_registro_operadora'
   if (columnSet.has('reg_ans') && columnSet.has('vl_saldo_final') && columnSet.has('vl_saldo_inicial') && columnSet.has('data')) {
     return 'raw_uppercase'
   }
@@ -2494,22 +2475,6 @@ function buildBaseDemonstracoesProjectionSql(schemaMode) {
         SAFE_CAST(b.ano AS INT64) AS ano,
         SAFE_CAST(b.trimestre AS INT64) AS trimestre,
         CAST(NULL AS STRING) AS arquivo_origem
-      FROM \`${BASE_DEMONSTRACOES_TABLE_REF.fqn}\` b
-    `
-  }
-
-  if (schemaMode === 'legacy_registro_operadora') {
-    return `
-      SELECT
-        DATE(b.data) AS data,
-        SAFE_CAST(b.registro_operadora AS INT64) AS reg_ans,
-        CAST(b.cd_conta_contabil AS STRING) AS cd_conta_contabil,
-        CAST(b.descricao AS STRING) AS descricao,
-        SAFE_CAST(b.vl_saldo_inicial AS FLOAT64) AS vl_saldo_inicial,
-        SAFE_CAST(b.vl_saldo_final AS FLOAT64) AS vl_saldo_final,
-        SAFE_CAST(b.ano AS INT64) AS ano,
-        SAFE_CAST(b.trimestre AS INT64) AS trimestre,
-        CAST(b.arquivo_origem AS STRING) AS arquivo_origem
       FROM \`${BASE_DEMONSTRACOES_TABLE_REF.fqn}\` b
     `
   }
@@ -3258,9 +3223,8 @@ app.post('/api/query', async (req, res) => {
   if (sanitized.includes(';')) {
     return res.status(400).json({ error: 'Somente uma instrução por requisição é permitida.' })
   }
-  const rewrittenSql = rewriteLegacyBigQueryRefs(sanitized)
-  const cteNames = extractCteNames(rewrittenSql)
-  const tableRefs = extractTableRefs(rewrittenSql, cteNames)
+  const cteNames = extractCteNames(sanitized)
+  const tableRefs = extractTableRefs(sanitized, cteNames)
   const disallowed = [...tableRefs].filter((ref) => !ALLOWED_TABLES.has(ref))
   if (disallowed.length) {
     console.warn('[server] Consulta bloqueada por allowlist', {
@@ -3272,9 +3236,9 @@ app.post('/api/query', async (req, res) => {
       tables: disallowed,
     })
   }
-  let scopedSql = rewrittenSql
+  let scopedSql = sanitized
   try {
-    scopedSql = applyUserAccessScopeToSql(rewrittenSql, req.accessContext)
+    scopedSql = applyUserAccessScopeToSql(sanitized, req.accessContext)
   } catch (err) {
     if (err?.code === 'NO_OPERATOR_ACCESS' || err?.code === 'NO_SCOPE_TABLE') {
       return res.status(403).json({ error: err.message, code: err.code })

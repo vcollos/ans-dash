@@ -42,7 +42,7 @@ steps:
         BQ_PROJECT_ID: "${_BQ_PROJECT_ID}"
         BQ_DATASET: "${_BQ_DATASET}"
         BQ_AUX_DATASET: "${_BQ_AUX_DATASET}"
-        BQ_DATASET_VIEW: "${_BQ_DATASET_VIEW}"
+        BQ_EXPORT_VIEW: "${_BQ_EXPORT_VIEW}"
         BQ_LOCATION: "${_BQ_LOCATION}"
         BQ_MART_DATASET: "${_BQ_MART_DATASET}"
         BQ_MART_ANS_TABLE: "${_BQ_MART_ANS_TABLE}"
@@ -96,7 +96,7 @@ substitutions:
   _BQ_PROJECT_ID: bigdata-467917
   _BQ_DATASET: dash_ans
   _BQ_AUX_DATASET: dash_ans
-  _BQ_DATASET_VIEW: dash_ans.indicadores_curados_snapshot_consolidado
+  _BQ_EXPORT_VIEW: dash_ans.indicadores_curados_snapshot_consolidado
   _BQ_LOCATION: southamerica-east1
   _BQ_MART_DATASET: dash_ans
   _BQ_MART_ANS_TABLE: indicadores_mart_ans_consolidado

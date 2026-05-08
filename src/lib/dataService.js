@@ -74,18 +74,16 @@ const BASE_VIEW_RAW =
   import.meta.env?.VITE_DATASET_VIEW ?? 'bigdata-467917.dash_ans.indicadores_curados_snapshot_consolidado'
 const MART_ANS_VIEW_RAW =
   import.meta.env?.VITE_MART_ANS_TABLE ??
-  import.meta.env?.VITE_DATASET_VIEW_ANS ??
   'bigdata-467917.dash_ans.indicadores_mart_ans_consolidado'
 const MART_UNIODONTO_VIEW_RAW =
   import.meta.env?.VITE_MART_UNIODONTO_TABLE ??
-  import.meta.env?.VITE_DATASET_VIEW_UNIODONTO ??
   'bigdata-467917.dash_ans.indicadores_mart_uniodonto_consolidado'
 const DEFAULT_VIEW_RAW = MART_ANS_VIEW_RAW || BASE_VIEW_RAW
 const UNIODONTO_VIEW_RAW = MART_UNIODONTO_VIEW_RAW || BASE_VIEW_RAW
 const DEFAULT_VIEW = formatTableRef(DEFAULT_VIEW_RAW)
 const UNIODONTO_VIEW = formatTableRef(UNIODONTO_VIEW_RAW)
-const HAS_ANS_MART = Boolean(MART_ANS_VIEW_RAW || import.meta.env?.VITE_DATASET_VIEW_ANS)
-const HAS_UNIODONTO_MART = Boolean(MART_UNIODONTO_VIEW_RAW || import.meta.env?.VITE_DATASET_VIEW_UNIODONTO)
+const HAS_ANS_MART = Boolean(MART_ANS_VIEW_RAW)
+const HAS_UNIODONTO_MART = Boolean(MART_UNIODONTO_VIEW_RAW)
 const viewColumnsCache = new Map()
 
 const PRESTADORES_TABLE_RAW =
@@ -243,8 +241,8 @@ function buildRegulatoryPercentileFragments(baseAlias = 'peer_base') {
 function buildWhereClause(filters = {}) {
   const clauses = []
   if (filters.modalidades?.length) {
-    const values = filters.modalidades.map((value) => `'${sanitizeSql(value)}'`)
-    clauses.push(`modalidade IN (${values.join(',')})`)
+    const values = filters.modalidades.map((value) => `'${sanitizeSql(value).toLowerCase()}'`)
+    clauses.push(`LOWER(TRIM(modalidade)) IN (${values.join(',')})`)
   }
   if (filters.portes?.length) {
     const values = filters.portes.map((value) => `'${sanitizeSql(value)}'`)
@@ -447,7 +445,7 @@ function buildFilterClauses(filters = {}, { latestOnlyDefault = true } = {}) {
 function getWhereExpression(filters = {}) {
   const clauses = []
   if (filters.modalidades?.length) {
-    clauses.push(`modalidade IN (${filters.modalidades.map((value) => `'${sanitizeSql(value)}'`).join(',')})`)
+    clauses.push(`LOWER(TRIM(modalidade)) IN (${filters.modalidades.map((value) => `'${sanitizeSql(value).toLowerCase()}'`).join(',')})`)
   }
   if (filters.portes?.length) {
     clauses.push(`${buildPorteExpression()} IN (${filters.portes.map((value) => `'${sanitizeSql(value)}'`).join(',')})`)

@@ -20,6 +20,22 @@ const BOOLEAN_OPTIONS = {
   ],
 }
 
+const normalizeOptionText = (value) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+
+function canonicalizeSelection(values, options) {
+  if (!Array.isArray(values)) return null
+  const optionByValue = new Map(options.map((option) => [normalizeOptionText(option.value), option.value]))
+  const optionByLabel = new Map(options.map((option) => [normalizeOptionText(option.label), option.value]))
+  return values
+    .map((value) => optionByValue.get(normalizeOptionText(value)) ?? optionByLabel.get(normalizeOptionText(value)))
+    .filter((value) => value !== undefined)
+}
+
 export const comparisonFilterOptions = {
   modalidades: MODALITY_OPTIONS,
   portes: PORTE_OPTIONS,
@@ -35,11 +51,12 @@ export const DEFAULT_COMPARISON_FILTERS = {
 }
 
 function ensureSelection(values, options) {
-  if (!Array.isArray(values)) {
+  const canonicalValues = canonicalizeSelection(values, options)
+  if (!canonicalValues) {
     return options.map((option) => option.value)
   }
   const allowedValues = options.map((option) => option.value)
-  const sanitized = values.filter((value) => allowedValues.includes(value))
+  const sanitized = canonicalValues.filter((value) => allowedValues.includes(value))
   return sanitized.length ? sanitized : allowedValues
 }
 

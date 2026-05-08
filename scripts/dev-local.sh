@@ -28,11 +28,11 @@ set -a
 : "${VITE_API_PROXY:=http://localhost:${SERVER_PORT}}"
 : "${BQ_PROJECT_ID:=bigdata-467917}"
 : "${BQ_DATASET:=dash_ans}"
-: "${BQ_EXPORT_VIEW:=indicadores_curados_snapshot}"
+: "${BQ_EXPORT_VIEW:=indicadores_curados_snapshot_consolidado}"
 : "${BQ_MART_ANS_TABLE:=indicadores_mart_ans}"
 : "${BQ_MART_UNIODONTO_TABLE:=indicadores_mart_uniodonto}"
 : "${BQ_MART_DATASET:=dash_ans}"
-: "${BQ_AUX_DATASET:=dash_ans_uploads}"
+: "${BQ_AUX_DATASET:=dash_ans}"
 : "${BQ_LOCATION:=southamerica-east1}"
 : "${FIREBASE_PROJECT_ID:=${BQ_PROJECT_ID}}"
 : "${FIREBASE_SERVICE_ACCOUNT_PATH:=}"
@@ -44,9 +44,9 @@ else
   _export_view_ref="${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_EXPORT_VIEW}"
 fi
 
-: "${VITE_DATASET_VIEW:=${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.indicadores_curados_snapshot_consolidado}"
-: "${VITE_MART_ANS_TABLE:=${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.indicadores_mart_ans_consolidado}"
-: "${VITE_MART_UNIODONTO_TABLE:=${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.indicadores_mart_uniodonto_consolidado}"
+: "${VITE_DATASET_VIEW:=${BQ_PROJECT_ID}.${BQ_MART_DATASET}.indicadores_curados_snapshot_consolidado}"
+: "${VITE_MART_ANS_TABLE:=${BQ_PROJECT_ID}.${BQ_MART_DATASET}.indicadores_mart_ans_consolidado}"
+: "${VITE_MART_UNIODONTO_TABLE:=${BQ_PROJECT_ID}.${BQ_MART_DATASET}.indicadores_mart_uniodonto_consolidado}"
 : "${BQ_ALLOWED_VIEWS:=${_export_view_ref},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_ANS_TABLE},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.${BQ_MART_UNIODONTO_TABLE},${BQ_PROJECT_ID}.${BQ_MART_DATASET}.prestadores_ativos_uniodonto_origem,${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.indicadores_curados_snapshot_consolidado,${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.indicadores_mart_ans_consolidado,${BQ_PROJECT_ID}.${BQ_AUX_DATASET}.indicadores_mart_uniodonto_consolidado}"
 set +a
 
