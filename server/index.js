@@ -245,6 +245,15 @@ const SERVER_BOOT_ID = process.env.K_REVISION ?? crypto.randomBytes(8).toString(
 const FIREBASE_PROJECT_ID =
   process.env.FIREBASE_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT
 const FIREBASE_SERVICE_ACCOUNT_PATH = String(process.env.FIREBASE_SERVICE_ACCOUNT_PATH ?? '').trim()
+const FIREBASE_WEB_CONFIG = {
+  apiKey: process.env.VITE_FIREBASE_API_KEY ?? 'AIzaSyDGszlkE1Jo_guXMs_QUGow8EK4pYgrp4Y',
+  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN ?? 'bigdata-467917.firebaseapp.com',
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID ?? FIREBASE_PROJECT_ID ?? 'bigdata-467917',
+  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET ?? 'bigdata-467917.firebasestorage.app',
+  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? '565810349046',
+  appId: process.env.VITE_FIREBASE_APP_ID ?? '1:565810349046:web:51a21f3b1609ca39597dd7',
+  measurementId: process.env.VITE_FIREBASE_MEASUREMENT_ID ?? 'G-12MS8R4KQS',
+}
 
 function buildFirebaseAdminOptions() {
   const options = {}
@@ -3315,6 +3324,17 @@ const SHOULD_SERVE_STATIC =
   process.env.SERVE_STATIC === 'true' || (process.env.NODE_ENV === 'production' && fs.existsSync(DIST_DIR))
 
 if (SHOULD_SERVE_STATIC) {
+  app.get('/__/firebase/init.json', (_req, res) => {
+    res.set('Cache-Control', 'public, max-age=3600')
+    res.json(FIREBASE_WEB_CONFIG)
+  })
+
+  app.get('/__/firebase/init.js', (_req, res) => {
+    res.type('application/javascript')
+    res.set('Cache-Control', 'public, max-age=3600')
+    res.send(`firebase.initializeApp(${JSON.stringify(FIREBASE_WEB_CONFIG)});`)
+  })
+
   app.use(express.static(DIST_DIR))
   app.get(/.*/, (req, res) => {
     if (req.path.startsWith('/api')) {
