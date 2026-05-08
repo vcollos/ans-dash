@@ -1938,6 +1938,7 @@ function buildConsolidatedIndicatorSnapshotQuery() {
   const obm = formatMaterializeTableRef(BQ_BENEFICIARIOS_ODONTO_TABLE, BQ_MART_DATASET)
   const operadoras = `\`${BQ_PROJECT_ID}.${BQ_DATASET}.operadoras\``
   const uniodontosAtivas = `\`${BQ_PROJECT_ID}.${BQ_DATASET}.uniodontos_ativas\``
+  const uhubCooperativas = `\`${BQ_PROJECT_ID}.uhub.cooperativas\``
   const target = quoteTableRef(CONSOLIDATED_INDICATOR_SNAPSHOT_REF)
 
   return `
@@ -1975,6 +1976,21 @@ function buildConsolidatedIndicatorSnapshotQuery() {
         PARTITION BY reg_ans
         ORDER BY Periodo DESC
       ) = 1
+    ), uhub_operadoras_dim AS (
+      SELECT
+        CAST(reg_ans AS STRING) AS reg_ans,
+        INITCAP(LOWER(TRIM(nome_fantasia))) AS nome_fantasia,
+        CONCAT(
+          'Uniodonto ',
+          REGEXP_REPLACE(INITCAP(LOWER(TRIM(nome_fantasia))), r'^Uniodonto\\s+', '')
+        ) AS operadora
+      FROM ${uhubCooperativas}
+      WHERE NULLIF(TRIM(nome_fantasia), '') IS NOT NULL
+        AND IFNULL(is_deleted, FALSE) IS FALSE
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY CAST(reg_ans AS STRING)
+        ORDER BY IFNULL(ativa, FALSE) DESC, updated_at DESC
+      ) = 1
     ), operadoras_dim AS (
       SELECT
         REG_ANS AS reg_ans,
@@ -1992,69 +2008,76 @@ function buildConsolidatedIndicatorSnapshotQuery() {
       FROM ${uniodontosAtivas}
     ), official_base AS (
       SELECT
-        reg_ans,
-        nome_operadora,
-        modalidade,
-        uniodonto,
-        ativa,
-        qt_beneficiarios,
-        porte,
-        ano,
-        trimestre,
-        periodo_raw AS periodo_data,
-        vr_receitas,
-        vr_despesas,
-        vr_contraprestacoes,
-        vr_contraprestacoes_efetivas,
-        vr_contraprestacoes_pre,
-        vr_corresponsabilidade_cedida,
-        vr_creditos_operacoes_saude,
-        vr_eventos_liquidos,
-        vr_eventos_a_liquidar,
-        vr_desp_comerciais,
-        vr_desp_comerciais_promocoes,
-        vr_conta_464,
-        vr_desp_administrativas,
-        vr_outras_desp_oper,
-        vr_conta_442129119,
-        vr_desp_tributos,
-        vr_receitas_fin,
-        vr_receitas_patrimoniais,
-        vr_despesas_fin,
-        vr_outras_receitas_operacionais,
-        vr_conta_332129111,
-        vr_conta_332189111,
-        vr_ativo_circulante,
-        vr_conta_1213,
-        vr_conta_1214,
-        vr_conta_122,
-        vr_ativo_permanente,
-        vr_passivo_circulante,
-        vr_passivo_nao_circulante,
-        vr_patrimonio_liquido,
-        vr_ativos_garantidores,
-        vr_provisoes_tecnicas,
-        vr_conta_32,
-        vr_conta_216,
-        vr_conta_217,
-        vr_conta_236,
-        vr_conta_237,
-        vr_pl_ajustado,
-        vr_margem_solvencia_exigida,
-        vr_conta_61,
-        qt_prestadores
-      FROM ${officialSnapshot}
+        official.reg_ans,
+        COALESCE(uop.operadora, official.nome_operadora) AS nome_operadora,
+        uop.nome_fantasia,
+        official.modalidade,
+        official.uniodonto,
+        official.ativa,
+        official.qt_beneficiarios,
+        official.porte,
+        official.ano,
+        official.trimestre,
+        official.periodo_raw AS periodo_data,
+        official.vr_receitas,
+        official.vr_despesas,
+        official.vr_contraprestacoes,
+        official.vr_contraprestacoes_efetivas,
+        official.vr_contraprestacoes_pre,
+        official.vr_corresponsabilidade_cedida,
+        official.vr_creditos_operacoes_saude,
+        official.vr_eventos_liquidos,
+        official.vr_eventos_a_liquidar,
+        official.vr_desp_comerciais,
+        official.vr_desp_comerciais_promocoes,
+        official.vr_conta_464,
+        official.vr_desp_administrativas,
+        official.vr_outras_desp_oper,
+        official.vr_conta_442129119,
+        official.vr_desp_tributos,
+        official.vr_receitas_fin,
+        official.vr_receitas_patrimoniais,
+        official.vr_despesas_fin,
+        official.vr_outras_receitas_operacionais,
+        official.vr_conta_332129111,
+        official.vr_conta_332189111,
+        official.vr_ativo_circulante,
+        official.vr_conta_1213,
+        official.vr_conta_1214,
+        official.vr_conta_122,
+        official.vr_ativo_permanente,
+        official.vr_passivo_circulante,
+        official.vr_passivo_nao_circulante,
+        official.vr_patrimonio_liquido,
+        official.vr_ativos_garantidores,
+        official.vr_provisoes_tecnicas,
+        official.vr_conta_32,
+        official.vr_conta_216,
+        official.vr_conta_217,
+        official.vr_conta_236,
+        official.vr_conta_237,
+        official.vr_pl_ajustado,
+        official.vr_margem_solvencia_exigida,
+        official.vr_conta_61,
+        official.qt_prestadores
+      FROM ${officialSnapshot} official
+      LEFT JOIN uhub_operadoras_dim uop
+        ON CAST(official.reg_ans AS STRING) = uop.reg_ans
     ), external_base AS (
       SELECT
         SAFE_CAST(src.reg_ans AS INT64) AS reg_ans,
-        MIN(
-          IF(
-            COALESCE(obm_p.Operadora, obm_l.Operadora, op.operadora) IS NOT NULL
-            AND COALESCE(obm_p.Operadora, obm_l.Operadora, op.operadora) <> '',
-            COALESCE(obm_p.Operadora, obm_l.Operadora, op.operadora),
-            NULL
+        COALESCE(
+          MAX(uop.operadora),
+          MIN(
+            IF(
+              COALESCE(obm_p.Operadora, obm_l.Operadora, op.operadora) IS NOT NULL
+              AND COALESCE(obm_p.Operadora, obm_l.Operadora, op.operadora) <> '',
+              COALESCE(obm_p.Operadora, obm_l.Operadora, op.operadora),
+              NULL
+            )
           )
         ) AS nome_operadora,
+        MAX(uop.nome_fantasia) AS nome_fantasia,
         MIN(
           IF(
             COALESCE(src.modalidade, obm_p.modalidade, obm_l.modalidade, op.modalidade) IS NOT NULL
@@ -2137,6 +2160,8 @@ function buildConsolidatedIndicatorSnapshotQuery() {
         ON CAST(src.reg_ans AS STRING) = op.reg_ans
       LEFT JOIN uniodonto_dim ud
         ON CAST(src.reg_ans AS STRING) = ud.reg_ans
+      LEFT JOIN uhub_operadoras_dim uop
+        ON CAST(src.reg_ans AS STRING) = uop.reg_ans
       WHERE src.ano IS NOT NULL
         AND src.trimestre IS NOT NULL
         AND LOWER(TRIM(COALESCE(src.modalidade, obm_p.modalidade, obm_l.modalidade, op.modalidade, ''))) IN (
@@ -2173,6 +2198,7 @@ function buildConsolidatedIndicatorSnapshotQuery() {
     SELECT
       lagged.reg_ans,
       lagged.nome_operadora,
+      lagged.nome_fantasia,
       lagged.modalidade,
       lagged.uniodonto,
       lagged.ativa,
