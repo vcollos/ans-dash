@@ -20,6 +20,7 @@ import { Button } from './components/ui/button'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './components/ui/tabs'
 import { describeComparisonFilters } from './lib/comparisonModes'
 import DataLoadingIndicator from './components/dashboard/DataLoadingIndicator'
+import DocumentationPage from './components/documentation/DocumentationPage'
 import { AuthProvider } from './contexts/AuthProvider'
 import { useAuth } from './contexts/useAuth'
 import { UNIODONTO_INDICATORS } from './lib/uniodontoMetrics'
@@ -221,6 +222,7 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile, onOpenAdminAccou
               <TabsTrigger value="indicadores">Indicadores</TabsTrigger>
               <TabsTrigger value="ranking">Ranking</TabsTrigger>
               <TabsTrigger value="historico">Gráficos históricos</TabsTrigger>
+              <TabsTrigger value="documentacao">Documentação</TabsTrigger>
             </TabsList>
             <TabsContent value="indicadores" className="mt-6 space-y-6">
               {uniodontoMode ? (
@@ -296,6 +298,9 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile, onOpenAdminAccou
                     : undefined
                 }
               />
+            </TabsContent>
+            <TabsContent value="documentacao" className="mt-6">
+              <DocumentationPage />
             </TabsContent>
           </Tabs>
         </div>
