@@ -164,6 +164,103 @@ export async function deleteAdminUpload(uploadId) {
   return payload
 }
 
+export async function fetchBrevoConfig() {
+  const response = await fetchWithAuth('/api/admin/brevo')
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao carregar configuração Brevo.')
+  }
+  return payload?.config ?? {}
+}
+
+export async function saveBrevoConfig(formData = {}) {
+  const response = await fetchWithAuth('/api/admin/brevo', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(formData),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao salvar configuração Brevo.')
+  }
+  return payload?.config ?? {}
+}
+
+export async function fetchAdminEmailTemplates() {
+  const response = await fetchWithAuth('/api/admin/email-templates')
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao carregar templates de email.')
+  }
+  return {
+    templates: Array.isArray(payload?.templates) ? payload.templates : [],
+    variables: Array.isArray(payload?.variables) ? payload.variables : [],
+  }
+}
+
+export async function createAdminEmailTemplate(formData = {}) {
+  const response = await fetchWithAuth('/api/admin/email-templates', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(formData),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao criar template de email.')
+  }
+  return payload?.template ?? null
+}
+
+export async function saveAdminEmailTemplate(templateId, formData = {}) {
+  const response = await fetchWithAuth(`/api/admin/email-templates/${encodeURIComponent(templateId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(formData),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao salvar template de email.')
+  }
+  return payload?.template ?? null
+}
+
+export async function deleteAdminEmailTemplate(templateId) {
+  const response = await fetchWithAuth(`/api/admin/email-templates/${encodeURIComponent(templateId)}`, {
+    method: 'DELETE',
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao excluir template de email.')
+  }
+  return payload
+}
+
+export async function previewAdminEmailTemplate(template = {}) {
+  const response = await fetchWithAuth('/api/admin/email-templates/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ template }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao gerar preview do email.')
+  }
+  return payload?.preview ?? {}
+}
+
+export async function sendAdminEmailTemplateTest({ to, template }) {
+  const response = await fetchWithAuth('/api/admin/email-templates/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to, template }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao enviar teste do email.')
+  }
+  return payload
+}
+
 export async function approveAccount(uid) {
   const response = await fetchWithAuth(`/api/admin/accounts/${encodeURIComponent(uid)}/approve`, {
     method: 'POST',

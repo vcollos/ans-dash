@@ -39,6 +39,7 @@ COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/server ./server
 COPY --from=base /app/db ./db
 COPY --from=base /app/dist ./dist
+COPY --from=base /app/Emails-PFC/templates ./Emails-PFC/templates
 COPY --from=base /app/package.json ./package.json
 
 EXPOSE 8080

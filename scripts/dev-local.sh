@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT_DIR}/.env.local.server"
 CLIENT_ENV_FILE="${ROOT_DIR}/.env.local"
+PRESET_SERVER_PORT="${SERVER_PORT-}"
+PRESET_VITE_PORT="${VITE_PORT-}"
+PRESET_VITE_API_PROXY="${VITE_API_PROXY-}"
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -18,6 +21,10 @@ if [[ -f "${CLIENT_ENV_FILE}" ]]; then
   . "${CLIENT_ENV_FILE}"
   set +a
 fi
+
+[[ -n "${PRESET_SERVER_PORT}" ]] && export SERVER_PORT="${PRESET_SERVER_PORT}"
+[[ -n "${PRESET_VITE_PORT}" ]] && export VITE_PORT="${PRESET_VITE_PORT}"
+[[ -n "${PRESET_VITE_API_PROXY}" ]] && export VITE_API_PROXY="${PRESET_VITE_API_PROXY}"
 
 set -a
 : "${SERVER_HOST:=0.0.0.0}"

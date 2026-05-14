@@ -70,8 +70,10 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile }) {
   const [filtersSidebarOpen, setFiltersSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('indicadores')
   const [isDataImportOpen, setIsDataImportOpen] = useState(false)
-  const [isAdminAccountsOpen, setIsAdminAccountsOpen] = useState(false)
   const [uploadDefaultOperator, setUploadDefaultOperator] = useState(null)
+  const [currentPath, setCurrentPath] = useState(() =>
+    typeof window === 'undefined' ? '/' : window.location.pathname,
+  )
   const {
     status,
     error,
@@ -132,6 +134,20 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile }) {
     [accessProfile?.operators],
   )
   const canOpenDataImport = uploadOperators.length > 0
+  const isAdminPage = accessProfile?.isAdmin && currentPath === '/admin'
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handlePopState = () => setCurrentPath(window.location.pathname)
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  function navigateTo(path) {
+    if (typeof window === 'undefined') return
+    window.history.pushState({}, '', path)
+    setCurrentPath(window.location.pathname)
+  }
 
   function handleOpenDataImport(operator = null) {
     setUploadDefaultOperator(operator)
@@ -154,6 +170,36 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile }) {
     )
   }
 
+  if (isAdminPage) {
+    return (
+      <div className="min-h-screen bg-muted/20">
+        <main className="flex min-h-screen w-full flex-col gap-6 px-[3vw] py-[3vh]">
+          <AdminAccountsDialog
+            inline
+            open
+            onBack={() => navigateTo('/')}
+            onOpenUploadForOperator={(operator) => {
+              navigateTo('/')
+              handleOpenDataImport(operator)
+            }}
+          />
+          <OperadoraDataImportDialog
+            open={isDataImportOpen}
+            onOpenChange={(nextOpen) => {
+              setIsDataImportOpen(nextOpen)
+              if (!nextOpen) setUploadDefaultOperator(null)
+            }}
+            allowedOperators={uploadOperators}
+            defaultOperatorName={uploadDefaultOperator?.operatorName ?? operatorInsight?.operatorName ?? null}
+            defaultOperatorRegAns={uploadDefaultOperator?.regAns ?? operatorContext?.regAns ?? null}
+            defaultCompetencia={uploadDefaultOperator?.competencia ?? null}
+            userEmail={accessProfile?.email ?? ''}
+          />
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-muted/20">
       <main className="flex min-h-screen w-full flex-col gap-6 px-[3vw] py-[3vh]">
@@ -162,7 +208,7 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile }) {
           onOpenFilters={() => setFiltersSidebarOpen(true)}
           onLogout={onLogout}
           onOpenProfile={onOpenProfile}
-          onOpenAdminAccounts={accessProfile?.isAdmin ? () => setIsAdminAccountsOpen(true) : null}
+          onOpenAdminAccounts={accessProfile?.isAdmin ? () => navigateTo('/admin') : null}
           uniodontoMode={uniodontoMode}
           onUniodontoModeChange={setUniodontoMode}
           onOpenDataImport={() => handleOpenDataImport(null)}
@@ -323,16 +369,6 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile }) {
           defaultCompetencia={uploadDefaultOperator?.competencia ?? null}
           userEmail={accessProfile?.email ?? ''}
         />
-        {accessProfile?.isAdmin ? (
-          <AdminAccountsDialog
-            open={isAdminAccountsOpen}
-            onOpenChange={setIsAdminAccountsOpen}
-            onOpenUploadForOperator={(operator) => {
-              setIsAdminAccountsOpen(false)
-              handleOpenDataImport(operator)
-            }}
-          />
-        ) : null}
       </main>
     </div>
   )

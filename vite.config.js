@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '')
+  const env = { ...loadEnv(mode, process.cwd(), ''), ...process.env }
   const serverPort = Number(env.SERVER_PORT || 4000)
   const vitePort = Number(env.VITE_PORT || 5173)
   const allowedHosts = String(
@@ -27,6 +27,7 @@ export default defineConfig(({ mode }) => {
       allowedHosts,
       proxy: {
         '/api': apiProxy,
+        '/email-assets': apiProxy,
       },
       headers: {
         'Cache-Control': 'no-store',
@@ -41,6 +42,7 @@ export default defineConfig(({ mode }) => {
       allowedHosts,
       proxy: {
         '/api': apiProxy,
+        '/email-assets': apiProxy,
       },
       headers: {
         'Cache-Control': 'no-store',

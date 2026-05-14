@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Button } from '../ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog'
+import { Dialog, DialogContent, DialogHeader } from '../ui/dialog'
+import AdminEmailTemplatesPanel from './AdminEmailTemplatesPanel'
 import {
   approveAccount,
   assignAccountOperator,
@@ -35,9 +36,7 @@ const EMPTY_EDIT_ACCOUNT = {
   roleFunction: '',
   regAns: '',
 }
-
 function normalizeRegAns(value) {
-  if (String(value ?? '').trim() === '*') return '*'
   return String(value ?? '').replace(/\D/g, '')
 }
 
@@ -83,7 +82,7 @@ function accountToEditForm(account = {}) {
   }
 }
 
-export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadForOperator }) {
+export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadForOperator, inline = false, onBack }) {
   const [accounts, setAccounts] = useState([])
   const [operators, setOperators] = useState([])
   const [uploadReport, setUploadReport] = useState({ rows: [], periods: [], summary: null })
@@ -138,7 +137,7 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
   }
 
   useEffect(() => {
-    if (!open) return
+    if (!open && !inline) return
     let cancelled = false
     setIsLoading(true)
     setErrorMessage(null)
@@ -167,7 +166,7 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, inline])
 
   function toggleSelected(uid, checked) {
     setSelectedUids((current) => {
@@ -370,14 +369,23 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
     }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-hidden p-0 sm:max-w-5xl">
-        <div className="flex max-h-[calc(100dvh-2rem)] flex-col">
+  const panel = (
+        <div className={inline ? 'flex min-h-0 flex-col rounded-lg border bg-background shadow-sm' : 'flex max-h-[calc(100dvh-2rem)] flex-col'}>
           <div className="border-b px-6 py-5">
             <DialogHeader>
-              <DialogTitle>Administração</DialogTitle>
-              <DialogDescription>Aprovação em lote, vínculo usuário-operadora e envio pela operadora.</DialogDescription>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h1 className="text-lg font-semibold leading-none tracking-tight">Administração</h1>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Aprovação em lote, vínculo usuário-operadora e envio pela operadora.
+                  </p>
+                </div>
+                {inline && typeof onBack === 'function' ? (
+                  <Button type="button" size="sm" variant="outline" onClick={onBack}>
+                    Voltar ao painel
+                  </Button>
+                ) : null}
+              </div>
             </DialogHeader>
           </div>
 
@@ -406,6 +414,14 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
                 onClick={() => setActiveTab('create')}
               >
                 Novo usuário
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={activeTab === 'emailTemplates' ? 'default' : 'outline'}
+                onClick={() => setActiveTab('emailTemplates')}
+              >
+                Emails do sistema
               </Button>
             </div>
           </div>
@@ -765,11 +781,22 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
                     </Button>
                   </form>
                 ) : null}
+                {activeTab === 'emailTemplates' ? <AdminEmailTemplatesPanel /> : null}
               </div>
             )}
             {errorMessage ? <p className="mt-3 text-sm text-destructive">{errorMessage}</p> : null}
           </div>
         </div>
+  )
+
+  if (inline) {
+    return panel
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-hidden p-0 sm:max-w-5xl">
+        {panel}
       </DialogContent>
     </Dialog>
   )

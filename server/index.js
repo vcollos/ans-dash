@@ -53,6 +53,7 @@ const BQ_AUX_DEMONSTRACOES_LATEST_VIEW =
   process.env.BQ_AUX_DEMONSTRACOES_LATEST_VIEW ?? 'vw_demonstracoes_contabeis_auxiliar_latest'
 const BQ_USER_ACCESS_TABLE = process.env.BQ_USER_ACCESS_TABLE ?? 'user_operadora_acessos'
 const BQ_USER_PROFILE_TABLE = process.env.BQ_USER_PROFILE_TABLE ?? 'user_profile_completions'
+const BQ_ADMIN_CONFIG_TABLE = process.env.BQ_ADMIN_CONFIG_TABLE ?? 'admin_config'
 const ENFORCE_USER_ACCESS = (process.env.BQ_ENFORCE_USER_ACCESS ?? 'true')
   .toLowerCase()
   .trim() === 'true'
@@ -68,13 +69,120 @@ const UHUB_OPERATOR_CACHE_TTL_MS = Number(process.env.UHUB_OPERATOR_CACHE_TTL_MS
 const PFC_ONBOARDING_COLLECTION = process.env.PFC_ONBOARDING_COLLECTION ?? 'pfc_users_uhub_link'
 const PFC_ONBOARDING_LOG_COLLECTION = process.env.PFC_ONBOARDING_LOG_COLLECTION ?? 'pfc_onboarding_audit_logs'
 const PFC_MARKETING_EMAIL = process.env.PFC_MARKETING_EMAIL ?? 'marketing@uniodonto.coop.br'
+const PFC_SUPPORT_EMAIL = process.env.PFC_SUPPORT_EMAIL ?? 'marketing@uniodonto.coop.br'
 const SMTP_HOST = String(process.env.SMTP_HOST ?? '').trim()
 const SMTP_PORT = Number(process.env.SMTP_PORT ?? 587)
 const SMTP_USER = String(process.env.SMTP_USER ?? '').trim()
 const SMTP_PASS = String(process.env.SMTP_PASS ?? '').trim()
 const SMTP_FROM = String(process.env.SMTP_FROM ?? '').trim()
+const BREVO_TRANSACTIONAL_CONFIG_DOC = process.env.BREVO_TRANSACTIONAL_CONFIG_DOC ?? 'brevo_transactional'
+const EMAIL_TEMPLATES_CONFIG_DOC = process.env.EMAIL_TEMPLATES_CONFIG_DOC ?? 'email_templates'
 const PFC_APP_URL = String(process.env.PFC_APP_URL ?? process.env.APP_URL ?? 'https://pfc.uniodonto.coop.br').trim()
-const GLOBAL_OPERATOR_ACCESS = { regAns: '*', operatorName: 'Uniodonto do Brasil' }
+const EMAIL_TEMPLATES_DIR = path.resolve(__dirname, process.env.EMAIL_TEMPLATES_DIR ?? '../Emails-PFC/templates')
+const EMAIL_TEMPLATES_INDEX_PATH = path.join(EMAIL_TEMPLATES_DIR, 'index.html')
+const EMAIL_TEMPLATE_FILES_DIR = path.join(EMAIL_TEMPLATES_DIR, 'emails')
+const EMAIL_TEMPLATE_MANIFEST_PATH = path.join(EMAIL_TEMPLATE_FILES_DIR, 'manifest.json')
+const EMAIL_ASSETS_PUBLIC_PATH = '/email-assets'
+const EMAIL_TEMPLATE_HTML_FILES = [
+  {
+    id: 'cadastro-recebido',
+    file: '01-conta-criada-pelo-usuario-cadastro-recebido.html',
+    name: 'Conta criada pelo usuário',
+    category: 'Usuário final',
+    subject: 'Recebemos seu cadastro no Painel Financeiro Contábil',
+    preheader: 'Seu cadastro está em validação. Avisaremos assim que o acesso for liberado.',
+  },
+  {
+    id: 'conta-liberada',
+    file: '02-conta-liberada-acesso-pfc.html',
+    name: 'Conta liberada',
+    category: 'Usuário final',
+    subject: 'Seu acesso ao Painel Financeiro Contábil foi liberado',
+    preheader: 'Seu cadastro foi validado. Acesse o painel para começar a usar o ambiente.',
+  },
+  {
+    id: 'conta-criada-admin',
+    file: '03-conta-criada-pelo-administrador.html',
+    name: 'Conta criada pelo administrador',
+    category: 'Usuário final',
+    subject: 'Sua conta no Painel Financeiro Contábil foi criada',
+    preheader: 'Seu acesso inicial está pronto. Use o link para entrar e concluir as informações necessárias.',
+  },
+  {
+    id: 'recuperacao-senha',
+    file: '04-recuperacao-de-senha.html',
+    name: 'Recuperação de senha',
+    category: 'Usuário final',
+    subject: 'Redefina sua senha de acesso ao PFC',
+    preheader: 'Recebemos sua solicitação de redefinição. Use o link para criar uma nova senha.',
+  },
+  {
+    id: 'primeiro-acesso',
+    file: '05-primeiro-acesso-completar-cadastro.html',
+    name: 'Primeiro acesso',
+    category: 'Usuário final',
+    subject: 'Complete seu cadastro para finalizar o primeiro acesso',
+    preheader: 'Revise seus dados e confirme o vínculo com sua Uniodonto para seguir usando o painel.',
+  },
+  {
+    id: 'perfil-atualizado',
+    file: '06-perfil-atualizado.html',
+    name: 'Perfil atualizado',
+    category: 'Usuário final',
+    subject: 'Seus dados cadastrais foram atualizados',
+    preheader: 'Confirmamos a atualização do seu perfil no Painel Financeiro Contábil.',
+  },
+  {
+    id: 'acesso-pendente',
+    file: '07-acesso-pendente-em-analise.html',
+    name: 'Acesso pendente',
+    category: 'Usuário final',
+    subject: 'Seu acesso ao PFC segue em análise',
+    preheader: 'Seu cadastro ainda está em avaliação. Avisaremos quando houver atualização.',
+  },
+  {
+    id: 'acesso-negado',
+    file: '08-acesso-negado-ou-pendencia-de-dados.html',
+    name: 'Acesso negado ou pendência de dados',
+    category: 'Usuário final',
+    subject: 'Precisamos ajustar seus dados de acesso ao PFC',
+    preheader: 'Seu cadastro precisa de ajuste ou confirmação adicional antes da liberação.',
+  },
+  {
+    id: 'lembrete-envio',
+    file: '09-lembrete-de-envio-atualize-seus-dados.html',
+    name: 'Lembrete de envio',
+    category: 'Usuário final',
+    subject: 'Lembrete de envio de demonstrações contábeis - {{competencia}}',
+    preheader: 'Use a opção "Atualize seus dados" para encaminhar as informações da competência {{competencia}}.',
+  },
+  {
+    id: 'upload-concluido',
+    file: '10-upload-concluido.html',
+    name: 'Upload concluído',
+    category: 'Usuário final',
+    subject: 'Recebemos seu envio de demonstrações contábeis',
+    preheader: 'O envio da competência {{competencia}} foi recebido e registrado no PFC.',
+  },
+  {
+    id: 'upload-erro',
+    file: '11-upload-com-erro.html',
+    name: 'Upload com erro',
+    category: 'Usuário final',
+    subject: 'Não foi possível concluir seu envio de dados',
+    preheader: 'Revise o arquivo da competência {{competencia}} e faça um novo envio pelo painel.',
+  },
+  {
+    id: 'aviso-aprovacao',
+    file: '12-aviso-administrativo-nova-conta-pendente.html',
+    name: 'Aviso administrativo',
+    category: 'Aprovador',
+    subject: 'Novo cadastro pendente de validação no PFC',
+    preheader: 'Há um novo usuário aguardando análise para acesso ao Painel Financeiro Contábil.',
+  },
+]
+const BRASIL_OPERATOR_REG_ANS = '314315'
+const BRASIL_OPERATOR_NAME = 'BRASIL'
 const ADMIN_EMAIL_DOMAINS = String(
   process.env.ACCESS_ADMIN_EMAIL_DOMAINS ?? 'uniodonto.coop.br,collos.com.br,contagbr.com.br',
 )
@@ -143,6 +251,7 @@ const AUX_DEMONSTRACOES_TABLE_REF = parseTableRef(BQ_AUX_DEMONSTRACOES_TABLE, BQ
 const AUX_DEMONSTRACOES_LATEST_VIEW_REF = parseTableRef(BQ_AUX_DEMONSTRACOES_LATEST_VIEW, BQ_AUX_DATASET)
 const USER_ACCESS_TABLE_REF = parseTableRef(BQ_USER_ACCESS_TABLE, BQ_MART_DATASET)
 const USER_PROFILE_TABLE_REF = parseTableRef(BQ_USER_PROFILE_TABLE, BQ_MART_DATASET)
+const ADMIN_CONFIG_TABLE_REF = parseTableRef(BQ_ADMIN_CONFIG_TABLE, BQ_AUX_DATASET)
 const BASE_DEMONSTRACOES_TABLE_REF = parseTableRef(BQ_BASE_DEMONSTRACOES_TABLE, BQ_DATASET)
 const CONSOLIDATED_DEMONSTRACOES_VIEW_REF = parseTableRef(BQ_CONSOLIDATED_DEMONSTRACOES_VIEW, BQ_AUX_DATASET)
 const EXPORT_VIEW_REF = parseTableRef(BQ_EXPORT_VIEW, BQ_MART_DATASET)
@@ -277,6 +386,9 @@ if (!admin.apps.length) {
 }
 
 const firestore = admin.firestore()
+firestore.settings({
+  preferRest: String(process.env.FIRESTORE_PREFER_REST ?? 'true').toLowerCase().trim() === 'true',
+})
 let mailTransporter = null
 
 function getMailTransporter() {
@@ -333,7 +445,12 @@ async function authMiddleware(req, res, next) {
       email: decoded.email ?? null,
       claims: decoded,
     }
-    if (AUTH_SKIP_ACCESS_CONTEXT_PATHS.has(req.path) || req.path.startsWith('/api/admin/accounts')) {
+    if (
+      AUTH_SKIP_ACCESS_CONTEXT_PATHS.has(req.path) ||
+      req.path.startsWith('/api/admin/accounts') ||
+      req.path.startsWith('/api/admin/brevo') ||
+      req.path.startsWith('/api/admin/email-templates')
+    ) {
       req.accessContext = {
         enforced: ENFORCE_USER_ACCESS,
         isAdmin: isPrivilegedDomainEmail(req.user.email),
@@ -587,9 +704,10 @@ let userAccessTablePromise = null
 let userAccessTableReady = false
 let userProfileTablePromise = null
 let userProfileTableReady = false
+let adminConfigTablePromise = null
+let adminConfigTableReady = false
 
 function normalizeRegAns(value) {
-  if (String(value ?? '').trim() === '*') return '*'
   const normalized = String(value ?? '')
     .trim()
     .replace(/\D+/g, '')
@@ -868,17 +986,16 @@ function completeProfileFromUhubResolve(profile = {}, verification = {}) {
 function mapUhubCooperativa(row = {}) {
   const regAns = normalizeRegAns(row.reg_ans_operadora ?? row.codigo_ans ?? row.reg_ans ?? row.REG_ANS)
   const operatorName =
+    toNullableString(row.nome_fantasia) ||
     toNullableString(row.uniodonto) ||
     toNullableString(row.razao_social) ||
     toNullableString(row.raz_social) ||
     toNullableString(row.nome) ||
     toNullableString(row.name)
-  const tipo = String(row.tipo ?? row.papel_rede ?? '').trim().toUpperCase()
   if (!regAns || !operatorName) return null
-  if (tipo && tipo !== 'SINGULAR') return null
   return {
     regAns,
-    operatorName,
+    operatorName: regAns === BRASIL_OPERATOR_REG_ANS ? BRASIL_OPERATOR_NAME : operatorName,
     cnpj: normalizeDigits(row.cnpj),
   }
 }
@@ -896,6 +1013,7 @@ async function listUhubOperatorCatalog({ forceRefresh = false } = {}) {
   const entries = rows
     .map(mapUhubCooperativa)
     .filter(Boolean)
+    .filter((item, index, list) => list.findIndex((candidate) => candidate.regAns === item.regAns) === index)
     .sort((a, b) => a.operatorName.localeCompare(b.operatorName))
   uhubOperatorCatalogCache.entries = entries
   uhubOperatorCatalogCache.expiresAt = now + Math.max(UHUB_OPERATOR_CACHE_TTL_MS, 60_000)
@@ -929,11 +1047,12 @@ async function listUhubOperatorCatalogFromBigQuery({ forceRefresh = false } = {}
       if (!regAns || !operatorName) return null
       return {
         regAns,
-        operatorName,
+        operatorName: regAns === BRASIL_OPERATOR_REG_ANS ? BRASIL_OPERATOR_NAME : operatorName,
         cnpj: normalizeDigits(row?.cnpj),
       }
     })
     .filter(Boolean)
+    .filter((item, index, list) => list.findIndex((candidate) => candidate.regAns === item.regAns) === index)
 
   uhubOperatorCatalogCache.entries = entries
   uhubOperatorCatalogCache.expiresAt = now + Math.max(UHUB_OPERATOR_CACHE_TTL_MS, 60_000)
@@ -943,7 +1062,6 @@ async function listUhubOperatorCatalogFromBigQuery({ forceRefresh = false } = {}
 async function resolveOperatorMetadata(regAns) {
   const normalizedRegAns = normalizeRegAns(regAns)
   if (!normalizedRegAns) return null
-  if (normalizedRegAns === GLOBAL_OPERATOR_ACCESS.regAns) return GLOBAL_OPERATOR_ACCESS
   try {
     const fromUhub = (await listUhubOperatorCatalog()).find((item) => item.regAns === normalizedRegAns)
     if (fromUhub) return fromUhub
@@ -1022,11 +1140,19 @@ async function auditOnboardingAttempt({ uid, email, phone, result, requestId }) 
 }
 
 async function sendOnboardingEmails({ profile, status, reason }) {
-  const transporter = getMailTransporter()
-  if (!transporter) return
   const userEmail = normalizeEmail(profile?.email)
   const operatorName = profile?.operatorName ?? profile?.regAns ?? 'Não informado'
   const statusLabel = status === APPROVAL_STATUS.AUTO_APPROVED ? 'auto-aprovada' : 'pendente de aprovação'
+  const variables = buildEmailVariables({
+    profile: {
+      ...profile,
+      operatorName,
+    },
+    extra: {
+      nome_operadora: operatorName,
+      reg_ans: profile?.regAns ?? '',
+    },
+  })
   const text = [
     `Cadastro PFC ${statusLabel}.`,
     `Nome: ${profile?.firstName ?? ''} ${profile?.lastName ?? ''}`.trim(),
@@ -1036,9 +1162,8 @@ async function sendOnboardingEmails({ profile, status, reason }) {
   ].join('\n')
   const messages = []
   if (userEmail) {
-    messages.push({
-      from: SMTP_FROM,
-      to: userEmail,
+    const templateId = status === APPROVAL_STATUS.AUTO_APPROVED ? 'conta-liberada' : 'cadastro-recebido'
+    const payload = await buildConfiguredEmailPayload(templateId, variables, {
       subject:
         status === APPROVAL_STATUS.AUTO_APPROVED
           ? 'Cadastro PFC liberado'
@@ -1048,14 +1173,20 @@ async function sendOnboardingEmails({ profile, status, reason }) {
           ? 'Seu cadastro foi validado no UHub e o acesso ao PFC foi liberado.'
           : 'Seu cadastro foi recebido e passará por ativação pela Uniodonto do Brasil.',
     })
+    messages.push({
+      to: userEmail,
+      ...payload,
+    })
   }
-  messages.push({
-    from: SMTP_FROM,
-    to: PFC_MARKETING_EMAIL,
+  const adminPayload = await buildConfiguredEmailPayload('aviso-aprovacao', variables, {
     subject: `Cadastro PFC ${statusLabel}`,
     text,
   })
-  await Promise.all(messages.map((message) => transporter.sendMail(message)))
+  messages.push({
+    to: PFC_MARKETING_EMAIL,
+    ...adminPayload,
+  })
+  await Promise.all(messages.map((message) => sendTransactionalEmail(message, { required: false })))
 }
 
 function renderEmailTemplate(template, variables) {
@@ -1096,28 +1227,637 @@ function buildProfileCompletionEmailPayload({ account, appUrl, template = {} }) 
   }
 }
 
-async function sendProfileCompletionRequestEmail({ account, appUrl, template }) {
-  const transporter = getMailTransporter()
-  if (!transporter) {
-    const error = new Error('SMTP não configurado para envio de e-mail.')
-    error.statusCode = 503
+const EMAIL_TEMPLATE_VARIABLES = [
+  { shortcode: '{{nome_usuario}}', alias: '{{nome}}', description: 'Nome do destinatário.' },
+  { shortcode: '{{email}}', description: 'Email da conta vinculada ao painel.' },
+  { shortcode: '{{nome_operadora}}', description: 'Nome da Uniodonto ou operadora associada.' },
+  { shortcode: '{{reg_ans}}', description: 'Registro ANS da operadora.' },
+  { shortcode: '{{cargo}}', description: 'Cargo principal do usuário.' },
+  { shortcode: '{{funcao}}', description: 'Função declarada no cadastro.' },
+  { shortcode: '{{link_acesso}}', description: 'Link principal para acessar o painel.' },
+  { shortcode: '{{link_redefinicao_senha}}', description: 'Link único para redefinição de senha.' },
+  { shortcode: '{{link_completar_cadastro}}', description: 'Link para concluir cadastro, perfil ou vínculo.' },
+  { shortcode: '{{competencia}}', description: 'Competência contábil de referência.' },
+  { shortcode: '{{upload_id}}', description: 'Identificador do envio ou tentativa de upload.' },
+  { shortcode: '{{data_envio}}', description: 'Data do envio registrado.' },
+  { shortcode: '{{suporte_email}}', description: 'Email institucional de suporte.' },
+  { shortcode: '{{dominio_pfc}}', description: 'Domínio público do painel.' },
+  { shortcode: '{{url_logo_email}}', description: 'URL pública do logo usado nos templates.' },
+]
+
+function decodeHtmlEntities(value) {
+  const entities = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: ' ',
+  }
+  return String(value ?? '').replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match, entity) => {
+    if (entity.startsWith('#x')) return String.fromCodePoint(Number.parseInt(entity.slice(2), 16))
+    if (entity.startsWith('#')) return String.fromCodePoint(Number.parseInt(entity.slice(1), 10))
+    return entities[entity] ?? match
+  })
+}
+
+function stripTemplateHtml(value) {
+  return decodeHtmlEntities(String(value ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
+}
+
+function extractTemplateMeta(section, label) {
+  const pattern = new RegExp(`<div class="meta"><strong>${label}<\\/strong><p>([\\s\\S]*?)<\\/p><\\/div>`, 'i')
+  return stripTemplateHtml(section.match(pattern)?.[1] ?? '')
+}
+
+function extractTemplateTextArea(section, summary) {
+  const pattern = new RegExp(`<details><summary>${summary}<\\/summary><textarea readonly>([\\s\\S]*?)<\\/textarea><\\/details>`, 'i')
+  return decodeHtmlEntities(section.match(pattern)?.[1]?.trim() ?? '')
+}
+
+function splitEmailTextSubject(value) {
+  const lines = String(value ?? '').replace(/^\uFEFF/, '').split(/\r?\n/)
+  const subjectMatch = lines[0]?.match(/^Assunto:\s*(.+)$/i)
+  if (!subjectMatch) return { subject: '', text: lines.join('\n').trim() }
+  return {
+    subject: subjectMatch[1].trim(),
+    text: lines.slice(1).join('\n').trim(),
+  }
+}
+
+function normalizeTemplateSource(value) {
+  return String(value ?? '')
+    .replace(/\{\{\s*nome\s*\}\}/g, '{{nome_usuario}}')
+    .replace(/pfc-uniodonto-assets\/logo-uniodonto-negativo\.png/g, '{{url_logo_email}}')
+}
+
+function htmlToEmailText(value) {
+  const body = String(value ?? '').match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] ?? value
+  return decodeHtmlEntities(
+    String(body)
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<(br|\/p|\/div|\/h[1-6]|\/tr)>/gi, '\n')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n\s+/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim(),
+  )
+}
+
+function loadTopLevelEmailTemplatesFromFiles() {
+  const existingFiles = EMAIL_TEMPLATE_HTML_FILES.filter((item) => fs.existsSync(path.join(EMAIL_TEMPLATES_DIR, item.file)))
+  if (existingFiles.length === 0) return []
+  return existingFiles.map((item) => {
+    const id = normalizeTemplateId(item.id)
+    const html = normalizeTemplateSource(fs.readFileSync(path.join(EMAIL_TEMPLATES_DIR, item.file), 'utf8').trim())
+    const sourceVersion = crypto.createHash('sha256').update(html).digest('hex').slice(0, 16)
+    return sanitizeEmailTemplate(
+      {
+        id,
+        name: item.name,
+        category: item.category,
+        enabled: true,
+        subject: normalizeTemplateSource(item.subject),
+        preheader: normalizeTemplateSource(item.preheader),
+        html,
+        text: normalizeTemplateSource(htmlToEmailText(html)),
+      },
+      { id, system: true, sourceVersion },
+    )
+  })
+}
+
+function loadSeparatedEmailTemplatesFromFiles() {
+  if (!fs.existsSync(EMAIL_TEMPLATE_MANIFEST_PATH)) return []
+  try {
+    const manifest = JSON.parse(fs.readFileSync(EMAIL_TEMPLATE_MANIFEST_PATH, 'utf8'))
+    if (!Array.isArray(manifest.templates)) return []
+    return manifest.templates.map((item) => {
+      const id = normalizeTemplateId(item.id)
+      const html = normalizeTemplateSource(fs.readFileSync(path.join(EMAIL_TEMPLATE_FILES_DIR, item.htmlFile), 'utf8').trim())
+      const sourceVersion = crypto.createHash('sha256').update(html).digest('hex').slice(0, 16)
+      return sanitizeEmailTemplate(
+        {
+          id,
+          name: item.name,
+          category: item.category,
+          enabled: true,
+          subject: normalizeTemplateSource(item.subject),
+          preheader: normalizeTemplateSource(item.preheader),
+          html,
+          text: normalizeTemplateSource(fs.readFileSync(path.join(EMAIL_TEMPLATE_FILES_DIR, item.textFile), 'utf8').trim()),
+        },
+        { id, system: true, sourceVersion },
+      )
+    })
+  } catch (err) {
+    console.warn('[server] Falha ao carregar templates separados', err?.message ?? err)
+    return []
+  }
+}
+
+function loadDefaultEmailTemplatesFromFiles() {
+  const topLevelTemplates = loadTopLevelEmailTemplatesFromFiles()
+  if (topLevelTemplates.length > 0) return topLevelTemplates
+
+  const separatedTemplates = loadSeparatedEmailTemplatesFromFiles()
+  if (separatedTemplates.length > 0) return separatedTemplates
+
+  try {
+    const source = fs.readFileSync(EMAIL_TEMPLATES_INDEX_PATH, 'utf8')
+    const templates = []
+    const sectionPattern = /<section class="module" id="([^"]+)">([\s\S]*?)(?=<section class="module" id="|<div class="footer-note"|<\/main>)/g
+    let match
+    while ((match = sectionPattern.exec(source))) {
+      const id = normalizeTemplateId(match[1])
+      const section = match[2]
+      const textWithSubject = normalizeTemplateSource(extractTemplateTextArea(section, 'Texto simples'))
+      const { subject: subjectFromText, text } = splitEmailTextSubject(textWithSubject)
+      const html = normalizeTemplateSource(extractTemplateTextArea(section, 'HTML responsivo'))
+      const sourceVersion = crypto.createHash('sha256').update(html).digest('hex').slice(0, 16)
+      const template = sanitizeEmailTemplate(
+        {
+          id,
+          name: stripTemplateHtml(section.match(/<h3>([\s\S]*?)<\/h3>/i)?.[1] ?? id),
+          category: stripTemplateHtml(section.match(/<span class="module-tag">([\s\S]*?)<\/span>/i)?.[1] ?? 'Sistema'),
+          enabled: true,
+          subject: normalizeTemplateSource(extractTemplateMeta(section, 'Assunto') || subjectFromText),
+          preheader: normalizeTemplateSource(extractTemplateMeta(section, 'Preheader')),
+          html,
+          text,
+        },
+        { id, system: true, sourceVersion },
+      )
+      templates.push(template)
+    }
+    if (templates.length > 0) return templates
+    console.warn('[server] Nenhum template de email encontrado em', EMAIL_TEMPLATES_INDEX_PATH)
+  } catch (err) {
+    console.warn('[server] Falha ao carregar templates de email', err?.message ?? err)
+  }
+  return []
+}
+
+const DEFAULT_EMAIL_TEMPLATES = loadDefaultEmailTemplatesFromFiles()
+
+function normalizeTemplateId(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function sanitizeEmailTemplate(input = {}, fallback = {}) {
+  const id = normalizeTemplateId(input.id ?? fallback.id)
+  if (!id) {
+    const error = new Error('ID do template inválido.')
+    error.statusCode = 400
     throw error
   }
+  return {
+    ...fallback,
+    id,
+    name: toNullableString(input.name) ?? fallback.name ?? id,
+    category: toNullableString(input.category) ?? fallback.category ?? 'Custom',
+    enabled: input.enabled === false ? false : true,
+    subject: toNullableString(input.subject) ?? fallback.subject ?? '',
+    preheader: toNullableString(input.preheader) ?? fallback.preheader ?? '',
+    html: toNullableString(input.html) ?? fallback.html ?? '',
+    text: toNullableString(input.text) ?? fallback.text ?? '',
+    system: fallback.system === true,
+    sourceVersion: fallback.sourceVersion ?? input.sourceVersion ?? null,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+function mergeEmailTemplates(config = {}) {
+  const overrides = config.templates && typeof config.templates === 'object' ? config.templates : {}
+  const deletedIds = new Set(Array.isArray(config.deletedIds) ? config.deletedIds : [])
+  const defaults = DEFAULT_EMAIL_TEMPLATES
+    .filter((template) => !deletedIds.has(template.id))
+    .map((template) => {
+      const override = overrides[template.id]
+      const sameSource = !override?.sourceVersion || override.sourceVersion === template.sourceVersion
+      return sanitizeEmailTemplate(sameSource ? (override ?? {}) : {}, template)
+    })
+  const custom = Object.values(overrides)
+    .filter((template) => template && !DEFAULT_EMAIL_TEMPLATES.some((item) => item.id === template.id))
+    .map((template) => sanitizeEmailTemplate(template, { system: false }))
+  return [...defaults, ...custom].sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.name).localeCompare(String(b.name)))
+}
+
+async function fetchEmailTemplatesConfig() {
+  return readAdminConfig(EMAIL_TEMPLATES_CONFIG_DOC)
+}
+
+async function listEmailTemplates() {
+  return {
+    templates: mergeEmailTemplates(await fetchEmailTemplatesConfig()),
+    variables: EMAIL_TEMPLATE_VARIABLES,
+  }
+}
+
+async function saveEmailTemplate(templateId, input = {}, user = {}) {
+  const id = normalizeTemplateId(templateId ?? input.id)
+  const config = await fetchEmailTemplatesConfig()
+  const templates = config.templates && typeof config.templates === 'object' ? { ...config.templates } : {}
+  const current = mergeEmailTemplates(config).find((template) => template.id === id)
+  const nextTemplate = sanitizeEmailTemplate({ ...input, id }, current ?? {})
+  templates[id] = nextTemplate
+  await writeAdminConfig(EMAIL_TEMPLATES_CONFIG_DOC, {
+    templates,
+    deletedIds: Array.isArray(config.deletedIds) ? config.deletedIds.filter((item) => item !== id) : [],
+  }, user)
+  return nextTemplate
+}
+
+async function deleteEmailTemplate(templateId, user = {}) {
+  const id = normalizeTemplateId(templateId)
+  const config = await fetchEmailTemplatesConfig()
+  const templates = config.templates && typeof config.templates === 'object' ? { ...config.templates } : {}
+  delete templates[id]
+  const isDefault = DEFAULT_EMAIL_TEMPLATES.some((template) => template.id === id)
+  const deletedIds = new Set(Array.isArray(config.deletedIds) ? config.deletedIds : [])
+  if (isDefault) deletedIds.add(id)
+  await writeAdminConfig(EMAIL_TEMPLATES_CONFIG_DOC, { templates, deletedIds: [...deletedIds] }, user)
+  return { id, deleted: true }
+}
+
+async function previewEmailTemplate(input = {}) {
+  const template = sanitizeEmailTemplate({ ...input, id: input.id || 'preview' }, { id: 'preview', system: false })
+  const variables = buildEmailVariables({
+    account: {
+      firstName: 'Maria',
+      lastName: 'Silva',
+      email: 'maria.silva@uniodonto.coop.br',
+      operatorName: 'Uniodonto Exemplo',
+      regAns: '123456',
+      jobTitle: 'Gerente Financeira',
+      roleFunction: 'Contabilidade',
+    },
+    extra: {
+      competencia: '2026-04',
+      upload_id: 'upload_demo_123',
+      data_envio: '14/05/2026',
+    },
+  })
+  return {
+    subject: renderEmailTemplate(template.subject, variables),
+    preheader: renderEmailTemplate(template.preheader, variables),
+    text: renderEmailTemplate(template.text, variables),
+    html: inlinePfcEmailHtml(template.html ? renderEmailTemplate(template.html, variables) : textToHtml(renderEmailTemplate(template.text, variables))),
+  }
+}
+
+async function sendEmailTemplateTest(input = {}) {
+  const to = normalizeEmail(input.to)
+  if (!to) {
+    const error = new Error('Informe um e-mail de teste válido.')
+    error.statusCode = 400
+    throw error
+  }
+  const preview = await previewEmailTemplate(input.template ?? {})
+  await sendTransactionalEmail({
+    to,
+    subject: `[TESTE] ${preview.subject}`,
+    text: preview.text,
+    html: preview.html,
+  }, { required: true })
+  return { sent: true, to, preview }
+}
+
+async function getEmailTemplate(templateId) {
+  const templates = mergeEmailTemplates(await fetchEmailTemplatesConfig())
+  return templates.find((template) => template.id === templateId && template.enabled !== false) ??
+    DEFAULT_EMAIL_TEMPLATES.find((template) => template.id === templateId)
+}
+
+function buildEmailVariables({ account = {}, profile = {}, appUrl = PFC_APP_URL, extra = {} } = {}) {
+  const firstName = toNullableString(account?.firstName ?? profile?.firstName) ?? ''
+  const lastName = toNullableString(account?.lastName ?? profile?.lastName) ?? ''
+  const fullName = [firstName, lastName].filter(Boolean).join(' ') || normalizeEmail(account?.email ?? profile?.email) || ''
+  const operatorName = account?.operatorName ?? account?.accessOperatorName ?? profile?.operatorName ?? profile?.regAns ?? ''
+  const publicUrl = String(appUrl || PFC_APP_URL).replace(/\/+$/, '')
+  return {
+    nome_usuario: fullName,
+    nome: fullName,
+    email: normalizeEmail(account?.email ?? profile?.email) ?? '',
+    nome_operadora: operatorName,
+    reg_ans: account?.regAns ?? account?.accessRegAns ?? profile?.regAns ?? '',
+    cargo: account?.jobTitle ?? profile?.jobTitle ?? '',
+    funcao: account?.roleFunction ?? profile?.roleFunction ?? profile?.department ?? '',
+    link_acesso: publicUrl,
+    link_redefinicao_senha: publicUrl,
+    link_completar_cadastro: publicUrl,
+    competencia: '',
+    upload_id: '',
+    data_envio: '',
+    suporte_email: PFC_SUPPORT_EMAIL,
+    dominio_pfc: publicUrl.replace(/^https?:\/\//, ''),
+    url_logo_email: `${publicUrl}${EMAIL_ASSETS_PUBLIC_PATH}/logo-uniodonto-negativo.png`,
+    ...extra,
+  }
+}
+
+async function buildConfiguredEmailPayload(templateId, variables, fallback = {}) {
+  const template = await getEmailTemplate(templateId)
+  const subject = renderEmailTemplate(template?.subject ?? fallback.subject, variables)
+  const text = renderEmailTemplate(template?.text ?? fallback.text, variables)
+  const htmlSource = template?.html ?? fallback.html
+  return {
+    subject,
+    text,
+    html: htmlSource ? inlinePfcEmailHtml(renderEmailTemplate(htmlSource, variables)) : undefined,
+  }
+}
+
+async function sendProfileCompletionRequestEmail({ account, appUrl, template }) {
   const userEmail = normalizeEmail(account?.email)
   if (!userEmail) {
     const error = new Error('Conta sem e-mail válido.')
     error.statusCode = 400
     throw error
   }
-  const payload = buildProfileCompletionEmailPayload({ account, appUrl, template })
-  await transporter.sendMail({
-    from: SMTP_FROM,
+  const variables = buildEmailVariables({ account, appUrl })
+  const payload = template
+    ? buildProfileCompletionEmailPayload({ account, appUrl, template })
+    : await buildConfiguredEmailPayload('primeiro-acesso', variables, buildProfileCompletionEmailPayload({ account, appUrl }))
+  await sendTransactionalEmail({
     to: userEmail,
     subject: payload.subject,
     text: payload.text,
     html: payload.html,
-  })
+  }, { required: true })
   return payload
+}
+
+function maskSecret(value) {
+  const text = String(value ?? '').trim()
+  if (!text) return null
+  return `••••${text.slice(-4)}`
+}
+
+function mapBrevoConfigData(data = {}) {
+  const apiKey = String(data.api_key ?? '').trim()
+  return {
+    enabled: data.enabled === true,
+    hasApiKey: Boolean(apiKey),
+    apiKeyLast4: apiKey ? apiKey.slice(-4) : null,
+    apiKeyMasked: maskSecret(apiKey),
+    senderName: data.sender_name ?? '',
+    senderEmail: data.sender_email ?? '',
+    replyToEmail: data.reply_to_email ?? '',
+    updatedAt: serializeFirestoreTimestamp(data.updated_at),
+    updatedByEmail: data.updated_by_email ?? null,
+  }
+}
+
+function mapBrevoConfigDataForSend(data = {}) {
+  return {
+    enabled: data.enabled === true,
+    apiKey: toNullableString(data.api_key),
+    senderName: toNullableString(data.sender_name),
+    senderEmail: normalizeEmail(data.sender_email),
+    replyToEmail: normalizeEmail(data.reply_to_email),
+  }
+}
+
+async function ensureAdminConfigTable() {
+  if (adminConfigTableReady) return
+  if (!adminConfigTablePromise) {
+    adminConfigTablePromise = bigquery
+      .query({
+        query: `
+          CREATE TABLE IF NOT EXISTS \`${ADMIN_CONFIG_TABLE_REF.fqn}\` (
+            config_key STRING NOT NULL,
+            config_json STRING,
+            updated_by_email STRING,
+            updated_at TIMESTAMP
+          )
+        `,
+        location: BQ_LOCATION,
+      })
+      .then(() => {
+        adminConfigTableReady = true
+      })
+      .finally(() => {
+        adminConfigTablePromise = null
+      })
+  }
+  await adminConfigTablePromise
+}
+
+function parseConfigJson(value) {
+  try {
+    return JSON.parse(String(value ?? '{}'))
+  } catch {
+    return {}
+  }
+}
+
+async function readAdminConfig(configKey) {
+  await ensureAdminConfigTable()
+  const [rows] = await bigquery.query({
+    query: `
+      SELECT config_json, updated_by_email, updated_at
+      FROM \`${ADMIN_CONFIG_TABLE_REF.fqn}\`
+      WHERE config_key = @configKey
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `,
+    params: { configKey },
+    location: BQ_LOCATION,
+  })
+  const row = normalizeBigQueryRows(rows)[0]
+  if (!row) return {}
+  return {
+    ...parseConfigJson(row.config_json),
+    updated_by_email: row.updated_by_email ?? null,
+    updated_at: row.updated_at ?? null,
+  }
+}
+
+async function writeAdminConfig(configKey, configData, user = {}) {
+  await ensureAdminConfigTable()
+  await bigquery.query({
+    query: `
+      MERGE \`${ADMIN_CONFIG_TABLE_REF.fqn}\` target
+      USING (
+        SELECT
+          @configKey AS config_key,
+          @configJson AS config_json,
+          @updatedByEmail AS updated_by_email,
+          CURRENT_TIMESTAMP() AS updated_at
+      ) source
+      ON target.config_key = source.config_key
+      WHEN MATCHED THEN UPDATE SET
+        config_json = source.config_json,
+        updated_by_email = source.updated_by_email,
+        updated_at = source.updated_at
+      WHEN NOT MATCHED THEN INSERT (config_key, config_json, updated_by_email, updated_at)
+        VALUES (source.config_key, source.config_json, source.updated_by_email, source.updated_at)
+    `,
+    params: {
+      configKey,
+      configJson: JSON.stringify(configData),
+      updatedByEmail: normalizeEmail(user?.email),
+    },
+    location: BQ_LOCATION,
+  })
+}
+
+async function fetchBrevoConfig() {
+  return mapBrevoConfigData(await readAdminConfig(BREVO_TRANSACTIONAL_CONFIG_DOC))
+}
+
+async function fetchBrevoConfigForSend() {
+  return mapBrevoConfigDataForSend(await readAdminConfig(BREVO_TRANSACTIONAL_CONFIG_DOC))
+}
+
+async function saveBrevoConfig(input = {}, user = {}) {
+  const current = await readAdminConfig(BREVO_TRANSACTIONAL_CONFIG_DOC)
+  const apiKey = toNullableString(input.apiKey)
+  const senderName = toNullableString(input.senderName)
+  const senderEmail = normalizeEmail(input.senderEmail)
+  const replyToEmail = normalizeEmail(input.replyToEmail)
+  const enabled = input.enabled === true
+
+  if (enabled && !apiKey && !toNullableString(current.api_key)) {
+    const error = new Error('Informe a API key do Brevo.')
+    error.statusCode = 400
+    throw error
+  }
+  if (enabled && !senderEmail) {
+    const error = new Error('Informe o e-mail remetente.')
+    error.statusCode = 400
+    throw error
+  }
+
+  const payload = {
+    enabled,
+    sender_name: senderName ?? '',
+    sender_email: senderEmail ?? '',
+    reply_to_email: replyToEmail ?? '',
+    updated_by_email: normalizeEmail(user?.email),
+    updated_at: new Date().toISOString(),
+  }
+  if (apiKey) payload.api_key = apiKey
+  await writeAdminConfig(BREVO_TRANSACTIONAL_CONFIG_DOC, payload, user)
+  return fetchBrevoConfig()
+}
+
+function normalizeEmailList(value) {
+  const raw = Array.isArray(value) ? value : String(value ?? '').split(',')
+  return raw.map((item) => normalizeEmail(item)).filter(Boolean)
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function textToHtml(value) {
+  return `<div>${escapeHtml(value).replace(/\n/g, '<br>')}</div>`
+}
+
+function appendInlineStyle(match, style) {
+  if (/\sstyle=/.test(match)) {
+    return match.replace(/\sstyle=(["'])(.*?)\1/i, (_styleMatch, quote, existing) => ` style=${quote}${existing};${style}${quote}`)
+  }
+  return match.replace(/>$/, ` style="${style}">`)
+}
+
+function inlinePfcEmailHtml(value) {
+  const source = String(value ?? '')
+  const headerCss = source.match(/\.header\{([^}]*)\}/i)?.[1] ?? ''
+  const headerBackground = headerCss.match(/background:\s*([^;]+)/i)?.[1]?.trim() ?? '#810E56'
+  const headerColor = headerCss.match(/color:\s*([^;]+)/i)?.[1]?.trim() ?? '#FFFFFF'
+  return source
+    .replace(/<body([^>]*)>/i, (match) => appendInlineStyle(match, 'margin:0;padding:0;background:#EDF2F5;font-family:Arial,Helvetica,sans-serif;color:#111111'))
+    .replace(/<table([^>]*class="[^"]*\bwrapper\b[^"]*"[^>]*)>/gi, (match) => appendInlineStyle(match, 'width:100%;background:#EDF2F5;padding:24px 0;border-collapse:collapse;border-spacing:0'))
+    .replace(/<table([^>]*class="[^"]*\bmain\b[^"]*"[^>]*)>/gi, (match) => appendInlineStyle(match, 'width:100%;max-width:600px;margin:0 auto;background:#FFFFFF;border:1px solid #E8D8E0;border-radius:18px;overflow:hidden;box-shadow:0 12px 36px rgba(85,0,57,.08);border-collapse:collapse;border-spacing:0'))
+    .replace(/<td([^>]*class="[^"]*\bheader\b[^"]*"[^>]*)>/gi, (match) => appendInlineStyle(match, `background:${headerBackground};color:${headerColor};padding:30px 24px 24px`))
+    .replace(/<td([^>]*class="[^"]*\bcontent\b[^"]*"[^>]*)>/gi, (match) => appendInlineStyle(match, 'padding:30px 28px 26px'))
+    .replace(/<span([^>]*class="[^"]*\bpill\b[^"]*"[^>]*)>/gi, (match) => appendInlineStyle(match, 'display:inline-block;background:#E9F2FB;color:#1F6FAF;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700'))
+    .replace(/<h1([^>]*)>/gi, (match) => appendInlineStyle(match, 'margin:16px 0 12px;font-size:28px;line-height:1.2;color:#810E56;font-family:Arial,Helvetica,sans-serif'))
+    .replace(/<p([^>]*)>/gi, (match) => appendInlineStyle(match, 'margin:0 0 12px;font-size:15px;line-height:1.6;color:#423540;font-family:Arial,Helvetica,sans-serif'))
+    .replace(/<div([^>]*class="[^"]*\binfo\b[^"]*"[^>]*)>/gi, (match) => appendInlineStyle(match, 'background:#F4F7FB;border:1px solid #E8D8E0;border-radius:16px;padding:16px;margin:18px 0'))
+    .replace(/<a([^>]*class="[^"]*\bcta\b[^"]*"[^>]*)>/gi, (match) => appendInlineStyle(match, 'display:inline-block;margin-top:8px;background:#810E56;color:#FFFFFF;text-decoration:none;font-weight:700;padding:14px 24px;border-radius:999px;font-family:Arial,Helvetica,sans-serif'))
+    .replace(/<td([^>]*class="[^"]*\bfooter\b[^"]*"[^>]*)>/gi, (match) => appendInlineStyle(match, 'padding:18px 24px 24px;border-top:1px solid #F0E5EA;font-size:12px;line-height:1.6;color:#7A5A6C;font-family:Arial,Helvetica,sans-serif'))
+    .replace(/<strong([^>]*)>/gi, (match) => appendInlineStyle(match, 'font-weight:700'))
+}
+
+async function sendBrevoTransactionalEmail(message = {}) {
+  const config = await fetchBrevoConfigForSend()
+  if (!config.enabled) return false
+  if (!config.apiKey || !config.senderEmail) {
+    const error = new Error('Brevo API não configurada.')
+    error.statusCode = 503
+    throw error
+  }
+  const recipients = normalizeEmailList(message.to)
+  if (!recipients.length) {
+    const error = new Error('E-mail sem destinatário válido.')
+    error.statusCode = 400
+    throw error
+  }
+  const payload = {
+    sender: {
+      email: config.senderEmail,
+      ...(config.senderName ? { name: config.senderName } : {}),
+    },
+    to: recipients.map((email) => ({ email })),
+    subject: String(message.subject ?? '').trim(),
+    htmlContent: message.html || textToHtml(message.text),
+    textContent: message.text || undefined,
+    ...(config.replyToEmail ? { replyTo: { email: config.replyToEmail } } : {}),
+  }
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'api-key': config.apiKey,
+    },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) {
+    const errorPayload = await response.json().catch(() => ({}))
+    const error = new Error(errorPayload?.message ?? 'Falha ao enviar e-mail pela Brevo.')
+    error.statusCode = response.status
+    throw error
+  }
+  return true
+}
+
+async function sendTransactionalEmail(message = {}, { required = true } = {}) {
+  const sentByBrevo = await sendBrevoTransactionalEmail(message)
+  if (sentByBrevo) return true
+
+  const transporter = getMailTransporter()
+  if (!transporter) {
+    if (!required) return false
+    const error = new Error('Brevo API ou SMTP não configurado para envio de e-mail.')
+    error.statusCode = 503
+    throw error
+  }
+  await transporter.sendMail({
+    from: SMTP_FROM,
+    to: message.to,
+    subject: message.subject,
+    text: message.text,
+    html: message.html,
+  })
+  return true
 }
 
 async function verifyUhubOnboarding({ email, phone }) {
@@ -1335,7 +2075,7 @@ function createAccessContextFromRows(rows = [], user = {}) {
     const regAns = normalizeRegAns(row?.reg_ans)
     const operatorName = String(row?.operator_name ?? '').trim() || null
     const canUpload = row?.can_upload === false ? false : true
-    if (role === 'admin' || regAns === '*') {
+    if (role === 'admin') {
       isAdmin = true
       return
     }
@@ -1849,6 +2589,19 @@ async function listAdminAccountsFromBigQuery() {
         FROM \`${USER_ACCESS_TABLE_REF.fqn}\`
         WHERE COALESCE(active, TRUE) IS TRUE
           AND NULLIF(REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', ''), '') IS NOT NULL
+      ), deduped_access AS (
+        SELECT
+          * EXCEPT(reg_rn)
+        FROM (
+          SELECT
+            *,
+            ROW_NUMBER() OVER (
+              PARTITION BY access_key, access_reg_ans
+              ORDER BY updated_at DESC
+            ) AS reg_rn
+          FROM access_rows
+        )
+        WHERE reg_rn = 1
       ), latest_access AS (
         SELECT
           *,
@@ -1856,7 +2609,7 @@ async function listAdminAccountsFromBigQuery() {
             PARTITION BY access_key
             ORDER BY updated_at DESC
           ) AS rn
-        FROM access_rows
+        FROM deduped_access
       ), grouped_access AS (
         SELECT
           access_key,
@@ -1868,7 +2621,7 @@ async function listAdminAccountsFromBigQuery() {
             )
             ORDER BY updated_at DESC
           ) AS access_links
-        FROM access_rows
+        FROM deduped_access
         GROUP BY access_key
       )
       SELECT
@@ -3415,6 +4168,7 @@ function buildNormalizedUploadRow(rawRow = {}, context = {}) {
 
 const app = express()
 app.use(express.json({ limit: '5mb' }))
+app.use(EMAIL_ASSETS_PUBLIC_PATH, express.static(path.join(EMAIL_TEMPLATES_DIR, 'pfc-uniodonto-assets')))
 app.use(authMiddleware)
 
 app.get('/api/auth/status', (req, res) => {
@@ -3472,9 +4226,6 @@ async function handleOperatorsList(_req, res) {
         regAns: item.regAns,
         operatorName: item.operatorName,
       }))
-    if (!operators.some((item) => item.regAns === GLOBAL_OPERATOR_ACCESS.regAns)) {
-      operators.unshift(GLOBAL_OPERATOR_ACCESS)
-    }
     res.setHeader('Cache-Control', 'no-store')
     return res.json({ operators, source })
   } catch (err) {
@@ -3744,6 +4495,89 @@ app.delete('/api/admin/uploads/:uploadId', async (req, res) => {
   } catch (err) {
     console.error('[server] Falha ao excluir upload', err)
     return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao excluir envio.' })
+  }
+})
+
+app.get('/api/admin/brevo', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    res.setHeader('Cache-Control', 'no-store')
+    return res.json({ config: await fetchBrevoConfig() })
+  } catch (err) {
+    console.error('[server] Falha ao carregar Brevo', err)
+    return res.status(500).json({ error: 'Falha ao carregar configuração Brevo.' })
+  }
+})
+
+app.put('/api/admin/brevo', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    return res.json({ config: await saveBrevoConfig(req.body ?? {}, req.user) })
+  } catch (err) {
+    console.error('[server] Falha ao salvar Brevo', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao salvar configuração Brevo.' })
+  }
+})
+
+app.get('/api/admin/email-templates', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    res.setHeader('Cache-Control', 'no-store')
+    return res.json(await listEmailTemplates())
+  } catch (err) {
+    console.error('[server] Falha ao listar templates de email', err)
+    return res.status(500).json({ error: 'Falha ao listar templates de email.' })
+  }
+})
+
+app.post('/api/admin/email-templates', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    const template = await saveEmailTemplate(req.body?.id ?? req.body?.name, req.body ?? {}, req.user)
+    return res.status(201).json({ template })
+  } catch (err) {
+    console.error('[server] Falha ao criar template de email', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao criar template de email.' })
+  }
+})
+
+app.put('/api/admin/email-templates/:templateId', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    return res.json({ template: await saveEmailTemplate(req.params.templateId, req.body ?? {}, req.user) })
+  } catch (err) {
+    console.error('[server] Falha ao salvar template de email', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao salvar template de email.' })
+  }
+})
+
+app.post('/api/admin/email-templates/preview', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    return res.json({ preview: await previewEmailTemplate(req.body?.template ?? req.body ?? {}) })
+  } catch (err) {
+    console.error('[server] Falha ao gerar preview de email', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao gerar preview de email.' })
+  }
+})
+
+app.post('/api/admin/email-templates/test', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    return res.json(await sendEmailTemplateTest(req.body ?? {}, req.user))
+  } catch (err) {
+    console.error('[server] Falha ao enviar teste de email', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao enviar teste de email.' })
+  }
+})
+
+app.delete('/api/admin/email-templates/:templateId', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    return res.json(await deleteEmailTemplate(req.params.templateId, req.user))
+  } catch (err) {
+    console.error('[server] Falha ao excluir template de email', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao excluir template de email.' })
   }
 })
 
