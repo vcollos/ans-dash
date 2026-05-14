@@ -83,6 +83,7 @@ const EMAIL_TEMPLATES_INDEX_PATH = path.join(EMAIL_TEMPLATES_DIR, 'index.html')
 const EMAIL_TEMPLATE_FILES_DIR = path.join(EMAIL_TEMPLATES_DIR, 'emails')
 const EMAIL_TEMPLATE_MANIFEST_PATH = path.join(EMAIL_TEMPLATE_FILES_DIR, 'manifest.json')
 const EMAIL_ASSETS_PUBLIC_PATH = '/email-assets'
+const UNIODONTO_NEGATIVE_LOGO_URL = 'https://www.uniodonto.coop.br/wp-content/uploads/2025/10/Logo-Uniodonto-Negativo.png'
 const EMAIL_TEMPLATE_HTML_FILES = [
   {
     id: 'cadastro-recebido',
@@ -1194,8 +1195,8 @@ function renderEmailTemplate(template, variables) {
     return variables[key] ?? ''
   })
   return rendered
-    .replace(/pfc-uniodonto-assets\/logo-uniodonto-negativo\.png/g, variables.url_logo_email ?? '')
-    .replace(/pfc-uniodonto-assets\/logo-vinho-email\.png/g, variables.url_logo_email_vinho ?? '')
+    .replace(/pfc-uniodonto-assets\/logo-uniodonto-negativo\.png/g, variables.url_logo_email ?? UNIODONTO_NEGATIVE_LOGO_URL)
+    .replace(/pfc-uniodonto-assets\/logo-vinho-email\.png/g, variables.url_logo_email ?? UNIODONTO_NEGATIVE_LOGO_URL)
 }
 
 function buildProfileCompletionEmailPayload({ account, appUrl, template = {} }) {
@@ -1293,7 +1294,7 @@ function normalizeTemplateSource(value) {
   return String(value ?? '')
     .replace(/\{\{\s*nome\s*\}\}/g, '{{nome_usuario}}')
     .replace(/pfc-uniodonto-assets\/logo-uniodonto-negativo\.png/g, '{{url_logo_email}}')
-    .replace(/pfc-uniodonto-assets\/logo-vinho-email\.png/g, '{{url_logo_email_vinho}}')
+    .replace(/pfc-uniodonto-assets\/logo-vinho-email\.png/g, '{{url_logo_email}}')
 }
 
 function htmlToEmailText(value) {
@@ -1564,8 +1565,8 @@ function buildEmailVariables({ account = {}, profile = {}, appUrl = PFC_APP_URL,
     data_envio: '',
     suporte_email: PFC_SUPPORT_EMAIL,
     dominio_pfc: publicUrl.replace(/^https?:\/\//, ''),
-    url_logo_email: `${publicUrl}${EMAIL_ASSETS_PUBLIC_PATH}/logo-uniodonto-negativo.png`,
-    url_logo_email_vinho: `${publicUrl}${EMAIL_ASSETS_PUBLIC_PATH}/logo-vinho-email.png`,
+    url_logo_email: UNIODONTO_NEGATIVE_LOGO_URL,
+    url_logo_email_vinho: UNIODONTO_NEGATIVE_LOGO_URL,
     ...extra,
   }
 }
