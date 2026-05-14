@@ -73,12 +73,17 @@ const SMTP_PORT = Number(process.env.SMTP_PORT ?? 587)
 const SMTP_USER = String(process.env.SMTP_USER ?? '').trim()
 const SMTP_PASS = String(process.env.SMTP_PASS ?? '').trim()
 const SMTP_FROM = String(process.env.SMTP_FROM ?? '').trim()
+const PFC_APP_URL = String(process.env.PFC_APP_URL ?? process.env.APP_URL ?? 'https://pfc.uniodonto.coop.br').trim()
+const GLOBAL_OPERATOR_ACCESS = { regAns: '*', operatorName: 'Uniodonto do Brasil' }
 const ADMIN_EMAIL_DOMAINS = String(
   process.env.ACCESS_ADMIN_EMAIL_DOMAINS ?? 'uniodonto.coop.br,collos.com.br,contagbr.com.br',
 )
   .split(',')
   .map((item) => item.trim().toLowerCase())
   .filter(Boolean)
+const DEV_AUTH_BYPASS =
+  process.env.NODE_ENV !== 'production' && String(process.env.DEV_AUTH_BYPASS ?? '').toLowerCase() === 'true'
+const DEV_AUTH_EMAIL = normalizeEmailForUhub(process.env.DEV_AUTH_EMAIL) ?? 'vitor@collos.com.br'
 const BQ_BASE_DEMONSTRACOES_TABLE =
   process.env.BQ_BASE_DEMONSTRACOES_TABLE ?? `${BQ_PROJECT_ID}.${BQ_MART_DATASET}.demonstracoes_contabeis`
 const BQ_CONSOLIDATED_DEMONSTRACOES_VIEW =
@@ -310,6 +315,15 @@ async function authMiddleware(req, res, next) {
   if (AUTH_PUBLIC_PATHS.has(req.path)) return next()
   const token = extractToken(req)
   if (!token) {
+    if (DEV_AUTH_BYPASS && req.headers['x-dev-auth-bypass'] === '1') {
+      req.user = {
+        uid: 'local-preview-admin',
+        email: DEV_AUTH_EMAIL,
+        claims: { admin: true, isAdmin: true },
+      }
+      req.accessContext = await resolveUserAccessContext(req.user)
+      return next()
+    }
     return res.status(401).json({ error: 'Autenticacao necessaria.' })
   }
   try {
@@ -575,6 +589,7 @@ let userProfileTablePromise = null
 let userProfileTableReady = false
 
 function normalizeRegAns(value) {
+  if (String(value ?? '').trim() === '*') return '*'
   const normalized = String(value ?? '')
     .trim()
     .replace(/\D+/g, '')
@@ -804,6 +819,52 @@ async function uhubPessoaByKey(pessoaId) {
   return payload
 }
 
+async function uhubResolvePessoa({ email, phone } = {}) {
+  const params = new URLSearchParams()
+  const normalizedEmail = normalizeEmailForUhub(email)
+  const normalizedPhone = normalizePhoneForUhub(phone)
+  if (normalizedEmail) params.set('email', normalizedEmail)
+  if (normalizedPhone) params.set('phone', normalizedPhone)
+  if (!params.toString()) return null
+  return uhubRequest(`/api/pessoas/resolve?${params.toString()}`)
+}
+
+function normalizeUhubResolveVinculos(vinculos = []) {
+  return Array.isArray(vinculos)
+    ? vinculos
+        .map((vinculo) => ({
+          regAns: normalizeRegAns(vinculo?.reg_ans ?? vinculo?.regAns),
+          operatorName: toNullableString(vinculo?.singular_nome ?? vinculo?.operatorName),
+          roleFunction: toNullableString(vinculo?.cargo_funcao ?? vinculo?.cargoFuncao),
+          department: toNullableString(vinculo?.departamento),
+          papel: toNullableString(vinculo?.papel),
+          principal: vinculo?.principal === true,
+          ativo: vinculo?.ativo !== false,
+        }))
+        .filter((vinculo) => vinculo.regAns && vinculo.ativo)
+    : []
+}
+
+function completeProfileFromUhubResolve(profile = {}, verification = {}) {
+  if (!verification?.pessoa) return profile
+  const pessoa = verification.pessoa
+  const [firstNameFromName, ...lastNameFromName] = String(pessoa.nome ?? '').trim().split(/\s+/).filter(Boolean)
+  const principalVinculo = verification.vinculos?.find((vinculo) => vinculo.principal) ?? verification.vinculos?.[0]
+  return {
+    ...profile,
+    firstName: toNullableString(profile.firstName) ?? firstNameFromName ?? null,
+    lastName: toNullableString(profile.lastName) ?? toNullableString(lastNameFromName.join(' ')),
+    phone: toNullableString(profile.phone) ?? toNullableString(pessoa.telefone),
+    phoneIsWhatsapp: profile.phoneIsWhatsapp === true || pessoa.whatsapp === true,
+    email: normalizeEmail(profile.email) ?? normalizeEmail(pessoa.email),
+    jobTitle: toNullableString(profile.jobTitle) ?? principalVinculo?.roleFunction ?? principalVinculo?.papel ?? null,
+    roleFunction: toNullableString(profile.roleFunction) ?? principalVinculo?.roleFunction ?? principalVinculo?.papel ?? null,
+    department: toNullableString(profile.department) ?? principalVinculo?.department ?? null,
+    regAns: normalizeRegAns(profile.regAns) ?? principalVinculo?.regAns ?? null,
+    operatorName: toNullableString(profile.operatorName) ?? principalVinculo?.operatorName ?? null,
+  }
+}
+
 function mapUhubCooperativa(row = {}) {
   const regAns = normalizeRegAns(row.reg_ans_operadora ?? row.codigo_ans ?? row.reg_ans ?? row.REG_ANS)
   const operatorName =
@@ -882,6 +943,7 @@ async function listUhubOperatorCatalogFromBigQuery({ forceRefresh = false } = {}
 async function resolveOperatorMetadata(regAns) {
   const normalizedRegAns = normalizeRegAns(regAns)
   if (!normalizedRegAns) return null
+  if (normalizedRegAns === GLOBAL_OPERATOR_ACCESS.regAns) return GLOBAL_OPERATOR_ACCESS
   try {
     const fromUhub = (await listUhubOperatorCatalog()).find((item) => item.regAns === normalizedRegAns)
     if (fromUhub) return fromUhub
@@ -996,6 +1058,68 @@ async function sendOnboardingEmails({ profile, status, reason }) {
   await Promise.all(messages.map((message) => transporter.sendMail(message)))
 }
 
+function renderEmailTemplate(template, variables) {
+  return String(template ?? '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => {
+    return variables[key] ?? ''
+  })
+}
+
+function buildProfileCompletionEmailPayload({ account, appUrl, template = {} }) {
+  const firstName = toNullableString(account?.firstName) ?? ''
+  const lastName = toNullableString(account?.lastName) ?? ''
+  const fullName = [firstName, lastName].filter(Boolean).join(' ')
+  const variables = {
+    firstName,
+    lastName,
+    fullName,
+    email: normalizeEmail(account?.email) ?? '',
+    operatorName: account?.operatorName ?? account?.accessOperatorName ?? '',
+    appUrl: String(appUrl || PFC_APP_URL).replace(/\/+$/, ''),
+  }
+  const subjectTemplate = template.subject ?? 'Complete seus dados para liberar o acesso ao PFC'
+  const textTemplate =
+    template.text ??
+    [
+      'Olá, {{firstName}}.',
+      '',
+      'Identificamos que seu cadastro no Painel Financeiro Contábil está incompleto.',
+      'Acesse {{appUrl}} e complete seus dados para que a Uniodonto do Brasil possa liberar seu acesso.',
+      '',
+      'Se você não souber sua senha, use a opção "Esqueci a senha" na tela de login.',
+    ].join('\n')
+  return {
+    to: variables.email,
+    subject: renderEmailTemplate(subjectTemplate, variables),
+    text: renderEmailTemplate(textTemplate, variables),
+    html: template.html ? renderEmailTemplate(template.html, variables) : undefined,
+    variables,
+  }
+}
+
+async function sendProfileCompletionRequestEmail({ account, appUrl, template }) {
+  const transporter = getMailTransporter()
+  if (!transporter) {
+    const error = new Error('SMTP não configurado para envio de e-mail.')
+    error.statusCode = 503
+    throw error
+  }
+  const userEmail = normalizeEmail(account?.email)
+  if (!userEmail) {
+    const error = new Error('Conta sem e-mail válido.')
+    error.statusCode = 400
+    throw error
+  }
+  const payload = buildProfileCompletionEmailPayload({ account, appUrl, template })
+  await transporter.sendMail({
+    from: SMTP_FROM,
+    to: userEmail,
+    subject: payload.subject,
+    text: payload.text,
+    html: payload.html,
+  })
+  return payload
+}
+
 async function verifyUhubOnboarding({ email, phone }) {
   const normalizedEmail = normalizeEmailForUhub(email)
   const normalizedPhone = normalizePhoneForUhub(phone)
@@ -1004,6 +1128,26 @@ async function verifyUhubOnboarding({ email, phone }) {
   }
 
   try {
+    try {
+      const resolved = await uhubResolvePessoa({ email: normalizedEmail, phone: normalizedPhone })
+      if (resolved?.match === true && resolved?.confidence === 'exact') {
+        const vinculos = normalizeUhubResolveVinculos(resolved.vinculos)
+        return {
+          status: APPROVAL_STATUS.AUTO_APPROVED,
+          reason: `uhub_resolve_${resolved.reason ?? 'exact'}`,
+          uhubPessoaId: resolved.pessoa?.id ?? null,
+          matchBy: resolved.reason ?? 'resolve',
+          pessoa: resolved.pessoa ?? null,
+          vinculos,
+        }
+      }
+      if (resolved?.match === false && resolved?.reason) {
+        return { status: APPROVAL_STATUS.PENDING, reason: resolved.reason }
+      }
+    } catch (err) {
+      console.warn('[server] Resolve UHub indisponível; usando fallback legado', err?.message ?? err)
+    }
+
     const [emailResults, phoneResults] = await Promise.all([
       normalizedEmail ? uhubSearchPessoaContatos(normalizedEmail) : Promise.resolve([]),
       normalizedPhone ? uhubSearchPessoaContatos(normalizedPhone) : Promise.resolve([]),
@@ -1447,6 +1591,17 @@ async function upsertUserProfile(user = {}, payload = {}) {
       reg_ans: regAns,
       operator_name: operatorName,
     },
+    types: {
+      uid: 'STRING',
+      email: 'STRING',
+      first_name: 'STRING',
+      last_name: 'STRING',
+      phone: 'STRING',
+      job_title: 'STRING',
+      department: 'STRING',
+      reg_ans: 'STRING',
+      operator_name: 'STRING',
+    },
     location: BQ_LOCATION,
   })
 }
@@ -1511,6 +1666,12 @@ async function upsertApprovedUserAccess(user = {}, payload = {}) {
       email,
       reg_ans: regAns,
       operator_name: toNullableString(payload.operatorName),
+    },
+    types: {
+      uid: 'STRING',
+      email: 'STRING',
+      reg_ans: 'STRING',
+      operator_name: 'STRING',
     },
     location: BQ_LOCATION,
   })
@@ -1634,6 +1795,627 @@ async function fetchPendingAccountFromBigQuery(uid) {
   })
   const row = normalizeBigQueryRows(rows)[0]
   return row ? mapPendingProfileRow(row) : null
+}
+
+function mapAdminAccountRow(row = {}) {
+  const accessRegAns = normalizeRegAns(row?.access_reg_ans)
+  const accessLinks = Array.isArray(row?.access_links)
+    ? row.access_links
+        .map((item) => ({
+          regAns: normalizeRegAns(item?.reg_ans),
+          operatorName: toNullableString(item?.operator_name),
+          canUpload: item?.can_upload === false ? false : true,
+        }))
+        .filter((item) => item.regAns)
+    : []
+  return {
+    uid: String(row?.user_uid ?? '').trim() || null,
+    statusAprovacao: accessRegAns ? APPROVAL_STATUS.MANUAL_APPROVED : APPROVAL_STATUS.PENDING,
+    approvalReason: accessRegAns ? 'acesso_operadora' : 'pendente_admin',
+    firstName: toNullableString(row?.first_name),
+    lastName: toNullableString(row?.last_name),
+    phone: toNullableString(row?.phone),
+    email: normalizeEmail(row?.user_email),
+    jobTitle: toNullableString(row?.job_title),
+    roleFunction: toNullableString(row?.department),
+    department: toNullableString(row?.department),
+    regAns: normalizeRegAns(row?.reg_ans),
+    operatorName: toNullableString(row?.operator_name),
+    accessRegAns,
+    accessOperatorName: toNullableString(row?.access_operator_name),
+    accessLinks,
+    canUpload: row?.can_upload === false ? false : true,
+    createdAt: serializeFirestoreTimestamp(row?.created_at),
+    updatedAt: serializeFirestoreTimestamp(row?.updated_at),
+  }
+}
+
+async function listAdminAccountsFromBigQuery() {
+  await Promise.all([ensureUserProfileTable(), ensureUserAccessTable()])
+  const [rows] = await bigquery.query({
+    query: `
+      WITH access_rows AS (
+        SELECT
+          COALESCE(
+            NULLIF(LOWER(TRIM(CAST(user_email AS STRING))), ''),
+            NULLIF(CAST(user_uid AS STRING), '')
+          ) AS access_key,
+          user_uid,
+          user_email,
+          REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', '') AS access_reg_ans,
+          NULLIF(TRIM(CAST(operator_name AS STRING)), '') AS access_operator_name,
+          COALESCE(can_upload, TRUE) AS can_upload,
+          updated_at
+        FROM \`${USER_ACCESS_TABLE_REF.fqn}\`
+        WHERE COALESCE(active, TRUE) IS TRUE
+          AND NULLIF(REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', ''), '') IS NOT NULL
+      ), latest_access AS (
+        SELECT
+          *,
+          ROW_NUMBER() OVER (
+            PARTITION BY access_key
+            ORDER BY updated_at DESC
+          ) AS rn
+        FROM access_rows
+      ), grouped_access AS (
+        SELECT
+          access_key,
+          ARRAY_AGG(
+            STRUCT(
+              access_reg_ans AS reg_ans,
+              access_operator_name AS operator_name,
+              can_upload AS can_upload
+            )
+            ORDER BY updated_at DESC
+          ) AS access_links
+        FROM access_rows
+        GROUP BY access_key
+      )
+      SELECT
+        p.user_uid,
+        p.user_email,
+        p.first_name,
+        p.last_name,
+        p.phone,
+        p.job_title,
+        p.department,
+        p.reg_ans,
+        p.operator_name,
+        p.created_at,
+        p.updated_at,
+        a.access_reg_ans,
+        a.access_operator_name,
+        a.can_upload,
+        g.access_links
+      FROM \`${USER_PROFILE_TABLE_REF.fqn}\` p
+      LEFT JOIN latest_access a
+        ON a.rn = 1
+        AND a.access_key = COALESCE(
+          NULLIF(LOWER(TRIM(CAST(p.user_email AS STRING))), ''),
+          NULLIF(CAST(p.user_uid AS STRING), '')
+        )
+      LEFT JOIN grouped_access g
+        ON g.access_key = COALESCE(
+          NULLIF(LOWER(TRIM(CAST(p.user_email AS STRING))), ''),
+          NULLIF(CAST(p.user_uid AS STRING), '')
+        )
+      WHERE NULLIF(LOWER(TRIM(CAST(p.user_email AS STRING))), '') IS NOT NULL
+      ORDER BY p.updated_at DESC
+      LIMIT 200
+    `,
+    location: BQ_LOCATION,
+  })
+  return normalizeBigQueryRows(rows).map(mapAdminAccountRow).filter((item) => item.uid)
+}
+
+async function listAdminAccounts() {
+  const merged = new Map()
+  try {
+    const snapshot = await firestore.collection(PFC_ONBOARDING_COLLECTION).limit(200).get()
+    snapshot.docs.map(mapOnboardingDoc).filter(Boolean).forEach((account) => {
+      merged.set(account.uid, account)
+    })
+  } catch (err) {
+    console.warn('[server] Listagem Firestore admin indisponível', err?.message ?? err)
+  }
+  try {
+    const accounts = await listAdminAccountsFromBigQuery()
+    accounts.forEach((account) => {
+      const current = merged.get(account.uid)
+      const mergedAccount = {
+        ...account,
+        ...current,
+        accessRegAns: account.accessRegAns,
+        accessOperatorName: account.accessOperatorName,
+        canUpload: account.canUpload,
+      }
+      if (account.accessRegAns && !canAccessFromApprovalStatus(mergedAccount.statusAprovacao)) {
+        mergedAccount.statusAprovacao = APPROVAL_STATUS.MANUAL_APPROVED
+        mergedAccount.approvalReason = 'acesso_operadora'
+      }
+      merged.set(account.uid, mergedAccount)
+    })
+  } catch (err) {
+    console.warn('[server] Listagem BigQuery admin indisponível', err?.message ?? err)
+  }
+  return [...merged.values()].sort((a, b) => {
+    const aPending = canAccessFromApprovalStatus(a.statusAprovacao) ? 1 : 0
+    const bPending = canAccessFromApprovalStatus(b.statusAprovacao) ? 1 : 0
+    if (aPending !== bPending) return aPending - bPending
+    return String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? ''))
+  })
+}
+
+async function fetchAdminAccount(uid) {
+  const normalizedUid = String(uid ?? '').trim()
+  if (!normalizedUid) return null
+  if (DEV_AUTH_BYPASS) {
+    return (await listAdminAccountsFromBigQuery()).find((account) => account.uid === normalizedUid) ?? null
+  }
+  const fromFirestore = await fetchOnboardingLink(normalizedUid).catch(() => null)
+  if (fromFirestore) return fromFirestore
+  return fetchPendingAccountFromBigQuery(normalizedUid)
+}
+
+async function approveAdminAccount(uid, reqUser, override = {}) {
+  const normalizedUid = String(uid ?? '').trim()
+  if (!normalizedUid) {
+    const error = new Error('UID inválido.')
+    error.statusCode = 400
+    throw error
+  }
+  const current = await fetchAdminAccount(normalizedUid)
+  if (!current) {
+    const error = new Error('Conta não encontrada.')
+    error.statusCode = 404
+    throw error
+  }
+  const regAns = normalizeRegAns(override.regAns ?? current.regAns)
+  let operatorName = toNullableString(override.operatorName) || current.operatorName || current.accessOperatorName || null
+  if (regAns) {
+    const operatorMetadata = await resolveOperatorMetadata(regAns)
+    operatorName = operatorMetadata?.operatorName ?? operatorName
+  }
+  await upsertApprovedUserAccess(
+    { uid: normalizedUid, email: current.email },
+    {
+      email: current.email,
+      regAns,
+      operatorName,
+    },
+  )
+  try {
+    await getOnboardingDocRef(normalizedUid).set(
+      {
+        status_aprovacao: APPROVAL_STATUS.MANUAL_APPROVED,
+        approval_reason: override.reason ?? 'aprovado_admin',
+        approved_by_email: normalizeEmail(reqUser?.email),
+        approved_at: admin.firestore.FieldValue.serverTimestamp(),
+        updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        reg_ans: regAns,
+        operator_name: operatorName,
+      },
+      { merge: true },
+    )
+  } catch (err) {
+    console.warn('[server] Vínculo admin salvo no BigQuery, Firestore indisponível', err?.message ?? err)
+  }
+  userAccessCache.delete(getUserAccessCacheKey({ uid: normalizedUid, email: current?.email }))
+  const accessLinks = [
+    { regAns, operatorName, canUpload: true },
+    ...(current.accessLinks ?? []),
+  ].filter((item, index, items) => item.regAns && items.findIndex((candidate) => candidate.regAns === item.regAns) === index)
+  return {
+    ...current,
+    regAns,
+    operatorName,
+    accessRegAns: regAns,
+    accessOperatorName: operatorName,
+    accessLinks,
+    statusAprovacao: APPROVAL_STATUS.MANUAL_APPROVED,
+    approvalReason: override.reason ?? 'aprovado_admin',
+  }
+}
+
+async function createAdminUserAccount(reqUser = {}, payload = {}) {
+  const email = normalizeEmail(payload.email)
+  const password = String(payload.password ?? '')
+  const firstName = toNullableString(payload.firstName)
+  const lastName = toNullableString(payload.lastName)
+  const phone = toNullableString(payload.phone)
+  const jobTitle = toNullableString(payload.jobTitle) || 'Usuário PFC'
+  const roleFunction = toNullableString(payload.roleFunction) || 'Operadora'
+  const regAns = normalizeRegAns(payload.regAns)
+  if (!email || !password || !firstName || !lastName || !regAns) {
+    const error = new Error('Informe e-mail, senha, nome, sobrenome e operadora.')
+    error.statusCode = 400
+    throw error
+  }
+  if (password.length < 6) {
+    const error = new Error('A senha precisa ter pelo menos 6 caracteres.')
+    error.statusCode = 400
+    throw error
+  }
+  const operatorMetadata = await resolveOperatorMetadata(regAns)
+  if (!operatorMetadata?.regAns) {
+    const error = new Error('Operadora não encontrada.')
+    error.statusCode = 400
+    throw error
+  }
+  const created = await admin.auth().createUser({
+    email,
+    password,
+    displayName: `${firstName} ${lastName}`.trim(),
+    emailVerified: false,
+    disabled: false,
+  })
+  const profilePayload = {
+    firstName,
+    lastName,
+    phone,
+    phoneIsWhatsapp: false,
+    email,
+    jobTitle,
+    roleFunction,
+    department: roleFunction,
+    regAns,
+    operatorName: operatorMetadata.operatorName,
+  }
+  await upsertUserProfile({ uid: created.uid, email }, profilePayload)
+  await saveOnboardingLink(
+    { uid: created.uid, email },
+    profilePayload,
+    { status: APPROVAL_STATUS.MANUAL_APPROVED, reason: 'criado_admin' },
+  )
+  await upsertApprovedUserAccess({ uid: created.uid, email }, profilePayload)
+  await admin.auth().setCustomUserClaims(created.uid, { pfcUser: true })
+  await auditOnboardingAttempt({
+    uid: created.uid,
+    email,
+    phone: normalizePhoneForUhub(phone),
+    result: { status: APPROVAL_STATUS.MANUAL_APPROVED, reason: 'criado_admin' },
+    requestId: crypto.randomUUID(),
+  })
+  userAccessCache.delete(getUserAccessCacheKey({ uid: created.uid, email }))
+  return {
+    uid: created.uid,
+    email,
+    firstName,
+    lastName,
+    phone,
+    jobTitle,
+    roleFunction,
+    department: roleFunction,
+    regAns,
+    operatorName: operatorMetadata.operatorName,
+    accessRegAns: regAns,
+    accessOperatorName: operatorMetadata.operatorName,
+    statusAprovacao: APPROVAL_STATUS.MANUAL_APPROVED,
+    approvalReason: 'criado_admin',
+    createdByEmail: normalizeEmail(reqUser?.email),
+  }
+}
+
+async function updateAdminUserAccount(uid, payload = {}) {
+  const normalizedUid = String(uid ?? '').trim()
+  if (!normalizedUid) {
+    const error = new Error('UID inválido.')
+    error.statusCode = 400
+    throw error
+  }
+  const current = await fetchAdminAccount(normalizedUid)
+  if (!current) {
+    const error = new Error('Conta não encontrada.')
+    error.statusCode = 404
+    throw error
+  }
+  const firstName = toNullableString(payload.firstName) ?? current.firstName
+  const lastName = toNullableString(payload.lastName) ?? current.lastName
+  const phone = toNullableString(payload.phone) ?? current.phone
+  const jobTitle = toNullableString(payload.jobTitle) ?? current.jobTitle ?? 'Usuário PFC'
+  const roleFunction = toNullableString(payload.roleFunction ?? payload.department) ?? current.roleFunction ?? current.department ?? 'Operadora'
+  const regAns = normalizeRegAns(payload.regAns ?? current.accessRegAns ?? current.regAns)
+  let operatorName = current.accessOperatorName ?? current.operatorName ?? null
+  if (regAns) {
+    const operatorMetadata = await resolveOperatorMetadata(regAns)
+    operatorName = operatorMetadata?.operatorName ?? operatorName
+  }
+  const profilePayload = {
+    firstName,
+    lastName,
+    phone,
+    phoneIsWhatsapp: current.phoneIsWhatsapp === true,
+    email: current.email,
+    jobTitle,
+    roleFunction,
+    department: roleFunction,
+    regAns,
+    operatorName,
+  }
+  await upsertUserProfile({ uid: normalizedUid, email: current.email }, profilePayload)
+  if (regAns) {
+    await upsertApprovedUserAccess({ uid: normalizedUid, email: current.email }, profilePayload)
+  }
+  if (!DEV_AUTH_BYPASS) {
+    try {
+      await admin.auth().updateUser(normalizedUid, {
+        displayName: [firstName, lastName].filter(Boolean).join(' ') || undefined,
+      })
+    } catch (err) {
+      if (err?.code !== 'auth/user-not-found') throw err
+    }
+    try {
+      await getOnboardingDocRef(normalizedUid).set(
+        {
+          first_name: firstName,
+          last_name: lastName,
+          phone,
+          job_title: jobTitle,
+          role_function: roleFunction,
+          department: roleFunction,
+          reg_ans: regAns,
+          operator_name: operatorName,
+          updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      )
+    } catch (err) {
+      console.warn('[server] Perfil admin salvo no BigQuery, Firestore indisponível', err?.message ?? err)
+    }
+  }
+  userAccessCache.delete(getUserAccessCacheKey({ uid: normalizedUid, email: current.email }))
+  return {
+    ...current,
+    ...profilePayload,
+    accessRegAns: regAns,
+    accessOperatorName: operatorName,
+    statusAprovacao: regAns ? APPROVAL_STATUS.MANUAL_APPROVED : current.statusAprovacao,
+    approvalReason: regAns ? 'editado_admin' : current.approvalReason,
+  }
+}
+
+async function deleteAdminUserAccount(uid) {
+  const normalizedUid = String(uid ?? '').trim()
+  if (!normalizedUid) {
+    const error = new Error('UID inválido.')
+    error.statusCode = 400
+    throw error
+  }
+  const current = await fetchAdminAccount(normalizedUid).catch(() => null)
+  await ensureUserProfileTable()
+  await ensureUserAccessTable()
+  await bigquery.query({
+    query: `
+      DELETE FROM \`${USER_PROFILE_TABLE_REF.fqn}\`
+      WHERE CAST(user_uid AS STRING) = @uid
+    `,
+    params: { uid: normalizedUid },
+    location: BQ_LOCATION,
+  })
+  await bigquery.query({
+    query: `
+      UPDATE \`${USER_ACCESS_TABLE_REF.fqn}\`
+      SET active = FALSE, updated_at = CURRENT_TIMESTAMP()
+      WHERE CAST(user_uid AS STRING) = @uid
+    `,
+    params: { uid: normalizedUid },
+    location: BQ_LOCATION,
+  })
+  if (!DEV_AUTH_BYPASS) {
+    try {
+      await getOnboardingDocRef(normalizedUid).delete()
+    } catch (err) {
+      console.warn('[server] Cadastro removido do BigQuery, Firestore indisponível', err?.message ?? err)
+    }
+  }
+  try {
+    await admin.auth().deleteUser(normalizedUid)
+  } catch (err) {
+    if (err?.code !== 'auth/user-not-found') throw err
+  }
+  userAccessCache.delete(getUserAccessCacheKey({ uid: normalizedUid, email: current?.email }))
+  return { uid: normalizedUid, email: current?.email ?? null, deleted: true }
+}
+
+async function requestAdminAccountCompletion(uid, req = {}) {
+  const normalizedUid = String(uid ?? '').trim()
+  if (!normalizedUid) {
+    const error = new Error('UID inválido.')
+    error.statusCode = 400
+    throw error
+  }
+  const current = await fetchAdminAccount(normalizedUid)
+  if (!current) {
+    const error = new Error('Conta não encontrada.')
+    error.statusCode = 404
+    throw error
+  }
+  const appUrl = req.get?.('origin') ?? PFC_APP_URL
+  const template = req.body?.template ?? {
+    subject: req.body?.subject,
+    text: req.body?.text,
+    html: req.body?.html,
+  }
+  const preview = buildProfileCompletionEmailPayload({ account: current, appUrl, template })
+  if (req.body?.dryRun === true) {
+    return { account: current, preview, dryRun: true }
+  }
+  await ensureUserProfileTable()
+  await ensureUserAccessTable()
+  await bigquery.query({
+    query: `
+      UPDATE \`${USER_PROFILE_TABLE_REF.fqn}\`
+      SET is_completed = FALSE, updated_at = CURRENT_TIMESTAMP()
+      WHERE CAST(user_uid AS STRING) = @uid
+        OR LOWER(TRIM(CAST(user_email AS STRING))) = @email
+    `,
+    params: { uid: normalizedUid, email: normalizeEmail(current.email) },
+    types: { uid: 'STRING', email: 'STRING' },
+    location: BQ_LOCATION,
+  })
+  await bigquery.query({
+    query: `
+      UPDATE \`${USER_ACCESS_TABLE_REF.fqn}\`
+      SET active = FALSE, updated_at = CURRENT_TIMESTAMP()
+      WHERE CAST(user_uid AS STRING) = @uid
+        OR LOWER(TRIM(CAST(user_email AS STRING))) = @email
+    `,
+    params: { uid: normalizedUid, email: normalizeEmail(current.email) },
+    types: { uid: 'STRING', email: 'STRING' },
+    location: BQ_LOCATION,
+  })
+  if (!DEV_AUTH_BYPASS) {
+    try {
+      await getOnboardingDocRef(normalizedUid).set(
+        {
+          status_aprovacao: APPROVAL_STATUS.PENDING_REVIEW,
+          approval_reason: 'dados_incompletos',
+          updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      )
+    } catch (err) {
+      console.warn('[server] Solicitação de dados salva no BigQuery, Firestore indisponível', err?.message ?? err)
+    }
+  }
+  await sendProfileCompletionRequestEmail({ account: current, appUrl, template })
+  userAccessCache.delete(getUserAccessCacheKey({ uid: normalizedUid, email: current.email }))
+  return {
+    ...current,
+    statusAprovacao: APPROVAL_STATUS.PENDING_REVIEW,
+    approvalReason: 'dados_incompletos',
+    accessRegAns: null,
+    accessOperatorName: null,
+    accessLinks: [],
+  }
+}
+
+function mapUploadReportRow(row = {}) {
+  return {
+    uploadId: toNullableString(row?.upload_id),
+    uploadedAt: serializeFirestoreTimestamp(row?.uploaded_at),
+    uploadedByEmail: normalizeEmail(row?.uploaded_by_email),
+    sourceFileName: toNullableString(row?.source_file_name),
+    operatorName: toNullableString(row?.operator_name),
+    competencia: toNullableString(row?.competencia),
+    regAns: normalizeRegAns(row?.reg_ans),
+    responsavelNome: toNullableString(row?.responsavel_nome),
+    responsavelEmail: normalizeEmail(row?.responsavel_email),
+    rowCount: Number(row?.row_count ?? 0),
+  }
+}
+
+async function listAdminUploadReport() {
+  const operators = await listUhubOperatorCatalog().catch(() => listUhubOperatorCatalogFromBigQuery())
+  const table = await ensureAuxDemonstracoesTable()
+  const [rows] = await bigquery.query({
+    query: `
+      WITH periods AS (
+        SELECT DISTINCT competencia
+        FROM \`${AUX_DEMONSTRACOES_TABLE_REF.fqn}\`
+        WHERE NULLIF(TRIM(CAST(competencia AS STRING)), '') IS NOT NULL
+        ORDER BY competencia DESC
+        LIMIT 12
+      ), grouped AS (
+        SELECT
+          upload_id,
+          uploaded_at,
+          uploaded_by_email,
+          source_file_name,
+          operator_name,
+          competencia,
+          reg_ans,
+          responsavel_nome,
+          responsavel_email,
+          COUNT(*) AS row_count,
+          ROW_NUMBER() OVER (
+            PARTITION BY REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', ''), competencia
+            ORDER BY uploaded_at DESC, upload_id DESC
+          ) AS rn
+        FROM \`${AUX_DEMONSTRACOES_TABLE_REF.fqn}\`
+        WHERE competencia IN (SELECT competencia FROM periods)
+        GROUP BY
+          upload_id,
+          uploaded_at,
+          uploaded_by_email,
+          source_file_name,
+          operator_name,
+          competencia,
+          reg_ans,
+          responsavel_nome,
+          responsavel_email
+      )
+      SELECT * EXCEPT(rn)
+      FROM grouped
+      WHERE rn = 1
+      ORDER BY competencia DESC, uploaded_at DESC
+    `,
+    location: BQ_LOCATION,
+  })
+  void table
+  const uploads = normalizeBigQueryRows(rows).map(mapUploadReportRow)
+  const periods = [...new Set(uploads.map((item) => item.competencia).filter(Boolean))].sort((a, b) =>
+    b.localeCompare(a),
+  )
+  const uploadMap = new Map(uploads.map((item) => [`${item.regAns}|${item.competencia}`, item]))
+  const reportRows = operators.flatMap((operator) => {
+    const operatorPeriods = periods.length ? periods : [null]
+    return operatorPeriods.map((competencia) => {
+      const upload = competencia ? uploadMap.get(`${operator.regAns}|${competencia}`) : null
+      return {
+        regAns: operator.regAns,
+        operatorName: operator.operatorName,
+        competencia,
+        status: upload ? 'enviado' : 'pendente',
+        upload,
+      }
+    })
+  })
+  return {
+    periods,
+    rows: reportRows,
+    summary: {
+      operators: operators.length,
+      periods: periods.length,
+      sent: reportRows.filter((row) => row.status === 'enviado').length,
+      pending: reportRows.filter((row) => row.status !== 'enviado').length,
+    },
+  }
+}
+
+async function deleteAdminUpload(uploadId) {
+  const normalizedUploadId = toNullableString(uploadId)
+  if (!normalizedUploadId) {
+    const error = new Error('Upload inválido.')
+    error.statusCode = 400
+    throw error
+  }
+  await ensureAuxDemonstracoesTable()
+  await bigquery.query({
+    query: `
+      DELETE FROM \`${AUX_DEMONSTRACOES_TABLE_REF.fqn}\`
+      WHERE CAST(upload_id AS STRING) = @upload_id
+    `,
+    params: { upload_id: normalizedUploadId },
+    location: BQ_LOCATION,
+  })
+  await refreshAuxDemonstracoesLatestView()
+  const refreshWarnings = []
+  if (SHOULD_REFRESH_CONSOLIDATED_VIEW) {
+    try {
+      await refreshConsolidatedDemonstracoesView()
+    } catch (err) {
+      refreshWarnings.push(err?.message ?? String(err))
+    }
+  }
+  if (SHOULD_REFRESH_CONSOLIDATED_INDICATORS) {
+    try {
+      await refreshConsolidatedIndicatorArtifacts()
+    } catch (err) {
+      refreshWarnings.push(err?.message ?? String(err))
+    }
+  }
+  return { success: true, uploadId: normalizedUploadId, warning: refreshWarnings.join(' | ') || null }
 }
 
 async function buildAuthProfilePayload(reqUser = {}, accessContext = {}) {
@@ -2642,6 +3424,25 @@ app.get('/api/auth/status', (req, res) => {
 
 app.get('/api/auth/profile', async (req, res) => {
   try {
+    if (DEV_AUTH_BYPASS && req.headers['x-dev-auth-bypass'] === '1') {
+      res.setHeader('Cache-Control', 'no-store')
+      return res.json({
+        uid: req.user?.uid ?? 'local-preview-admin',
+        email: req.user?.email ?? DEV_AUTH_EMAIL,
+        enforced: ENFORCE_USER_ACCESS,
+        isAdmin: true,
+        operators: [],
+        allowedRegAns: [],
+        canUploadRegAns: [],
+        noAccess: false,
+        approvalStatus: null,
+        approvalReason: null,
+        canAccess: true,
+        uhubLink: null,
+        requiresProfileCompletion: false,
+        registrationProfile: null,
+      })
+    }
     const accessContext = await resolveUserAccessContext(req.user)
     const payload = await buildAuthProfilePayload(req.user, accessContext)
     res.setHeader('Cache-Control', 'no-store')
@@ -2671,6 +3472,9 @@ async function handleOperatorsList(_req, res) {
         regAns: item.regAns,
         operatorName: item.operatorName,
       }))
+    if (!operators.some((item) => item.regAns === GLOBAL_OPERATOR_ACCESS.regAns)) {
+      operators.unshift(GLOBAL_OPERATOR_ACCESS)
+    }
     res.setHeader('Cache-Control', 'no-store')
     return res.json({ operators, source })
   } catch (err) {
@@ -2716,7 +3520,7 @@ app.post('/api/auth/profile/complete', async (req, res) => {
       }
     }
     const requestId = crypto.randomUUID()
-    const profilePayload = {
+    let profilePayload = {
       firstName,
       lastName,
       phone,
@@ -2731,13 +3535,23 @@ app.post('/api/auth/profile/complete', async (req, res) => {
     const verification = isPrivilegedUser
       ? { status: APPROVAL_STATUS.MANUAL_APPROVED, reason: 'usuario_admin' }
       : await verifyUhubOnboarding({ email: profileEmail, phone })
+    profilePayload = completeProfileFromUhubResolve(profilePayload, verification)
 
     await upsertUserProfile(req.user, {
       ...profilePayload,
     })
 
     if (canAccessFromApprovalStatus(verification.status)) {
-      await upsertApprovedUserAccess(req.user, profilePayload)
+      const vinculos = Array.isArray(verification.vinculos) && verification.vinculos.length ? verification.vinculos : [profilePayload]
+      for (const vinculo of vinculos) {
+        await upsertApprovedUserAccess(req.user, {
+          ...profilePayload,
+          regAns: vinculo.regAns ?? profilePayload.regAns,
+          operatorName: vinculo.operatorName ?? profilePayload.operatorName,
+          roleFunction: vinculo.roleFunction ?? profilePayload.roleFunction,
+          department: vinculo.department ?? profilePayload.department,
+        })
+      }
     }
 
     let onboardingLink = createOnboardingLinkFallback(req.user, profilePayload, verification)
@@ -2826,54 +3640,145 @@ app.get('/api/admin/accounts/pending', async (req, res) => {
   }
 })
 
+app.get('/api/admin/accounts', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    const accounts =
+      DEV_AUTH_BYPASS && req.headers['x-dev-auth-bypass'] === '1'
+        ? await listAdminAccountsFromBigQuery()
+        : await listAdminAccounts()
+    res.setHeader('Cache-Control', 'no-store')
+    return res.json({ accounts })
+  } catch (err) {
+    console.error('[server] Falha ao listar contas admin', err)
+    return res.status(500).json({ error: 'Falha ao listar contas.' })
+  }
+})
+
+app.post('/api/admin/accounts/bulk-approve', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  const uids = Array.isArray(req.body?.uids)
+    ? [...new Set(req.body.uids.map((uid) => String(uid ?? '').trim()).filter(Boolean))]
+    : []
+  if (!uids.length) {
+    return res.status(400).json({ error: 'Selecione ao menos uma conta.' })
+  }
+  try {
+    const accounts = []
+    for (const uid of uids.slice(0, 100)) {
+      accounts.push(await approveAdminAccount(uid, req.user, { reason: 'aprovado_admin_lote' }))
+    }
+    return res.json({ accounts, count: accounts.length })
+  } catch (err) {
+    console.error('[server] Falha ao aprovar contas em lote', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao aprovar contas em lote.' })
+  }
+})
+
+app.post('/api/admin/accounts/create', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    const account = await createAdminUserAccount(req.user, req.body ?? {})
+    return res.status(201).json({ account })
+  } catch (err) {
+    console.error('[server] Falha ao criar usuário admin', err)
+    if (err?.code === 'auth/email-already-exists') {
+      return res.status(409).json({ error: 'Já existe usuário com este e-mail.' })
+    }
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao criar usuário.' })
+  }
+})
+
+app.put('/api/admin/accounts/:uid', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    const account = await updateAdminUserAccount(req.params.uid, req.body ?? {})
+    return res.json({ account })
+  } catch (err) {
+    console.error('[server] Falha ao editar usuário admin', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao editar usuário.' })
+  }
+})
+
+app.delete('/api/admin/accounts/:uid', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    const result = await deleteAdminUserAccount(req.params.uid)
+    return res.json(result)
+  } catch (err) {
+    console.error('[server] Falha ao excluir usuário admin', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao excluir usuário.' })
+  }
+})
+
+app.post('/api/admin/accounts/:uid/request-completion', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    const result = await requestAdminAccountCompletion(req.params.uid, req)
+    return res.json(result)
+  } catch (err) {
+    console.error('[server] Falha ao solicitar complemento cadastral', err)
+    return res.status(err?.statusCode ?? 500).json({
+      error: err?.message ?? 'Falha ao solicitar complemento cadastral.',
+    })
+  }
+})
+
+app.get('/api/admin/uploads/report', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    const report = await listAdminUploadReport()
+    res.setHeader('Cache-Control', 'no-store')
+    return res.json(report)
+  } catch (err) {
+    console.error('[server] Falha ao gerar relatório de uploads', err)
+    return res.status(500).json({ error: 'Falha ao gerar relatório de envios.' })
+  }
+})
+
+app.delete('/api/admin/uploads/:uploadId', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    const result = await deleteAdminUpload(req.params.uploadId)
+    return res.json(result)
+  } catch (err) {
+    console.error('[server] Falha ao excluir upload', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao excluir envio.' })
+  }
+})
+
 app.post('/api/admin/accounts/:uid/approve', async (req, res) => {
   if (!ensureAdminRequest(req, res)) return
   const uid = String(req.params.uid ?? '').trim()
   if (!uid) return res.status(400).json({ error: 'UID inválido.' })
   try {
-    let current = null
-    try {
-      const ref = getOnboardingDocRef(uid)
-      const snapshot = await ref.get()
-      if (snapshot.exists) {
-        current = mapOnboardingDoc(snapshot)
-        await ref.set(
-          {
-            status_aprovacao: APPROVAL_STATUS.MANUAL_APPROVED,
-            approval_reason: 'aprovado_admin',
-            approved_by_email: normalizeEmail(req.user?.email),
-            approved_at: admin.firestore.FieldValue.serverTimestamp(),
-            updated_at: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: true },
-        )
-      }
-    } catch (err) {
-      console.warn('[server] Aprovação admin caiu para BigQuery', err?.message ?? err)
-    }
-    if (!current) {
-      current = await fetchPendingAccountFromBigQuery(uid)
-    }
-    if (!current) return res.status(404).json({ error: 'Conta não encontrada.' })
-    await upsertApprovedUserAccess(
-      { uid, email: current.email },
-      {
-        email: current.email,
-        regAns: current.regAns,
-        operatorName: current.operatorName,
-      },
-    )
-    userAccessCache.delete(getUserAccessCacheKey({ uid, email: current?.email }))
-    return res.json({
-      account: {
-        ...current,
-        statusAprovacao: APPROVAL_STATUS.MANUAL_APPROVED,
-        approvalReason: 'aprovado_admin',
-      },
-    })
+    return res.json({ account: await approveAdminAccount(uid, req.user) })
   } catch (err) {
     console.error('[server] Falha ao aprovar conta', err)
-    return res.status(500).json({ error: 'Falha ao aprovar conta.' })
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao aprovar conta.' })
+  }
+})
+
+app.post('/api/admin/accounts/:uid/operator', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  const uid = String(req.params.uid ?? '').trim()
+  const regAns = normalizeRegAns(req.body?.regAns)
+  if (!uid) return res.status(400).json({ error: 'UID inválido.' })
+  if (!regAns) return res.status(400).json({ error: 'Registro ANS inválido.' })
+  try {
+    const operatorMetadata = await resolveOperatorMetadata(regAns)
+    if (!operatorMetadata?.regAns) {
+      return res.status(400).json({ error: 'Operadora não encontrada.' })
+    }
+    const account = await approveAdminAccount(uid, req.user, {
+      regAns,
+      operatorName: operatorMetadata.operatorName,
+      reason: 'vinculo_operadora_admin',
+    })
+    return res.json({ account })
+  } catch (err) {
+    console.error('[server] Falha ao vincular operadora', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao vincular operadora.' })
   }
 })
 

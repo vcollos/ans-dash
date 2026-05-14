@@ -59,7 +59,7 @@ export async function fetchOperatorsCatalog() {
     error.code = payload?.code ?? null
     throw error
   }
-  return Array.isArray(payload?.operators)
+  const operators = Array.isArray(payload?.operators)
     ? payload.operators
         .map((item) => ({
           regAns: String(item?.regAns ?? '').trim(),
@@ -67,6 +67,7 @@ export async function fetchOperatorsCatalog() {
         }))
         .filter((item) => item.regAns)
     : []
+  return [...new Map(operators.map((item) => [item.regAns, item])).values()]
 }
 
 export async function saveProfileCompletion(formData = {}) {
@@ -93,6 +94,76 @@ export async function fetchPendingAccounts() {
   return Array.isArray(payload?.accounts) ? payload.accounts : []
 }
 
+export async function fetchAdminAccounts() {
+  const response = await fetchWithAuth('/api/admin/accounts')
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao carregar contas.')
+  }
+  return Array.isArray(payload?.accounts) ? payload.accounts : []
+}
+
+export async function createAdminAccount(formData = {}) {
+  const response = await fetchWithAuth('/api/admin/accounts/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(formData),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao criar usuário.')
+  }
+  return payload?.account ?? null
+}
+
+export async function updateAdminAccount(uid, formData = {}) {
+  const response = await fetchWithAuth(`/api/admin/accounts/${encodeURIComponent(uid)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(formData),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao editar usuário.')
+  }
+  return payload?.account ?? null
+}
+
+export async function deleteAdminAccount(uid) {
+  const response = await fetchWithAuth(`/api/admin/accounts/${encodeURIComponent(uid)}`, {
+    method: 'DELETE',
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao excluir usuário.')
+  }
+  return payload
+}
+
+export async function fetchAdminUploadReport() {
+  const response = await fetchWithAuth('/api/admin/uploads/report')
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao carregar relatório de envios.')
+  }
+  return {
+    periods: Array.isArray(payload?.periods) ? payload.periods : [],
+    rows: Array.isArray(payload?.rows) ? payload.rows : [],
+    summary: payload?.summary ?? null,
+  }
+}
+
+export async function deleteAdminUpload(uploadId) {
+  const response = await fetchWithAuth(`/api/admin/uploads/${encodeURIComponent(uploadId)}`, {
+    method: 'DELETE',
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao excluir envio.')
+  }
+  return payload
+}
+
 export async function approveAccount(uid) {
   const response = await fetchWithAuth(`/api/admin/accounts/${encodeURIComponent(uid)}/approve`, {
     method: 'POST',
@@ -100,6 +171,32 @@ export async function approveAccount(uid) {
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
     throw new Error(payload?.error ?? 'Falha ao aprovar conta.')
+  }
+  return payload?.account ?? null
+}
+
+export async function bulkApproveAccounts(uids = []) {
+  const response = await fetchWithAuth('/api/admin/accounts/bulk-approve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uids }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao aprovar contas em lote.')
+  }
+  return Array.isArray(payload?.accounts) ? payload.accounts : []
+}
+
+export async function assignAccountOperator(uid, regAns) {
+  const response = await fetchWithAuth(`/api/admin/accounts/${encodeURIComponent(uid)}/operator`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ regAns }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao vincular operadora.')
   }
   return payload?.account ?? null
 }

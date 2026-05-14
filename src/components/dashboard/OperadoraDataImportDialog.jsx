@@ -112,16 +112,6 @@ function getCurrentCompetencia() {
   return `${year}-${month}`
 }
 
-function computePorteFromBeneficiarios(value) {
-  const text = toNullableString(value)
-  if (!text) return ''
-  const numeric = Number(String(text).replace(/[^\d-]/g, ''))
-  if (!Number.isFinite(numeric)) return ''
-  if (numeric <= 19999) return 'Pequeno Porte'
-  if (numeric <= 99999) return 'Médio Porte'
-  return 'Grande Porte'
-}
-
 function createDefaultBatchForm(userEmail = '') {
   return {
     competencia: getCurrentCompetencia(),
@@ -218,6 +208,7 @@ export default function OperadoraDataImportDialog({
   allowedOperators = [],
   defaultOperatorName = null,
   defaultOperatorRegAns = null,
+  defaultCompetencia = null,
   userEmail = '',
   onUploadSuccess,
 }) {
@@ -267,9 +258,10 @@ export default function OperadoraDataImportDialog({
     setBatchForm((current) => ({
       ...createDefaultBatchForm(userEmail),
       ...current,
+      competencia: toNullableString(defaultCompetencia) || current.competencia || getCurrentCompetencia(),
       responsavel_email: toNullableString(current.responsavel_email) || toNullableString(userEmail),
     }))
-  }, [userEmail])
+  }, [defaultCompetencia, userEmail])
 
   useEffect(() => {
     if (!open || !selectedRegAns) return
@@ -295,7 +287,6 @@ export default function OperadoraDataImportDialog({
             toNullableString(current.responsavel_email) ||
             toNullableString(payload?.responsavelEmail) ||
             toNullableString(userEmail),
-          porte: computePorteFromBeneficiarios(current.qt_beneficiarios) || current.porte,
         }))
       })
       .catch((err) => {
@@ -394,10 +385,7 @@ export default function OperadoraDataImportDialog({
             sistema_origem: batchForm.sistema_origem,
             responsavel_nome: batchForm.responsavel_nome,
             responsavel_email: batchForm.responsavel_email,
-            qt_beneficiarios: batchForm.qt_beneficiarios,
-            qt_prestadores: batchForm.qt_prestadores,
             modalidade: batchForm.modalidade,
-            porte: batchForm.porte,
             observacoes: batchForm.observacoes,
           },
           rows: parsedRows,
@@ -434,14 +422,16 @@ export default function OperadoraDataImportDialog({
     setIsParsing(false)
     setIsSubmitting(false)
     setIsLoadingOperatorContext(false)
-    setBatchForm(createDefaultBatchForm(userEmail))
+    setBatchForm({
+      ...createDefaultBatchForm(userEmail),
+      competencia: toNullableString(defaultCompetencia) || getCurrentCompetencia(),
+    })
   }
 
   function updateBatchForm(field, value) {
     setBatchForm((current) => ({
       ...current,
       [field]: value,
-      ...(field === 'qt_beneficiarios' ? { porte: computePorteFromBeneficiarios(value) } : null),
     }))
   }
 
@@ -484,9 +474,6 @@ export default function OperadoraDataImportDialog({
                 </p>
                 <p>
                   <strong>Registro ANS:</strong> {selectedOperator?.regAns ?? 'Não informado'}
-                </p>
-                <p>
-                  <strong>Porte calculado:</strong> {batchForm.porte || 'Informe a quantidade de beneficiários'}
                 </p>
               </div>
 
@@ -554,31 +541,6 @@ export default function OperadoraDataImportDialog({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="upload-beneficiarios">Quantidade de beneficiários</Label>
-                  <Input
-                    id="upload-beneficiarios"
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={batchForm.qt_beneficiarios}
-                    onChange={(event) => updateBatchForm('qt_beneficiarios', event.target.value)}
-                    disabled={isFormLocked}
-                  />
-                  <p className="text-xs text-muted-foreground">Informar a quantidade no último dia do período e ativos na ANS.</p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="upload-prestadores">Quantidade de prestadores</Label>
-                  <Input
-                    id="upload-prestadores"
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={batchForm.qt_prestadores}
-                    onChange={(event) => updateBatchForm('qt_prestadores', event.target.value)}
-                    disabled={isFormLocked}
-                  />
-                </div>
-                <div className="space-y-2">
                   <Label htmlFor="upload-modalidade">Modalidade</Label>
                   <select
                     id="upload-modalidade"
@@ -593,10 +555,6 @@ export default function OperadoraDataImportDialog({
                       </option>
                     ))}
                   </select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="upload-porte">Porte</Label>
-                  <Input id="upload-porte" value={batchForm.porte} disabled readOnly placeholder="Calculado pelos beneficiários" />
                 </div>
               </div>
 

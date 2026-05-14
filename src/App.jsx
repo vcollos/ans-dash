@@ -66,10 +66,12 @@ function ErrorState({ error, onRetry }) {
   )
 }
 
-function DashboardApp({ onLogout, accessProfile, onOpenProfile, onOpenAdminAccounts }) {
+function DashboardApp({ onLogout, accessProfile, onOpenProfile }) {
   const [filtersSidebarOpen, setFiltersSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('indicadores')
   const [isDataImportOpen, setIsDataImportOpen] = useState(false)
+  const [isAdminAccountsOpen, setIsAdminAccountsOpen] = useState(false)
+  const [uploadDefaultOperator, setUploadDefaultOperator] = useState(null)
   const {
     status,
     error,
@@ -131,6 +133,11 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile, onOpenAdminAccou
   )
   const canOpenDataImport = uploadOperators.length > 0
 
+  function handleOpenDataImport(operator = null) {
+    setUploadDefaultOperator(operator)
+    setIsDataImportOpen(true)
+  }
+
   if (status === 'loading') {
     return (
       <main className="min-h-screen w-full px-[3vw] py-[3vh]">
@@ -155,10 +162,10 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile, onOpenAdminAccou
           onOpenFilters={() => setFiltersSidebarOpen(true)}
           onLogout={onLogout}
           onOpenProfile={onOpenProfile}
-          onOpenAdminAccounts={accessProfile?.isAdmin ? onOpenAdminAccounts : null}
+          onOpenAdminAccounts={accessProfile?.isAdmin ? () => setIsAdminAccountsOpen(true) : null}
           uniodontoMode={uniodontoMode}
           onUniodontoModeChange={setUniodontoMode}
-          onOpenDataImport={() => setIsDataImportOpen(true)}
+          onOpenDataImport={() => handleOpenDataImport(null)}
           canOpenDataImport={canOpenDataImport}
         />
         <DataLoadingIndicator
@@ -306,12 +313,26 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile, onOpenAdminAccou
         </div>
         <OperadoraDataImportDialog
           open={isDataImportOpen}
-          onOpenChange={setIsDataImportOpen}
+          onOpenChange={(nextOpen) => {
+            setIsDataImportOpen(nextOpen)
+            if (!nextOpen) setUploadDefaultOperator(null)
+          }}
           allowedOperators={uploadOperators}
-          defaultOperatorName={operatorInsight?.operatorName ?? null}
-          defaultOperatorRegAns={operatorContext?.regAns ?? null}
+          defaultOperatorName={uploadDefaultOperator?.operatorName ?? operatorInsight?.operatorName ?? null}
+          defaultOperatorRegAns={uploadDefaultOperator?.regAns ?? operatorContext?.regAns ?? null}
+          defaultCompetencia={uploadDefaultOperator?.competencia ?? null}
           userEmail={accessProfile?.email ?? ''}
         />
+        {accessProfile?.isAdmin ? (
+          <AdminAccountsDialog
+            open={isAdminAccountsOpen}
+            onOpenChange={setIsAdminAccountsOpen}
+            onOpenUploadForOperator={(operator) => {
+              setIsAdminAccountsOpen(false)
+              handleOpenDataImport(operator)
+            }}
+          />
+        ) : null}
       </main>
     </div>
   )
@@ -342,7 +363,6 @@ function AppContent() {
   const [profileCompletionError, setProfileCompletionError] = useState(null)
   const [isSavingProfileCompletion, setIsSavingProfileCompletion] = useState(false)
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = useState(false)
-  const [isAdminAccountsOpen, setIsAdminAccountsOpen] = useState(false)
   const [isSendingPasswordReset, setIsSendingPasswordReset] = useState(false)
   const [passwordResetMessage, setPasswordResetMessage] = useState(null)
   const allowSignUp = import.meta.env?.VITE_ALLOW_SIGNUP !== 'false'
@@ -374,7 +394,6 @@ function AppContent() {
       setOperatorCatalog([])
       setProfileCompletionError(null)
       setIsProfileSettingsOpen(false)
-      setIsAdminAccountsOpen(false)
       setPasswordResetMessage(null)
       return
     }
@@ -649,9 +668,7 @@ function AppContent() {
         onLogout={signOut}
         accessProfile={accessProfile}
         onOpenProfile={() => setIsProfileSettingsOpen(true)}
-        onOpenAdminAccounts={() => setIsAdminAccountsOpen(true)}
       />
-      <AdminAccountsDialog open={isAdminAccountsOpen} onOpenChange={setIsAdminAccountsOpen} />
       <ProfileCompletionDialog
         open={isProfileSettingsOpen}
         onOpenChange={setIsProfileSettingsOpen}

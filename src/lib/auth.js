@@ -1,4 +1,4 @@
-import { signOut } from 'firebase/auth'
+import { onAuthStateChanged, signOut } from 'firebase/auth'
 import { auth } from './firebaseClient'
 
 const FIREBASE_AUTH_MESSAGES = {
@@ -35,8 +35,25 @@ export function getAuthErrorMessage(error, fallback = 'Falha ao autenticar.') {
   return fallback
 }
 
+function waitForAuthUser(timeoutMs = 1500) {
+  if (auth.currentUser) return Promise.resolve(auth.currentUser)
+  return new Promise((resolve) => {
+    let settled = false
+    let unsubscribe = () => {}
+    const settle = (user) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      unsubscribe()
+      resolve(user ?? auth.currentUser ?? null)
+    }
+    const timeout = setTimeout(() => settle(null), timeoutMs)
+    unsubscribe = onAuthStateChanged(auth, settle, () => settle(null))
+  })
+}
+
 async function getAuthToken() {
-  const user = auth.currentUser
+  const user = await waitForAuthUser()
   if (!user) return null
   try {
     return await user.getIdToken()
@@ -53,18 +70,37 @@ function notifyAuthExpired() {
 
 export async function fetchWithAuth(url, options = {}) {
   const headers = new Headers(options.headers ?? {})
-  const token = await getAuthToken()
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`)
-  }
-  const response = await fetch(url, { ...options, headers })
-  if (response.status === 401) {
-    try {
-      await signOut(auth)
-    } catch (err) {
-      console.warn('[auth] Falha ao encerrar sessao', err)
+  const timeoutMs = Number(options.timeoutMs ?? 30000)
+  const controller = options.signal ? null : new AbortController()
+  const timeout =
+    controller && Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? window.setTimeout(() => controller.abort(), timeoutMs)
+      : null
+  let sentAuth = false
+  if (import.meta.env.DEV && import.meta.env.VITE_DEV_AUTH_BYPASS === 'true') {
+    headers.set('X-Dev-Auth-Bypass', '1')
+    sentAuth = true
+  } else {
+    const token = await getAuthToken()
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`)
+      sentAuth = true
     }
-    notifyAuthExpired()
   }
-  return response
+  try {
+    const fetchOptions = { ...options }
+    delete fetchOptions.timeoutMs
+    const response = await fetch(url, { ...fetchOptions, headers, signal: options.signal ?? controller?.signal })
+    if (response.status === 401 && sentAuth) {
+      try {
+        await signOut(auth)
+      } catch (err) {
+        console.warn('[auth] Falha ao encerrar sessao', err)
+      }
+      notifyAuthExpired()
+    }
+    return response
+  } finally {
+    if (timeout) window.clearTimeout(timeout)
+  }
 }

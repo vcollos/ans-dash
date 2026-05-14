@@ -4,7 +4,6 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   getRedirectResult,
-  signInWithPopup,
   signInWithRedirect,
   signOut as firebaseSignOut,
   sendSignInLinkToEmail,
@@ -16,6 +15,8 @@ import { auth, googleProvider } from '../lib/firebaseClient'
 import AuthContext from './auth-context'
 
 const EMAIL_LINK_STORAGE_KEY = 'auth:emailLink'
+const DEV_AUTH_BYPASS_ENABLED = import.meta.env.DEV && import.meta.env.VITE_DEV_AUTH_BYPASS === 'true'
+const DEV_AUTH_EMAIL = import.meta.env.VITE_DEV_AUTH_EMAIL || 'vitor@collos.com.br'
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
@@ -31,7 +32,7 @@ export function AuthProvider({ children }) {
     const unsub = onAuthStateChanged(
       auth,
       (currentUser) => {
-        setUser(currentUser ?? null)
+        setUser(DEV_AUTH_BYPASS_ENABLED ? { uid: 'local-preview-admin', email: DEV_AUTH_EMAIL } : (currentUser ?? null))
         setIsLoading(false)
       },
       (error) => {
@@ -57,16 +58,8 @@ export function AuthProvider({ children }) {
 
   const signInWithGoogle = useCallback(async () => {
     setAuthError(null)
-    try {
-      const result = await signInWithPopup(auth, googleProvider)
-      return result.user
-    } catch (error) {
-      if (!['auth/popup-blocked', 'auth/cancelled-popup-request'].includes(error?.code)) {
-        throw error
-      }
-      await signInWithRedirect(auth, googleProvider)
-      return null
-    }
+    await signInWithRedirect(auth, googleProvider)
+    return null
   }, [])
 
   const sendEmailLink = useCallback(async (email, continueUrl) => {
@@ -103,7 +96,7 @@ export function AuthProvider({ children }) {
 
   const signOut = useCallback(async () => {
     await firebaseSignOut(auth)
-    setUser(null)
+    setUser(DEV_AUTH_BYPASS_ENABLED ? { uid: 'local-preview-admin', email: DEV_AUTH_EMAIL } : null)
   }, [])
 
   const sendPasswordReset = useCallback(async (email) => {
