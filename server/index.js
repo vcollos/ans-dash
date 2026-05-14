@@ -1190,9 +1190,12 @@ async function sendOnboardingEmails({ profile, status, reason }) {
 }
 
 function renderEmailTemplate(template, variables) {
-  return String(template ?? '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => {
+  const rendered = String(template ?? '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => {
     return variables[key] ?? ''
   })
+  return rendered
+    .replace(/pfc-uniodonto-assets\/logo-uniodonto-negativo\.png/g, variables.url_logo_email ?? '')
+    .replace(/pfc-uniodonto-assets\/logo-vinho-email\.png/g, variables.url_logo_email_vinho ?? '')
 }
 
 function buildProfileCompletionEmailPayload({ account, appUrl, template = {} }) {
@@ -1243,6 +1246,7 @@ const EMAIL_TEMPLATE_VARIABLES = [
   { shortcode: '{{suporte_email}}', description: 'Email institucional de suporte.' },
   { shortcode: '{{dominio_pfc}}', description: 'Domínio público do painel.' },
   { shortcode: '{{url_logo_email}}', description: 'URL pública do logo usado nos templates.' },
+  { shortcode: '{{url_logo_email_vinho}}', description: 'URL pública do logo vinho usado em fundos claros.' },
 ]
 
 function decodeHtmlEntities(value) {
@@ -1289,6 +1293,7 @@ function normalizeTemplateSource(value) {
   return String(value ?? '')
     .replace(/\{\{\s*nome\s*\}\}/g, '{{nome_usuario}}')
     .replace(/pfc-uniodonto-assets\/logo-uniodonto-negativo\.png/g, '{{url_logo_email}}')
+    .replace(/pfc-uniodonto-assets\/logo-vinho-email\.png/g, '{{url_logo_email_vinho}}')
 }
 
 function htmlToEmailText(value) {
@@ -1560,6 +1565,7 @@ function buildEmailVariables({ account = {}, profile = {}, appUrl = PFC_APP_URL,
     suporte_email: PFC_SUPPORT_EMAIL,
     dominio_pfc: publicUrl.replace(/^https?:\/\//, ''),
     url_logo_email: `${publicUrl}${EMAIL_ASSETS_PUBLIC_PATH}/logo-uniodonto-negativo.png`,
+    url_logo_email_vinho: `${publicUrl}${EMAIL_ASSETS_PUBLIC_PATH}/logo-vinho-email.png`,
     ...extra,
   }
 }
