@@ -985,7 +985,7 @@ function completeProfileFromUhubResolve(profile = {}, verification = {}) {
 }
 
 function mapUhubCooperativa(row = {}) {
-  const regAns = normalizeRegAns(row.reg_ans_operadora ?? row.codigo_ans ?? row.reg_ans ?? row.REG_ANS)
+  const regAns = normalizeRegAns(row.codigo_ans ?? row.reg_ans ?? row.REG_ANS ?? row.reg_ans_operadora)
   const operatorName =
     toNullableString(row.nome_fantasia) ||
     toNullableString(row.uniodonto) ||
@@ -1006,10 +1006,16 @@ async function listUhubOperatorCatalog({ forceRefresh = false } = {}) {
   if (!forceRefresh && uhubOperatorCatalogCache.entries.length && uhubOperatorCatalogCache.expiresAt > now) {
     return uhubOperatorCatalogCache.entries
   }
-  const payload = await uhubRequest('/api/external/catalogo/cooperativas/search', {
-    method: 'POST',
-    body: { limit: 500 },
-  })
+  let payload
+  try {
+    payload = await uhubRequest('/api/external/cooperativas')
+  } catch (err) {
+    console.warn('[server] Falha ao listar cooperativas pelo endpoint UHub principal; usando catálogo genérico', err?.message ?? err)
+    payload = await uhubRequest('/api/external/catalogo/cooperativas/search', {
+      method: 'POST',
+      body: { limit: 500 },
+    })
+  }
   const rows = Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : []
   const entries = rows
     .map(mapUhubCooperativa)
