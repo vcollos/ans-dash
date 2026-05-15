@@ -95,7 +95,7 @@ options:
 
 substitutions:
   _SERVICE: ans-dashboard
-  _REGION: southamerica-east1
+  _REGION: us-central1
   _RUN_SERVICE_ACCOUNT: ans-dashboard-run@bigdata-467917.iam.gserviceaccount.com
   _BQ_PROJECT_ID: bigdata-467917
   _BQ_DATASET: dash_ans
