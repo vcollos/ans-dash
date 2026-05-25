@@ -261,9 +261,11 @@ export async function sendAdminEmailTemplateTest({ to, template }) {
   return payload
 }
 
-export async function approveAccount(uid) {
+export async function approveAccount(uid, regAns = null) {
   const response = await fetchWithAuth(`/api/admin/accounts/${encodeURIComponent(uid)}/approve`, {
     method: 'POST',
+    headers: regAns ? { 'Content-Type': 'application/json' } : undefined,
+    body: regAns ? JSON.stringify({ regAns }) : undefined,
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
@@ -296,6 +298,17 @@ export async function assignAccountOperator(uid, regAns) {
     throw new Error(payload?.error ?? 'Falha ao vincular operadora.')
   }
   return payload?.account ?? null
+}
+
+export async function requestAccountCompletion(uid) {
+  const response = await fetchWithAuth(`/api/admin/accounts/${encodeURIComponent(uid)}/request-completion`, {
+    method: 'POST',
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao solicitar complemento cadastral.')
+  }
+  return payload?.account ?? payload ?? null
 }
 
 export async function rejectAccount(uid, reason = '') {

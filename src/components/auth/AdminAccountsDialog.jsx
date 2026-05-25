@@ -14,6 +14,7 @@ import {
   fetchAdminUploadReport,
   fetchOperatorsCatalog,
   rejectAccount,
+  requestAccountCompletion,
   updateAdminAccount,
 } from '../../lib/accessProfile'
 
@@ -185,13 +186,18 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
     setSelectedUids(new Set())
   }
 
-  async function handleApprove(uid) {
-    setActionKey(`approve:${uid}`)
+  async function handleApprove(account) {
+    const regAns = normalizeRegAns(operatorByUid[account.uid] ?? account.accessRegAns ?? account.regAns)
+    if (!regAns) {
+      setErrorMessage('Selecione uma operadora antes de aprovar a conta.')
+      return
+    }
+    setActionKey(`approve:${account.uid}`)
     setErrorMessage(null)
     try {
-      const account = await approveAccount(uid)
-      setAccounts((current) => upsertAccount(current, account))
-      toggleSelected(uid, false)
+      const approvedAccount = await approveAccount(account.uid, regAns)
+      setAccounts((current) => upsertAccount(current, approvedAccount))
+      toggleSelected(account.uid, false)
     } catch (err) {
       setErrorMessage(err?.message ?? 'Falha ao aprovar conta.')
     } finally {
@@ -260,6 +266,24 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
       setAccounts((current) => upsertAccount(current, nextAccount))
     } catch (err) {
       setErrorMessage(err?.message ?? 'Falha ao vincular operadora.')
+    } finally {
+      setActionKey(null)
+    }
+  }
+
+  async function handleRequestCompletion(account) {
+    setActionKey(`request-completion:${account.uid}`)
+    setErrorMessage(null)
+    try {
+      const nextAccount = await requestAccountCompletion(account.uid)
+      setAccounts((current) => upsertAccount(current, nextAccount))
+      setOperatorByUid((current) => {
+        const next = { ...current }
+        delete next[account.uid]
+        return next
+      })
+    } catch (err) {
+      setErrorMessage(err?.message ?? 'Falha ao solicitar complemento cadastral.')
     } finally {
       setActionKey(null)
     }
@@ -647,12 +671,23 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
                           >
                             Enviar dados
                           </Button>
+                          {!linkedOperators.length ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleRequestCompletion(account)}
+                              disabled={Boolean(actionKey)}
+                            >
+                              {actionKey === `request-completion:${account.uid}` ? 'Enviando...' : 'Solicitar cadastro'}
+                            </Button>
+                          ) : null}
                           {!approved ? (
                             <Button
                               type="button"
                               size="sm"
-                              onClick={() => handleApprove(account.uid)}
-                              disabled={Boolean(actionKey)}
+                              onClick={() => handleApprove(account)}
+                              disabled={!regAns || Boolean(actionKey)}
                             >
                               {actionKey === `approve:${account.uid}` ? 'Salvando...' : 'Aprovar'}
                             </Button>

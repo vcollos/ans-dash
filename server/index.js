@@ -185,7 +185,7 @@ const EMAIL_TEMPLATE_HTML_FILES = [
 const BRASIL_OPERATOR_REG_ANS = '314315'
 const BRASIL_OPERATOR_NAME = 'BRASIL'
 const ADMIN_EMAIL_DOMAINS = String(
-  process.env.ACCESS_ADMIN_EMAIL_DOMAINS ?? 'uniodonto.coop.br,collos.com.br,contagbr.com.br',
+  process.env.ACCESS_ADMIN_EMAIL_DOMAINS ?? 'collos.com.br',
 )
   .split(',')
   .map((item) => item.trim().toLowerCase())
@@ -2736,12 +2736,20 @@ async function approveAdminAccount(uid, reqUser, override = {}) {
     error.statusCode = 404
     throw error
   }
-  const regAns = normalizeRegAns(override.regAns ?? current.regAns)
-  let operatorName = toNullableString(override.operatorName) || current.operatorName || current.accessOperatorName || null
-  if (regAns) {
-    const operatorMetadata = await resolveOperatorMetadata(regAns)
-    operatorName = operatorMetadata?.operatorName ?? operatorName
+  const regAns = normalizeRegAns(override.regAns ?? current.accessRegAns ?? current.regAns)
+  if (!regAns) {
+    const error = new Error('Selecione uma operadora antes de aprovar a conta.')
+    error.statusCode = 400
+    throw error
   }
+  let operatorName = toNullableString(override.operatorName) || current.operatorName || current.accessOperatorName || null
+  const operatorMetadata = await resolveOperatorMetadata(regAns)
+  if (!operatorMetadata?.regAns) {
+    const error = new Error('Operadora não encontrada.')
+    error.statusCode = 400
+    throw error
+  }
+  operatorName = operatorMetadata.operatorName ?? operatorName
   await upsertApprovedUserAccess(
     { uid: normalizedUid, email: current.email },
     {
@@ -4599,7 +4607,11 @@ app.post('/api/admin/accounts/:uid/approve', async (req, res) => {
   const uid = String(req.params.uid ?? '').trim()
   if (!uid) return res.status(400).json({ error: 'UID inválido.' })
   try {
-    return res.json({ account: await approveAdminAccount(uid, req.user) })
+    return res.json({
+      account: await approveAdminAccount(uid, req.user, {
+        regAns: req.body?.regAns,
+      }),
+    })
   } catch (err) {
     console.error('[server] Falha ao aprovar conta', err)
     return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao aprovar conta.' })
