@@ -153,6 +153,18 @@ export async function fetchAdminUploadReport() {
   }
 }
 
+export async function fetchAdminUploadDetail(uploadId) {
+  const response = await fetchWithAuth(`/api/admin/uploads/${encodeURIComponent(uploadId)}`)
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao carregar dados do envio.')
+  }
+  return {
+    upload: payload?.upload ?? null,
+    rows: Array.isArray(payload?.rows) ? payload.rows : [],
+  }
+}
+
 export async function deleteAdminUpload(uploadId) {
   const response = await fetchWithAuth(`/api/admin/uploads/${encodeURIComponent(uploadId)}`, {
     method: 'DELETE',
@@ -160,6 +172,32 @@ export async function deleteAdminUpload(uploadId) {
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
     throw new Error(payload?.error ?? 'Falha ao excluir envio.')
+  }
+  return payload
+}
+
+export async function approveAdminUpload(uploadId, notes = '') {
+  const response = await fetchWithAuth(`/api/admin/uploads/${encodeURIComponent(uploadId)}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ notes }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao aprovar envio.')
+  }
+  return payload
+}
+
+export async function rejectAdminUpload(uploadId, notes = '') {
+  const response = await fetchWithAuth(`/api/admin/uploads/${encodeURIComponent(uploadId)}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ notes }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Falha ao rejeitar envio.')
   }
   return payload
 }
