@@ -1,12 +1,12 @@
 import { BigQuery } from '@google-cloud/bigquery'
 
 const PROJECT_ID = process.env.BQ_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'bigdata-467917'
-const SOURCE_DATASET_ID = process.env.BQ_SOURCE_DATASET ?? 'datalake_ans'
+const SOURCE_DATASET_ID = process.env.BQ_SOURCE_DATASET ?? 'ans_curated'
 const SOURCE_VIEW = process.env.BQ_SOURCE_NORM_VIEW ?? 'vw_demonstracoes_contabeis_norm'
 const TARGET_DATASET_ID = process.env.BQ_DATASET ?? 'dash_ans'
 const TARGET_TABLE = process.env.BQ_BASE_DEMONSTRACOES_TABLE ?? `${TARGET_DATASET_ID}.demonstracoes_contabeis`
 const TARGET_RAW_VIEW = process.env.BQ_BASE_RAW_VIEW ?? `${TARGET_DATASET_ID}.demonstracoes_contabeis_raw`
-const SOURCE_RAW_TABLE = process.env.BQ_SOURCE_RAW_TABLE ?? `${SOURCE_DATASET_ID}.demonstracoes_contabeis_raw`
+const SOURCE_RAW_TABLE = process.env.BQ_SOURCE_RAW_TABLE ?? `${PROJECT_ID}.datalake_ans.demonstracoes_contabeis_raw`
 const LOCATION = process.env.BQ_LOCATION ?? 'southamerica-east1'
 
 function qualify(name, defaultDataset = TARGET_DATASET_ID) {

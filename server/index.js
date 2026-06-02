@@ -3647,6 +3647,18 @@ function buildConsolidatedIndicatorSnapshotQuery() {
       FROM ${officialSnapshot} official
       LEFT JOIN uhub_operadoras_dim uop
         ON CAST(official.reg_ans AS STRING) = uop.reg_ans
+    ), official_latest_stats AS (
+      SELECT
+        reg_ans,
+        qt_beneficiarios,
+        qt_prestadores
+      FROM official_base
+      WHERE qt_beneficiarios IS NOT NULL
+         OR qt_prestadores IS NOT NULL
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY reg_ans
+        ORDER BY ano DESC, trimestre DESC
+      ) = 1
     ), external_base AS (
       SELECT
         SAFE_CAST(src.reg_ans AS INT64) AS reg_ans,
@@ -3684,7 +3696,12 @@ function buildConsolidatedIndicatorSnapshotQuery() {
             ELSE NULL
           END
         ) AS ativa,
-        MAX(SAFE_CAST(src.qt_beneficiarios AS INT64)) AS qt_beneficiarios,
+        COALESCE(
+          MAX(SAFE_CAST(src.qt_beneficiarios AS INT64)),
+          MAX(SAFE_CAST(obm_p.Beneficiarios AS INT64)),
+          MAX(SAFE_CAST(obm_l.Beneficiarios AS INT64)),
+          MAX(official_latest_stats.qt_beneficiarios)
+        ) AS qt_beneficiarios,
         COALESCE(
           MAX(IF(src.porte IS NOT NULL AND src.porte <> '', CAST(src.porte AS STRING), NULL)),
           MAX(IF(obm_p.porte IS NOT NULL AND obm_p.porte <> '', CAST(obm_p.porte AS STRING), NULL)),
@@ -3733,7 +3750,10 @@ function buildConsolidatedIndicatorSnapshotQuery() {
         SUM(IF(src.cd_conta_contabil = '2521', COALESCE(SAFE_CAST(src.vl_saldo_final AS FLOAT64), 0), 0)) AS vr_pl_ajustado,
         SUM(IF(src.cd_conta_contabil = '2522', COALESCE(SAFE_CAST(src.vl_saldo_final AS FLOAT64), 0), 0)) AS vr_margem_solvencia_exigida,
         SUM(IF(src.cd_conta_contabil = '61', COALESCE(SAFE_CAST(src.vl_saldo_final AS FLOAT64), 0), 0)) AS vr_conta_61,
-        MAX(SAFE_CAST(src.qt_prestadores AS INT64)) AS qt_prestadores
+        COALESCE(
+          MAX(SAFE_CAST(src.qt_prestadores AS INT64)),
+          MAX(official_latest_stats.qt_prestadores)
+        ) AS qt_prestadores
       FROM ${auxLatest} src
       LEFT JOIN obm_period obm_p
         ON CAST(src.reg_ans AS STRING) = obm_p.reg_ans
@@ -3746,6 +3766,8 @@ function buildConsolidatedIndicatorSnapshotQuery() {
         ON CAST(src.reg_ans AS STRING) = ud.reg_ans
       LEFT JOIN uhub_operadoras_dim uop
         ON CAST(src.reg_ans AS STRING) = uop.reg_ans
+      LEFT JOIN official_latest_stats
+        ON SAFE_CAST(src.reg_ans AS INT64) = official_latest_stats.reg_ans
       WHERE src.ano IS NOT NULL
         AND src.trimestre IS NOT NULL
         AND LOWER(TRIM(COALESCE(src.modalidade, obm_p.modalidade, obm_l.modalidade, op.modalidade, ''))) IN (
