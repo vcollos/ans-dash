@@ -404,7 +404,7 @@ function getMailTransporter() {
   return mailTransporter
 }
 
-const AUTH_PUBLIC_PATHS = new Set(['/api/health', '/api/auth/status', '/api/onboarding/operators'])
+const AUTH_PUBLIC_PATHS = new Set(['/api/health', '/api/auth/status', '/api/auth/password-reset', '/api/onboarding/operators'])
 const AUTH_SKIP_ACCESS_CONTEXT_PATHS = new Set([
   '/api/auth/profile',
   '/api/auth/profile/complete',
@@ -1607,6 +1607,57 @@ async function sendProfileCompletionRequestEmail({ account, appUrl, template }) 
     html: payload.html,
   }, { required: true })
   return payload
+}
+
+async function sendPasswordResetTemplateEmail({ email, appUrl }) {
+  const userEmail = normalizeEmail(email)
+  if (!userEmail) {
+    const error = new Error('Informe um e-mail válido.')
+    error.statusCode = 400
+    throw error
+  }
+
+  let user
+  try {
+    user = await admin.auth().getUserByEmail(userEmail)
+  } catch (err) {
+    if (err?.code === 'auth/user-not-found') {
+      return { sent: false, reason: 'user_not_found' }
+    }
+    throw err
+  }
+
+  const resetLink = await admin.auth().generatePasswordResetLink(userEmail, {
+    url: String(appUrl || PFC_APP_URL).replace(/\/+$/, ''),
+  })
+  const displayName = String(user.displayName ?? '').trim()
+  const [firstName = '', ...lastNameParts] = displayName.split(/\s+/).filter(Boolean)
+  const variables = buildEmailVariables({
+    account: {
+      email: userEmail,
+      firstName,
+      lastName: lastNameParts.join(' '),
+    },
+    appUrl,
+    extra: {
+      link_redefinicao_senha: resetLink,
+    },
+  })
+  const payload = await buildConfiguredEmailPayload('recuperacao-senha', variables, {
+    subject: 'Redefina sua senha de acesso ao PFC',
+    text: [
+      'Recebemos uma solicitação para redefinir a senha vinculada ao seu acesso no Painel Financeiro Contábil.',
+      `Redefinir senha: ${resetLink}`,
+      'Se não reconhece esta solicitação, ignore esta mensagem.',
+    ].join('\n\n'),
+  })
+  await sendTransactionalEmail({
+    to: userEmail,
+    subject: payload.subject,
+    text: payload.text,
+    html: payload.html,
+  }, { required: true })
+  return { sent: true }
 }
 
 function maskSecret(value) {
@@ -4217,6 +4268,22 @@ app.use(authMiddleware)
 app.get('/api/auth/status', (req, res) => {
   res.setHeader('Cache-Control', 'no-store')
   res.json({ enabled: true, bootId: SERVER_BOOT_ID, projectId: FIREBASE_PROJECT_ID ?? null })
+})
+
+app.post('/api/auth/password-reset', async (req, res) => {
+  try {
+    await sendPasswordResetTemplateEmail({
+      email: req.body?.email,
+      appUrl: req.get?.('origin') ?? PFC_APP_URL,
+    })
+    return res.json({ ok: true })
+  } catch (err) {
+    if (err?.statusCode === 400) {
+      return res.status(400).json({ error: err.message })
+    }
+    console.error('[server] Falha ao enviar recuperação de senha', err)
+    return res.status(err?.statusCode ?? 500).json({ error: 'Falha ao enviar e-mail de redefinição de senha.' })
+  }
 })
 
 app.get('/api/auth/profile', async (req, res) => {

@@ -9,7 +9,6 @@ import {
   sendSignInLinkToEmail,
   isSignInWithEmailLink,
   signInWithEmailLink,
-  sendPasswordResetEmail,
 } from 'firebase/auth'
 import { auth, googleProvider } from '../lib/firebaseClient'
 import AuthContext from './auth-context'
@@ -106,7 +105,15 @@ export function AuthProvider({ children }) {
     if (!target) {
       throw new Error('Não foi possível identificar o e-mail da conta.')
     }
-    await sendPasswordResetEmail(auth, target)
+    const response = await fetch('/api/auth/password-reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: target }),
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(payload?.error ?? 'Falha ao enviar e-mail de redefinição de senha.')
+    }
     return target
   }, [])
 
