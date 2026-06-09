@@ -26,6 +26,7 @@ import { useAuth } from './contexts/useAuth'
 import { UNIODONTO_INDICATORS } from './lib/uniodontoMetrics'
 import { fetchAccessProfile, fetchOperatorsCatalog, saveProfileCompletion } from './lib/accessProfile'
 import { getAuthErrorMessage } from './lib/auth'
+import { identifyAnalyticsUser, trackAppEvent } from './lib/analytics'
 
 function LoadingState() {
   return (
@@ -440,6 +441,11 @@ function AppContent() {
       .then((profile) => {
         if (cancelled) return
         setAccessProfile(profile)
+        identifyAnalyticsUser({ uid: userUid, email: userEmail }, profile)
+        trackAppEvent('user_access_loaded', {
+          is_admin: profile?.isAdmin ? 'true' : 'false',
+          access_granted: profile?.canAccess === false ? 'false' : 'true',
+        })
       })
       .catch((err) => {
         if (cancelled) return
@@ -498,7 +504,9 @@ function AppContent() {
     setIsAuthLoading(true)
     setAuthMessage(null)
     try {
-      await signInWithEmail(email, password)
+      const signedInUser = await signInWithEmail(email, password)
+      identifyAnalyticsUser(signedInUser, { email })
+      trackAppEvent('login_success', { method: 'password', email_domain: email.split('@')[1]?.toLowerCase() ?? '' })
     } catch (err) {
       setAuthMessage(getAuthErrorMessage(err, 'Falha ao autenticar.'))
     } finally {
@@ -510,7 +518,9 @@ function AppContent() {
     setIsAuthLoading(true)
     setAuthMessage(null)
     try {
-      await signInWithGoogle()
+      const signedInUser = await signInWithGoogle()
+      identifyAnalyticsUser(signedInUser)
+      trackAppEvent('login_success', { method: 'google' })
     } catch (err) {
       setAuthMessage(getAuthErrorMessage(err, 'Falha ao autenticar com Google.'))
     } finally {
@@ -571,6 +581,7 @@ function AppContent() {
     setAuthMessage(null)
     try {
       const targetEmail = await sendPasswordReset(email)
+      trackAppEvent('password_reset_requested', { email_domain: targetEmail.split('@')[1]?.toLowerCase() ?? '' })
       setAuthMessage(`E-mail de redefinição enviado para ${targetEmail}.`)
     } catch (err) {
       setAuthMessage(getAuthErrorMessage(err, 'Falha ao enviar e-mail de redefinição de senha.'))
@@ -602,6 +613,7 @@ function AppContent() {
     setPasswordResetMessage(null)
     try {
       const targetEmail = await sendPasswordReset(accessProfile?.email ?? userEmail)
+      trackAppEvent('password_reset_requested', { email_domain: targetEmail.split('@')[1]?.toLowerCase() ?? '' })
       setPasswordResetMessage(`E-mail de redefinição enviado para ${targetEmail}.`)
     } catch (err) {
       setProfileCompletionError(err?.message ?? 'Falha ao enviar e-mail de redefinição de senha.')
