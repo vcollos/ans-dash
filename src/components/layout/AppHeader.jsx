@@ -30,12 +30,12 @@ function AppHeader({
   const headerSubtitle = uniodontoMode ? 'Indicadores exclusivos do sistema Uniodonto.' : 'DIOPS Financeiro'
 
   return (
-    <header className="sticky top-2 z-30 flex flex-col gap-5 rounded-2xl border bg-card/95 p-5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/80 sm:p-6 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
-      <div className="space-y-4 lg:max-w-[520px]">
-        <div className="flex items-center gap-4">
-          <img src={uniodontoLogo} alt="Uniodonto" className="h-14 w-auto" />
+    <header className="z-30 flex flex-col gap-5 rounded-2xl border bg-card/95 p-5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/80 sm:p-6 lg:sticky lg:top-2 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
+      <div className="min-w-0 space-y-4 lg:max-w-[520px]">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+          <img src={uniodontoLogo} alt="Uniodonto" className="h-10 w-auto max-w-full sm:h-14" />
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold leading-tight">{headerTitle}</h1>
+            <h1 className="text-xl font-semibold leading-tight sm:text-2xl">{headerTitle}</h1>
             <p className="text-sm font-medium text-muted-foreground">{headerSubtitle}</p>
           </div>
         </div>

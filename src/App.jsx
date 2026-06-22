@@ -272,12 +272,14 @@ function DashboardApp({ onLogout, accessProfile, onOpenProfile }) {
         ) : null}
         <div className="space-y-6 min-w-0">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="w-fit">
-              <TabsTrigger value="indicadores">Indicadores</TabsTrigger>
-              <TabsTrigger value="ranking">Ranking</TabsTrigger>
-              <TabsTrigger value="historico">Gráficos históricos</TabsTrigger>
-              <TabsTrigger value="documentacao">Documentação</TabsTrigger>
-            </TabsList>
+            <div className="max-w-full overflow-x-auto pb-1 scrollbar-thin">
+              <TabsList className="w-max">
+                <TabsTrigger value="indicadores">Indicadores</TabsTrigger>
+                <TabsTrigger value="ranking">Ranking</TabsTrigger>
+                <TabsTrigger value="historico">Gráficos históricos</TabsTrigger>
+                <TabsTrigger value="documentacao">Documentação</TabsTrigger>
+              </TabsList>
+            </div>
             <TabsContent value="indicadores" className="mt-6 space-y-6">
               {uniodontoMode ? (
                 <UniodontoKpiCards
