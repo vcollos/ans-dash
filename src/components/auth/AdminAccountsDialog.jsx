@@ -5,20 +5,29 @@ import { Dialog, DialogContent, DialogHeader } from '../ui/dialog'
 import AdminEmailTemplatesPanel from './AdminEmailTemplatesPanel'
 import {
   approveAccount,
+  approveAdminUpload,
   assignAccountOperator,
   bulkApproveAccounts,
   createAdminAccount,
   deleteAdminAccount,
   deleteAdminUpload,
   fetchAdminAccounts,
+  fetchAdminUploadDetail,
   fetchAdminUploadReport,
   fetchOperatorsCatalog,
+  rejectAdminUpload,
   rejectAccount,
   requestAccountCompletion,
   updateAdminAccount,
 } from '../../lib/accessProfile'
 
 const APPROVED_STATUSES = new Set(['auto_aprovado', 'aprovado_manual'])
+const UPLOAD_APPROVAL_STATUS = {
+  PENDING: 'PENDENTE',
+  APPROVED: 'APROVADO',
+  REJECTED: 'REJEITADO',
+  NOT_SENT: 'NAO_ENVIADO',
+}
 const EMPTY_NEW_ACCOUNT = {
   firstName: '',
   lastName: '',
@@ -72,6 +81,70 @@ function formatDateTime(value) {
   })
 }
 
+function formatMoney(value) {
+  if (value === null || value === undefined || value === '') return '—'
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '—'
+  return numeric.toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    maximumFractionDigits: 2,
+  })
+}
+
+function formatNumeric(value) {
+  if (value === null || value === undefined || value === '') return '—'
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '—'
+  return numeric.toLocaleString('pt-BR', { maximumFractionDigits: 2 })
+}
+
+function getUploadStatusMeta(status) {
+  if (status === UPLOAD_APPROVAL_STATUS.APPROVED) {
+    return {
+      label: 'Aprovado',
+      className: 'rounded bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-700',
+    }
+  }
+  if (status === UPLOAD_APPROVAL_STATUS.REJECTED) {
+    return {
+      label: 'Rejeitado',
+      className: 'rounded bg-destructive/10 px-2 py-1 text-xs font-semibold text-destructive',
+    }
+  }
+  if (status === UPLOAD_APPROVAL_STATUS.PENDING) {
+    return {
+      label: 'Pendente aprovação',
+      className: 'rounded bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-700',
+    }
+  }
+  return {
+    label: 'Pendente envio',
+    className: 'rounded bg-muted px-2 py-1 text-xs font-semibold text-muted-foreground',
+  }
+}
+
+function findAccountValue(rows = [], code) {
+  const row = rows.find((item) => String(item?.cdContaContabil ?? '').trim() === code)
+  return Number.isFinite(Number(row?.vlSaldoFinal)) ? Number(row.vlSaldoFinal) : null
+}
+
+function buildUploadCheckItems(rows = []) {
+  const ativo = findAccountValue(rows, '1')
+  const passivo = findAccountValue(rows, '2')
+  const receitas = findAccountValue(rows, '3')
+  const despesas = findAccountValue(rows, '4')
+  return [
+    { label: 'Linhas', value: rows.length.toLocaleString('pt-BR') },
+    { label: 'Conta 1 - Ativo', value: formatMoney(ativo) },
+    { label: 'Conta 2 - Passivo/PL', value: formatMoney(passivo) },
+    { label: 'Dif. Ativo - Conta 2', value: ativo === null || passivo === null ? '—' : formatMoney(ativo - passivo) },
+    { label: 'Conta 3 - Receitas', value: formatMoney(receitas) },
+    { label: 'Conta 4 - Despesas', value: formatMoney(despesas) },
+    { label: 'Resultado 3 - 4', value: receitas === null || despesas === null ? '—' : formatMoney(receitas - despesas) },
+  ]
+}
+
 function accountToEditForm(account = {}) {
   return {
     firstName: account.firstName ?? '',
@@ -95,6 +168,9 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
   const [operatorByUid, setOperatorByUid] = useState({})
   const [editingUid, setEditingUid] = useState(null)
   const [editAccount, setEditAccount] = useState(EMPTY_EDIT_ACCOUNT)
+  const [uploadDetail, setUploadDetail] = useState(null)
+  const [isUploadDetailLoading, setIsUploadDetailLoading] = useState(false)
+  const [uploadDetailSearch, setUploadDetailSearch] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [actionKey, setActionKey] = useState(null)
   const [errorMessage, setErrorMessage] = useState(null)
@@ -130,11 +206,46 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
     })
   }, [accountSearch, accounts])
   const allVisibleSelected = filteredAccounts.length > 0 && filteredAccounts.every((account) => selectedUids.has(account.uid))
+  const uploadDetailRows = useMemo(() => uploadDetail?.rows ?? [], [uploadDetail])
+  const uploadDetailCheckItems = useMemo(() => buildUploadCheckItems(uploadDetailRows), [uploadDetailRows])
+  const filteredUploadDetailRows = useMemo(() => {
+    const query = normalizeSearchText(uploadDetailSearch).trim()
+    if (!query) return uploadDetailRows
+    return uploadDetailRows.filter((row) => {
+      const text = normalizeSearchText(
+        [
+          row.cdContaContabil,
+          row.descricao,
+          row.statusFechamento,
+          row.tipoEnvio,
+          row.modalidade,
+          row.porte,
+          row.observacoes,
+        ].join(' '),
+      )
+      return text.includes(query)
+    })
+  }, [uploadDetailRows, uploadDetailSearch])
 
   async function reloadUploadReport() {
     const report = await fetchAdminUploadReport()
     setUploadReport(report)
     return report
+  }
+
+  async function loadUploadDetail(uploadId) {
+    setIsUploadDetailLoading(true)
+    setErrorMessage(null)
+    try {
+      const detail = await fetchAdminUploadDetail(uploadId)
+      setUploadDetail(detail)
+      return detail
+    } catch (err) {
+      setErrorMessage(err?.message ?? 'Falha ao carregar dados do envio.')
+      throw err
+    } finally {
+      setIsUploadDetailLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -386,12 +497,65 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
     try {
       await deleteAdminUpload(uploadId)
       await reloadUploadReport()
+      if (uploadDetail?.upload?.uploadId === uploadId) {
+        setUploadDetail(null)
+        setUploadDetailSearch('')
+      }
     } catch (err) {
       setErrorMessage(err?.message ?? 'Falha ao excluir envio.')
     } finally {
       setActionKey(null)
     }
   }
+
+  async function handleViewUpload(row) {
+    const uploadId = row?.upload?.uploadId
+    if (!uploadId) return
+    setUploadDetailSearch('')
+    await loadUploadDetail(uploadId).catch(() => null)
+  }
+
+  async function handleApproveUpload(row) {
+    const uploadId = row?.upload?.uploadId
+    if (!uploadId) return
+    setActionKey(`approve-upload:${uploadId}`)
+    setErrorMessage(null)
+    try {
+      await approveAdminUpload(uploadId)
+      await reloadUploadReport()
+      if (uploadDetail?.upload?.uploadId === uploadId) {
+        await loadUploadDetail(uploadId)
+      }
+    } catch (err) {
+      setErrorMessage(err?.message ?? 'Falha ao aprovar envio.')
+    } finally {
+      setActionKey(null)
+    }
+  }
+
+  async function handleRejectUpload(row) {
+    const uploadId = row?.upload?.uploadId
+    if (!uploadId) return
+    const notes = window.prompt('Motivo da rejeição do envio:', row.upload?.approvalNotes ?? '')
+    if (notes === null) return
+    setActionKey(`reject-upload:${uploadId}`)
+    setErrorMessage(null)
+    try {
+      await rejectAdminUpload(uploadId, notes)
+      await reloadUploadReport()
+      if (uploadDetail?.upload?.uploadId === uploadId) {
+        await loadUploadDetail(uploadId)
+      }
+    } catch (err) {
+      setErrorMessage(err?.message ?? 'Falha ao rejeitar envio.')
+    } finally {
+      setActionKey(null)
+    }
+  }
+
+  const detailUpload = uploadDetail?.upload ?? null
+  const detailStatusMeta = getUploadStatusMeta(detailUpload?.approvalStatus)
+  const detailCanModerate = Boolean(detailUpload?.uploadId) && detailUpload?.approvalStatus === UPLOAD_APPROVAL_STATUS.PENDING
 
   const panel = (
         <div className={inline ? 'flex min-h-0 flex-col rounded-lg border bg-background shadow-sm' : 'flex max-h-[calc(100dvh-2rem)] flex-col'}>
@@ -464,7 +628,7 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
                     <div>
                       <h3 className="text-sm font-semibold">Envios de balancete</h3>
                       <p className="text-xs text-muted-foreground">
-                        {uploadReport.summary?.sent ?? 0} enviado(s) · {uploadReport.summary?.pending ?? 0} pendente(s)
+                        {uploadReport.summary?.sent ?? 0} recebido(s) · {uploadReport.summary?.pending ?? 0} aguardando aprovação · {uploadReport.summary?.approved ?? 0} aprovado(s)
                       </p>
                     </div>
                   </div>
@@ -485,54 +649,94 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
                       </thead>
                       <tbody>
                         {uploadReport.rows.length ? (
-                          uploadReport.rows.map((row) => (
-                            <tr key={`${row.regAns}-${row.competencia ?? 'sem-periodo'}`} className="border-t">
-                              <td className="px-3 py-2 font-medium">{row.operatorName}</td>
-                              <td className="px-3 py-2">{row.regAns}</td>
-                              <td className="px-3 py-2">{row.competencia ?? '—'}</td>
-                              <td className="px-3 py-2">
-                                <span
-                                  className={
-                                    row.status === 'enviado'
-                                      ? 'rounded bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-700'
-                                      : 'rounded bg-muted px-2 py-1 text-xs font-semibold text-muted-foreground'
-                                  }
-                                >
-                                  {row.status === 'enviado' ? 'Enviado' : 'Pendente'}
-                                </span>
-                              </td>
-                              <td className="px-3 py-2">{formatDateTime(row.upload?.uploadedAt)}</td>
-                              <td className="px-3 py-2">
-                                {row.upload?.responsavelEmail ?? row.upload?.uploadedByEmail ?? '—'}
-                              </td>
-                              <td className="px-3 py-2">{row.upload?.sourceFileName ?? '—'}</td>
-                              <td className="px-3 py-2">{row.upload?.rowCount ?? '—'}</td>
-                              <td className="px-3 py-2">
-                                <div className="flex flex-wrap gap-2">
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleOpenUploadForReportRow(row)}
-                                    disabled={Boolean(actionKey)}
-                                  >
-                                    {row.status === 'enviado' ? 'Atualizar' : 'Enviar'}
-                                  </Button>
-                                  {row.upload?.uploadId ? (
+                          uploadReport.rows.map((row) => {
+                            const statusMeta = getUploadStatusMeta(row.status)
+                            const canModerate = Boolean(row.upload?.uploadId) && row.status === UPLOAD_APPROVAL_STATUS.PENDING
+                            return (
+                              <tr key={`${row.regAns}-${row.competencia ?? 'sem-periodo'}`} className="border-t">
+                                <td className="px-3 py-2 font-medium">{row.operatorName}</td>
+                                <td className="px-3 py-2">{row.regAns}</td>
+                                <td className="px-3 py-2">{row.competencia ?? '—'}</td>
+                                <td className="px-3 py-2">
+                                  <span className={statusMeta.className}>{statusMeta.label}</span>
+                                  {row.upload?.approvedByEmail ? (
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                      por {row.upload.approvedByEmail}
+                                    </p>
+                                  ) : null}
+                                  {row.upload?.rejectedByEmail ? (
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                      por {row.upload.rejectedByEmail}
+                                    </p>
+                                  ) : null}
+                                </td>
+                                <td className="px-3 py-2">{formatDateTime(row.upload?.uploadedAt)}</td>
+                                <td className="px-3 py-2">
+                                  {row.upload?.responsavelEmail ?? row.upload?.uploadedByEmail ?? '—'}
+                                </td>
+                                <td className="px-3 py-2">{row.upload?.sourceFileName ?? '—'}</td>
+                                <td className="px-3 py-2">{row.upload?.rowCount ?? '—'}</td>
+                                <td className="px-3 py-2">
+                                  <div className="flex flex-wrap gap-2">
+                                    {row.upload?.uploadId ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => handleViewUpload(row)}
+                                        disabled={Boolean(actionKey) || isUploadDetailLoading}
+                                      >
+                                        {isUploadDetailLoading && uploadDetail?.upload?.uploadId === row.upload.uploadId
+                                          ? 'Abrindo...'
+                                          : 'Visualizar'}
+                                      </Button>
+                                    ) : null}
                                     <Button
                                       type="button"
                                       size="sm"
                                       variant="outline"
-                                      onClick={() => handleDeleteUpload(row)}
+                                      onClick={() => handleOpenUploadForReportRow(row)}
                                       disabled={Boolean(actionKey)}
                                     >
-                                      {actionKey === `delete-upload:${row.upload.uploadId}` ? 'Excluindo...' : 'Excluir'}
+                                      {row.upload?.uploadId ? 'Atualizar' : 'Enviar'}
                                     </Button>
-                                  ) : null}
-                                </div>
-                              </td>
-                            </tr>
-                          ))
+                                    {canModerate ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        onClick={() => handleApproveUpload(row)}
+                                        disabled={Boolean(actionKey)}
+                                      >
+                                        {actionKey === `approve-upload:${row.upload.uploadId}` ? 'Aprovando...' : 'Aprovar'}
+                                      </Button>
+                                    ) : null}
+                                    {canModerate ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => handleRejectUpload(row)}
+                                        disabled={Boolean(actionKey)}
+                                      >
+                                        {actionKey === `reject-upload:${row.upload.uploadId}` ? 'Rejeitando...' : 'Rejeitar'}
+                                      </Button>
+                                    ) : null}
+                                    {row.upload?.uploadId ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => handleDeleteUpload(row)}
+                                        disabled={Boolean(actionKey)}
+                                      >
+                                        {actionKey === `delete-upload:${row.upload.uploadId}` ? 'Excluindo...' : 'Excluir'}
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })
                         ) : (
                           <tr>
                             <td className="px-3 py-4 text-muted-foreground" colSpan={9}>
@@ -824,15 +1028,173 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
         </div>
   )
 
+  const detailDialog = (
+    <Dialog
+      open={Boolean(uploadDetail) || isUploadDetailLoading}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) return
+        setUploadDetail(null)
+        setUploadDetailSearch('')
+        setIsUploadDetailLoading(false)
+      }}
+    >
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-hidden p-0 sm:max-w-6xl">
+        <div className="flex max-h-[calc(100dvh-2rem)] flex-col">
+          <div className="border-b px-6 py-5">
+            <DialogHeader>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold leading-none tracking-tight">Conferência do envio</h2>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {detailUpload
+                      ? `${detailUpload.operatorName ?? 'Operadora'} · ${detailUpload.regAns ?? 'sem reg. ANS'} · ${detailUpload.competencia ?? 'sem período'}`
+                      : 'Carregando dados do envio...'}
+                  </p>
+                </div>
+                {detailUpload ? <span className={detailStatusMeta.className}>{detailStatusMeta.label}</span> : null}
+              </div>
+            </DialogHeader>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+            {isUploadDetailLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Carregando linhas do balancete...
+              </div>
+            ) : detailUpload ? (
+              <div className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-7">
+                  {uploadDetailCheckItems.map((item) => (
+                    <div key={item.label} className="rounded-md border bg-muted/20 px-3 py-2">
+                      <p className="text-[11px] font-semibold uppercase text-muted-foreground">{item.label}</p>
+                      <p className="mt-1 text-sm font-semibold">{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid gap-3 rounded-md border bg-muted/20 px-3 py-3 text-sm md:grid-cols-3">
+                  <p>
+                    <span className="font-semibold">Arquivo:</span> {detailUpload.sourceFileName ?? '—'}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Enviado em:</span> {formatDateTime(detailUpload.uploadedAt)}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Enviado por:</span>{' '}
+                    {detailUpload.responsavelEmail ?? detailUpload.uploadedByEmail ?? '—'}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <input
+                    type="search"
+                    value={uploadDetailSearch}
+                    onChange={(event) => setUploadDetailSearch(event.target.value)}
+                    placeholder="Buscar conta, descrição, status ou observação"
+                    className="min-w-[280px] flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    {filteredUploadDetailRows.length.toLocaleString('pt-BR')} de {uploadDetailRows.length.toLocaleString('pt-BR')} linha(s)
+                  </p>
+                </div>
+
+                <div className="max-h-[48vh] overflow-auto rounded-md border">
+                  <table className="w-full min-w-[1080px] text-sm">
+                    <thead className="sticky top-0 bg-muted text-left text-xs uppercase text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2">Conta</th>
+                        <th className="px-3 py-2">Descrição</th>
+                        <th className="px-3 py-2 text-right">Saldo inicial</th>
+                        <th className="px-3 py-2 text-right">Débitos</th>
+                        <th className="px-3 py-2 text-right">Créditos</th>
+                        <th className="px-3 py-2 text-right">Saldo final</th>
+                        <th className="px-3 py-2">Meta</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredUploadDetailRows.length ? (
+                        filteredUploadDetailRows.map((row, index) => (
+                          <tr key={`${row.cdContaContabil}-${index}`} className="border-t">
+                            <td className="px-3 py-2 font-mono text-xs">{row.cdContaContabil}</td>
+                            <td className="px-3 py-2">{row.descricao ?? '—'}</td>
+                            <td className="px-3 py-2 text-right">{formatMoney(row.vlSaldoInicial)}</td>
+                            <td className="px-3 py-2 text-right">{formatMoney(row.vlDebitos)}</td>
+                            <td className="px-3 py-2 text-right">{formatMoney(row.vlCreditos)}</td>
+                            <td className="px-3 py-2 text-right font-semibold">{formatMoney(row.vlSaldoFinal)}</td>
+                            <td className="px-3 py-2 text-xs text-muted-foreground">
+                              {[
+                                row.statusFechamento,
+                                row.tipoEnvio,
+                                row.versaoEnvio ? `v${formatNumeric(row.versaoEnvio)}` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(' · ') || '—'}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td className="px-3 py-4 text-muted-foreground" colSpan={7}>
+                            Nenhuma linha encontrada para a busca.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Nenhum envio selecionado.</p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-2 border-t px-6 py-4">
+            <Button type="button" variant="outline" onClick={() => setUploadDetail(null)}>
+              Fechar
+            </Button>
+            {detailCanModerate ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => handleRejectUpload({ upload: detailUpload })}
+                disabled={Boolean(actionKey)}
+              >
+                {actionKey === `reject-upload:${detailUpload.uploadId}` ? 'Rejeitando...' : 'Rejeitar'}
+              </Button>
+            ) : null}
+            {detailCanModerate ? (
+              <Button
+                type="button"
+                onClick={() => handleApproveUpload({ upload: detailUpload })}
+                disabled={Boolean(actionKey)}
+              >
+                {actionKey === `approve-upload:${detailUpload.uploadId}` ? 'Aprovando...' : 'Aprovar e publicar'}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+
   if (inline) {
-    return panel
+    return (
+      <>
+        {panel}
+        {detailDialog}
+      </>
+    )
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-hidden p-0 sm:max-w-5xl">
-        {panel}
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-hidden p-0 sm:max-w-5xl">
+          {panel}
+        </DialogContent>
+      </Dialog>
+      {detailDialog}
+    </>
   )
 }

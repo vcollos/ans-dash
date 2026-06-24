@@ -636,8 +636,13 @@ export default function OperadoraDataImportDialog({
                 <div className="space-y-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4" />
-                    <span>Upload concluído com sucesso.</span>
+                    <span>{uploadResult.message ?? 'Upload concluído com sucesso.'}</span>
                   </div>
+                  {uploadResult.approvalStatus ? (
+                    <p>
+                      <strong>Status:</strong> {uploadResult.approvalStatus}
+                    </p>
+                  ) : null}
                   <p>
                     <strong>Upload ID:</strong> {uploadResult.uploadId}
                   </p>

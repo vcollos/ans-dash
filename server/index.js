@@ -49,6 +49,8 @@ const DEMONSTRACOES_EXAMPLE_CSV = `cd_conta_contabil;vl_saldo_final
 21;500000.00`
 const BQ_AUX_DATASET = process.env.BQ_AUX_DATASET ?? DEFAULT_BQ_AUX_DATASET
 const BQ_AUX_DEMONSTRACOES_TABLE = process.env.BQ_AUX_DEMONSTRACOES_TABLE ?? 'demonstracoes_contabeis_auxiliar'
+const BQ_AUX_DEMONSTRACOES_UPLOADS_TABLE =
+  process.env.BQ_AUX_DEMONSTRACOES_UPLOADS_TABLE ?? 'demonstracoes_contabeis_uploads'
 const BQ_AUX_DEMONSTRACOES_LATEST_VIEW =
   process.env.BQ_AUX_DEMONSTRACOES_LATEST_VIEW ?? 'vw_demonstracoes_contabeis_auxiliar_latest'
 const BQ_USER_ACCESS_TABLE = process.env.BQ_USER_ACCESS_TABLE ?? 'user_operadora_acessos'
@@ -249,6 +251,7 @@ function parseTableRef(rawValue, defaultDataset = BQ_DATASET) {
 }
 
 const AUX_DEMONSTRACOES_TABLE_REF = parseTableRef(BQ_AUX_DEMONSTRACOES_TABLE, BQ_AUX_DATASET)
+const AUX_DEMONSTRACOES_UPLOADS_TABLE_REF = parseTableRef(BQ_AUX_DEMONSTRACOES_UPLOADS_TABLE, BQ_AUX_DATASET)
 const AUX_DEMONSTRACOES_LATEST_VIEW_REF = parseTableRef(BQ_AUX_DEMONSTRACOES_LATEST_VIEW, BQ_AUX_DATASET)
 const USER_ACCESS_TABLE_REF = parseTableRef(BQ_USER_ACCESS_TABLE, BQ_MART_DATASET)
 const USER_PROFILE_TABLE_REF = parseTableRef(BQ_USER_PROFILE_TABLE, BQ_MART_DATASET)
@@ -278,6 +281,11 @@ const BQ_EXECUTE = process.env.BQ_EXECUTE === 'true'
 const DEFAULT_DEMONSTRACOES_STATUS = 'FECHADO'
 const DEFAULT_DEMONSTRACOES_TIPO_ENVIO = 'NORMAL'
 const DEFAULT_DEMONSTRACOES_MODALIDADE = 'Cooperativa odontológica'
+const DEMONSTRACOES_APPROVAL_STATUS = Object.freeze({
+  PENDING: 'PENDENTE',
+  APPROVED: 'APROVADO',
+  REJECTED: 'REJEITADO',
+})
 
 const queryCache = new Map()
 const inFlightQueries = new Map()
@@ -3119,20 +3127,59 @@ function mapUploadReportRow(row = {}) {
   return {
     uploadId: toNullableString(row?.upload_id),
     uploadedAt: serializeFirestoreTimestamp(row?.uploaded_at),
+    uploadedByUid: toNullableString(row?.uploaded_by_uid),
     uploadedByEmail: normalizeEmail(row?.uploaded_by_email),
     sourceFileName: toNullableString(row?.source_file_name),
     operatorName: toNullableString(row?.operator_name),
     competencia: toNullableString(row?.competencia),
+    ano: Number(row?.ano ?? 0) || null,
+    trimestre: Number(row?.trimestre ?? 0) || null,
     regAns: normalizeRegAns(row?.reg_ans),
+    cnpj: normalizeDigits(row?.cnpj),
     responsavelNome: toNullableString(row?.responsavel_nome),
     responsavelEmail: normalizeEmail(row?.responsavel_email),
     rowCount: Number(row?.row_count ?? 0),
+    approvalStatus: normalizeDemonstracoesApprovalStatus(row?.approval_status),
+    approvedAt: serializeFirestoreTimestamp(row?.approved_at),
+    approvedByEmail: normalizeEmail(row?.approved_by_email),
+    rejectedAt: serializeFirestoreTimestamp(row?.rejected_at),
+    rejectedByEmail: normalizeEmail(row?.rejected_by_email),
+    approvalNotes: toNullableString(row?.approval_notes),
+  }
+}
+
+function mapUploadDetailRow(row = {}) {
+  return {
+    competencia: toNullableString(row?.competencia),
+    ano: Number(row?.ano ?? 0) || null,
+    trimestre: Number(row?.trimestre ?? 0) || null,
+    data: serializeFirestoreTimestamp(row?.data),
+    regAns: normalizeRegAns(row?.reg_ans),
+    cnpj: normalizeDigits(row?.cnpj),
+    cdContaContabil: toNullableString(row?.cd_conta_contabil),
+    descricao: toNullableString(row?.descricao),
+    vlSaldoInicial: parseFlexibleNumber(row?.vl_saldo_inicial),
+    vlDebitos: parseFlexibleNumber(row?.vl_debitos),
+    vlCreditos: parseFlexibleNumber(row?.vl_creditos),
+    vlSaldoFinal: parseFlexibleNumber(row?.vl_saldo_final),
+    moeda: toNullableString(row?.moeda),
+    statusFechamento: toNullableString(row?.status_fechamento),
+    tipoEnvio: toNullableString(row?.tipo_envio),
+    versaoEnvio: parseFlexibleInteger(row?.versao_envio),
+    sistemaOrigem: toNullableString(row?.sistema_origem),
+    qtBeneficiarios: parseFlexibleInteger(row?.qt_beneficiarios),
+    qtPrestadores: parseFlexibleInteger(row?.qt_prestadores),
+    modalidade: toNullableString(row?.modalidade),
+    porte: toNullableString(row?.porte),
+    observacoes: toNullableString(row?.observacoes),
+    arquivoOrigem: toNullableString(row?.arquivo_origem),
   }
 }
 
 async function listAdminUploadReport() {
   const operators = await listUhubOperatorCatalog().catch(() => listUhubOperatorCatalogFromBigQuery())
-  const table = await ensureAuxDemonstracoesTable()
+  await ensureAuxDemonstracoesTable()
+  await ensureAuxDemonstracoesUploadsTable()
   const [rows] = await bigquery.query({
     query: `
       WITH periods AS (
@@ -3143,32 +3190,46 @@ async function listAdminUploadReport() {
         LIMIT 12
       ), grouped AS (
         SELECT
-          upload_id,
-          uploaded_at,
-          uploaded_by_email,
-          source_file_name,
-          operator_name,
-          competencia,
-          reg_ans,
-          responsavel_nome,
-          responsavel_email,
+          raw.upload_id,
+          raw.uploaded_at,
+          raw.uploaded_by_email,
+          raw.source_file_name,
+          raw.operator_name,
+          raw.competencia,
+          raw.reg_ans,
+          raw.responsavel_nome,
+          raw.responsavel_email,
           COUNT(*) AS row_count,
+          COALESCE(status.approval_status, '${DEMONSTRACOES_APPROVAL_STATUS.PENDING}') AS approval_status,
+          status.approved_at,
+          status.approved_by_email,
+          status.rejected_at,
+          status.rejected_by_email,
+          status.approval_notes,
           ROW_NUMBER() OVER (
-            PARTITION BY REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', ''), competencia
-            ORDER BY uploaded_at DESC, upload_id DESC
+            PARTITION BY REGEXP_REPLACE(CAST(raw.reg_ans AS STRING), r'\\D', ''), raw.competencia
+            ORDER BY raw.uploaded_at DESC, raw.upload_id DESC
           ) AS rn
-        FROM \`${AUX_DEMONSTRACOES_TABLE_REF.fqn}\`
-        WHERE competencia IN (SELECT competencia FROM periods)
+        FROM \`${AUX_DEMONSTRACOES_TABLE_REF.fqn}\` raw
+        LEFT JOIN \`${AUX_DEMONSTRACOES_UPLOADS_TABLE_REF.fqn}\` status
+          ON raw.upload_id = status.upload_id
+        WHERE raw.competencia IN (SELECT competencia FROM periods)
         GROUP BY
-          upload_id,
-          uploaded_at,
-          uploaded_by_email,
-          source_file_name,
-          operator_name,
-          competencia,
-          reg_ans,
-          responsavel_nome,
-          responsavel_email
+          raw.upload_id,
+          raw.uploaded_at,
+          raw.uploaded_by_email,
+          raw.source_file_name,
+          raw.operator_name,
+          raw.competencia,
+          raw.reg_ans,
+          raw.responsavel_nome,
+          raw.responsavel_email,
+          COALESCE(status.approval_status, '${DEMONSTRACOES_APPROVAL_STATUS.PENDING}'),
+          status.approved_at,
+          status.approved_by_email,
+          status.rejected_at,
+          status.rejected_by_email,
+          status.approval_notes
       )
       SELECT * EXCEPT(rn)
       FROM grouped
@@ -3177,7 +3238,6 @@ async function listAdminUploadReport() {
     `,
     location: BQ_LOCATION,
   })
-  void table
   const uploads = normalizeBigQueryRows(rows).map(mapUploadReportRow)
   const periods = [...new Set(uploads.map((item) => item.competencia).filter(Boolean))].sort((a, b) =>
     b.localeCompare(a),
@@ -3191,7 +3251,7 @@ async function listAdminUploadReport() {
         regAns: operator.regAns,
         operatorName: operator.operatorName,
         competencia,
-        status: upload ? 'enviado' : 'pendente',
+        status: upload?.approvalStatus ?? 'NAO_ENVIADO',
         upload,
       }
     })
@@ -3202,10 +3262,321 @@ async function listAdminUploadReport() {
     summary: {
       operators: operators.length,
       periods: periods.length,
-      sent: reportRows.filter((row) => row.status === 'enviado').length,
-      pending: reportRows.filter((row) => row.status !== 'enviado').length,
+      sent: reportRows.filter((row) => row.status !== 'NAO_ENVIADO').length,
+      pending: reportRows.filter((row) => row.status === DEMONSTRACOES_APPROVAL_STATUS.PENDING).length,
+      approved: reportRows.filter((row) => row.status === DEMONSTRACOES_APPROVAL_STATUS.APPROVED).length,
+      rejected: reportRows.filter((row) => row.status === DEMONSTRACOES_APPROVAL_STATUS.REJECTED).length,
+      notSent: reportRows.filter((row) => row.status === 'NAO_ENVIADO').length,
     },
   }
+}
+
+function normalizeDemonstracoesApprovalStatus(value, fallback = DEMONSTRACOES_APPROVAL_STATUS.PENDING) {
+  const normalized = String(value ?? '')
+    .trim()
+    .toUpperCase()
+  if (Object.values(DEMONSTRACOES_APPROVAL_STATUS).includes(normalized)) return normalized
+  if (normalized === 'APPROVED' || normalized === 'PUBLICADO') return DEMONSTRACOES_APPROVAL_STATUS.APPROVED
+  if (normalized === 'REJECTED' || normalized === 'RECUSADO') return DEMONSTRACOES_APPROVAL_STATUS.REJECTED
+  if (normalized === 'PENDING') return DEMONSTRACOES_APPROVAL_STATUS.PENDING
+  return fallback
+}
+
+async function refreshDemonstracoesPublicationViews() {
+  await refreshAuxDemonstracoesLatestView()
+  const refreshWarnings = []
+  if (SHOULD_REFRESH_CONSOLIDATED_VIEW) {
+    try {
+      await refreshConsolidatedDemonstracoesView()
+    } catch (err) {
+      refreshWarnings.push(err?.message ?? String(err))
+    }
+  }
+  if (SHOULD_REFRESH_CONSOLIDATED_INDICATORS) {
+    try {
+      await refreshConsolidatedIndicatorArtifacts()
+    } catch (err) {
+      refreshWarnings.push(err?.message ?? String(err))
+    }
+  }
+  return refreshWarnings
+}
+
+async function fetchAdminUploadSummary(uploadId) {
+  const normalizedUploadId = toNullableString(uploadId)
+  if (!normalizedUploadId) return null
+  await ensureAuxDemonstracoesTable()
+  await ensureAuxDemonstracoesUploadsTable()
+  const [rows] = await bigquery.query({
+    query: `
+      SELECT
+        raw.upload_id,
+        MIN(raw.uploaded_at) AS uploaded_at,
+        ANY_VALUE(raw.uploaded_by_uid) AS uploaded_by_uid,
+        ANY_VALUE(raw.uploaded_by_email) AS uploaded_by_email,
+        ANY_VALUE(raw.source_file_name) AS source_file_name,
+        ANY_VALUE(raw.operator_name) AS operator_name,
+        ANY_VALUE(raw.competencia) AS competencia,
+        ANY_VALUE(raw.ano) AS ano,
+        ANY_VALUE(raw.trimestre) AS trimestre,
+        ANY_VALUE(raw.reg_ans) AS reg_ans,
+        ARRAY_AGG(raw.cnpj IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] AS cnpj,
+        ANY_VALUE(raw.responsavel_nome) AS responsavel_nome,
+        ANY_VALUE(raw.responsavel_email) AS responsavel_email,
+        COUNT(*) AS row_count,
+        COALESCE(ANY_VALUE(status.approval_status), '${DEMONSTRACOES_APPROVAL_STATUS.PENDING}') AS approval_status,
+        ANY_VALUE(status.approved_at) AS approved_at,
+        ANY_VALUE(status.approved_by_email) AS approved_by_email,
+        ANY_VALUE(status.rejected_at) AS rejected_at,
+        ANY_VALUE(status.rejected_by_email) AS rejected_by_email,
+        ANY_VALUE(status.approval_notes) AS approval_notes
+      FROM \`${AUX_DEMONSTRACOES_TABLE_REF.fqn}\` raw
+      LEFT JOIN \`${AUX_DEMONSTRACOES_UPLOADS_TABLE_REF.fqn}\` status
+        ON raw.upload_id = status.upload_id
+      WHERE CAST(raw.upload_id AS STRING) = @upload_id
+      GROUP BY raw.upload_id
+      LIMIT 1
+    `,
+    params: { upload_id: normalizedUploadId },
+    location: BQ_LOCATION,
+  })
+  const row = normalizeBigQueryRows(rows)[0]
+  return row ? mapUploadReportRow(row) : null
+}
+
+async function fetchAdminUploadDetail(uploadId) {
+  const summary = await fetchAdminUploadSummary(uploadId)
+  if (!summary) {
+    const error = new Error('Upload não encontrado.')
+    error.statusCode = 404
+    throw error
+  }
+  const [rows] = await bigquery.query({
+    query: `
+      SELECT
+        competencia,
+        ano,
+        trimestre,
+        data,
+        reg_ans,
+        cnpj,
+        cd_conta_contabil,
+        descricao,
+        vl_saldo_inicial,
+        vl_debitos,
+        vl_creditos,
+        vl_saldo_final,
+        moeda,
+        status_fechamento,
+        tipo_envio,
+        versao_envio,
+        sistema_origem,
+        qt_beneficiarios,
+        qt_prestadores,
+        modalidade,
+        porte,
+        observacoes,
+        arquivo_origem
+      FROM \`${AUX_DEMONSTRACOES_TABLE_REF.fqn}\`
+      WHERE CAST(upload_id AS STRING) = @upload_id
+      ORDER BY cd_conta_contabil
+      LIMIT @limit
+    `,
+    params: {
+      upload_id: summary.uploadId,
+      limit: 10000,
+    },
+    types: {
+      upload_id: 'STRING',
+      limit: 'INT64',
+    },
+    location: BQ_LOCATION,
+  })
+  return {
+    upload: summary,
+    rows: normalizeBigQueryRows(rows).map(mapUploadDetailRow),
+  }
+}
+
+async function saveDemonstracoesUploadApproval(summary = {}, status, { user = {}, notes = null } = {}) {
+  const approvalStatus = normalizeDemonstracoesApprovalStatus(status)
+  const actionEmail = normalizeEmail(user?.email)
+  const isApproved = approvalStatus === DEMONSTRACOES_APPROVAL_STATUS.APPROVED
+  const isRejected = approvalStatus === DEMONSTRACOES_APPROVAL_STATUS.REJECTED
+  await ensureAuxDemonstracoesUploadsTable()
+  await bigquery.query({
+    query: `
+      MERGE \`${AUX_DEMONSTRACOES_UPLOADS_TABLE_REF.fqn}\` target
+      USING (
+        SELECT
+          @upload_id AS upload_id,
+          TIMESTAMP(@uploaded_at) AS uploaded_at,
+          @uploaded_by_uid AS uploaded_by_uid,
+          @uploaded_by_email AS uploaded_by_email,
+          @source_file_name AS source_file_name,
+          @operator_name AS operator_name,
+          @competencia AS competencia,
+          @ano AS ano,
+          @trimestre AS trimestre,
+          @reg_ans AS reg_ans,
+          @cnpj AS cnpj,
+          @row_count AS row_count,
+          'VALIDO' AS validation_status,
+          0 AS validation_errors_count,
+          @approval_status AS approval_status,
+          TIMESTAMP(@approval_requested_at) AS approval_requested_at,
+          IF(@is_approved, CURRENT_TIMESTAMP(), CAST(NULL AS TIMESTAMP)) AS approved_at,
+          IF(@is_approved, @action_uid, CAST(NULL AS STRING)) AS approved_by_uid,
+          IF(@is_approved, @action_email, CAST(NULL AS STRING)) AS approved_by_email,
+          IF(@is_rejected, CURRENT_TIMESTAMP(), CAST(NULL AS TIMESTAMP)) AS rejected_at,
+          IF(@is_rejected, @action_uid, CAST(NULL AS STRING)) AS rejected_by_uid,
+          IF(@is_rejected, @action_email, CAST(NULL AS STRING)) AS rejected_by_email,
+          @approval_notes AS approval_notes,
+          CURRENT_TIMESTAMP() AS updated_at
+      ) source
+      ON target.upload_id = source.upload_id
+      WHEN MATCHED THEN UPDATE SET
+        uploaded_at = source.uploaded_at,
+        uploaded_by_uid = source.uploaded_by_uid,
+        uploaded_by_email = source.uploaded_by_email,
+        source_file_name = source.source_file_name,
+        operator_name = source.operator_name,
+        competencia = source.competencia,
+        ano = source.ano,
+        trimestre = source.trimestre,
+        reg_ans = source.reg_ans,
+        cnpj = source.cnpj,
+        row_count = source.row_count,
+        validation_status = source.validation_status,
+        validation_errors_count = source.validation_errors_count,
+        approval_status = source.approval_status,
+        approval_requested_at = source.approval_requested_at,
+        approved_at = source.approved_at,
+        approved_by_uid = source.approved_by_uid,
+        approved_by_email = source.approved_by_email,
+        rejected_at = source.rejected_at,
+        rejected_by_uid = source.rejected_by_uid,
+        rejected_by_email = source.rejected_by_email,
+        approval_notes = source.approval_notes,
+        updated_at = source.updated_at
+      WHEN NOT MATCHED THEN INSERT (
+        upload_id,
+        uploaded_at,
+        uploaded_by_uid,
+        uploaded_by_email,
+        source_file_name,
+        operator_name,
+        competencia,
+        ano,
+        trimestre,
+        reg_ans,
+        cnpj,
+        row_count,
+        validation_status,
+        validation_errors_count,
+        approval_status,
+        approval_requested_at,
+        approved_at,
+        approved_by_uid,
+        approved_by_email,
+        rejected_at,
+        rejected_by_uid,
+        rejected_by_email,
+        approval_notes,
+        updated_at
+      ) VALUES (
+        source.upload_id,
+        source.uploaded_at,
+        source.uploaded_by_uid,
+        source.uploaded_by_email,
+        source.source_file_name,
+        source.operator_name,
+        source.competencia,
+        source.ano,
+        source.trimestre,
+        source.reg_ans,
+        source.cnpj,
+        source.row_count,
+        source.validation_status,
+        source.validation_errors_count,
+        source.approval_status,
+        source.approval_requested_at,
+        source.approved_at,
+        source.approved_by_uid,
+        source.approved_by_email,
+        source.rejected_at,
+        source.rejected_by_uid,
+        source.rejected_by_email,
+        source.approval_notes,
+        source.updated_at
+      )
+    `,
+    params: {
+      upload_id: summary.uploadId,
+      uploaded_at: summary.uploadedAt ?? new Date().toISOString(),
+      uploaded_by_uid: summary.uploadedByUid ?? null,
+      uploaded_by_email: summary.uploadedByEmail ?? null,
+      source_file_name: summary.sourceFileName ?? null,
+      operator_name: summary.operatorName ?? null,
+      competencia: summary.competencia,
+      ano: Number(summary.ano),
+      trimestre: Number(summary.trimestre),
+      reg_ans: summary.regAns,
+      cnpj: summary.cnpj ?? null,
+      row_count: Number(summary.rowCount ?? 0),
+      approval_status: approvalStatus,
+      approval_requested_at: summary.uploadedAt ?? new Date().toISOString(),
+      is_approved: isApproved,
+      is_rejected: isRejected,
+      action_uid: user?.uid ?? null,
+      action_email: actionEmail,
+      approval_notes: toNullableString(notes),
+    },
+    types: {
+      upload_id: 'STRING',
+      uploaded_at: 'STRING',
+      uploaded_by_uid: 'STRING',
+      uploaded_by_email: 'STRING',
+      source_file_name: 'STRING',
+      operator_name: 'STRING',
+      competencia: 'STRING',
+      ano: 'INT64',
+      trimestre: 'INT64',
+      reg_ans: 'STRING',
+      cnpj: 'STRING',
+      row_count: 'INT64',
+      approval_status: 'STRING',
+      approval_requested_at: 'STRING',
+      is_approved: 'BOOL',
+      is_rejected: 'BOOL',
+      action_uid: 'STRING',
+      action_email: 'STRING',
+      approval_notes: 'STRING',
+    },
+    location: BQ_LOCATION,
+  })
+  return {
+    ...summary,
+    approvalStatus,
+    approvedByEmail: isApproved ? actionEmail : null,
+    rejectedByEmail: isRejected ? actionEmail : null,
+    approvalNotes: toNullableString(notes),
+  }
+}
+
+async function updateAdminUploadApproval(uploadId, status, req) {
+  const summary = await fetchAdminUploadSummary(uploadId)
+  if (!summary) {
+    const error = new Error('Upload não encontrado.')
+    error.statusCode = 404
+    throw error
+  }
+  const upload = await saveDemonstracoesUploadApproval(summary, status, {
+    user: req.user,
+    notes: req.body?.notes,
+  })
+  const refreshWarnings = await refreshDemonstracoesPublicationViews()
+  return { upload, warning: refreshWarnings.join(' | ') || null }
 }
 
 async function deleteAdminUpload(uploadId) {
@@ -3224,22 +3595,16 @@ async function deleteAdminUpload(uploadId) {
     params: { upload_id: normalizedUploadId },
     location: BQ_LOCATION,
   })
-  await refreshAuxDemonstracoesLatestView()
-  const refreshWarnings = []
-  if (SHOULD_REFRESH_CONSOLIDATED_VIEW) {
-    try {
-      await refreshConsolidatedDemonstracoesView()
-    } catch (err) {
-      refreshWarnings.push(err?.message ?? String(err))
-    }
-  }
-  if (SHOULD_REFRESH_CONSOLIDATED_INDICATORS) {
-    try {
-      await refreshConsolidatedIndicatorArtifacts()
-    } catch (err) {
-      refreshWarnings.push(err?.message ?? String(err))
-    }
-  }
+  await ensureAuxDemonstracoesUploadsTable()
+  await bigquery.query({
+    query: `
+      DELETE FROM \`${AUX_DEMONSTRACOES_UPLOADS_TABLE_REF.fqn}\`
+      WHERE CAST(upload_id AS STRING) = @upload_id
+    `,
+    params: { upload_id: normalizedUploadId },
+    location: BQ_LOCATION,
+  })
+  const refreshWarnings = await refreshDemonstracoesPublicationViews()
   return { success: true, uploadId: normalizedUploadId, warning: refreshWarnings.join(' | ') || null }
 }
 
@@ -4015,51 +4380,109 @@ async function ensureAuxDemonstracoesTable() {
   return table
 }
 
+async function ensureAuxDemonstracoesUploadsTable() {
+  const dataset = await ensureDataset(AUX_DEMONSTRACOES_UPLOADS_TABLE_REF.datasetId)
+  const table = dataset.table(AUX_DEMONSTRACOES_UPLOADS_TABLE_REF.objectId)
+  const [tableExists] = await table.exists()
+  if (!tableExists) {
+    await table.create({
+      schema: [
+        { name: 'upload_id', type: 'STRING', mode: 'REQUIRED' },
+        { name: 'uploaded_at', type: 'TIMESTAMP', mode: 'REQUIRED' },
+        { name: 'uploaded_by_uid', type: 'STRING' },
+        { name: 'uploaded_by_email', type: 'STRING' },
+        { name: 'source_file_name', type: 'STRING' },
+        { name: 'operator_name', type: 'STRING' },
+        { name: 'competencia', type: 'STRING', mode: 'REQUIRED' },
+        { name: 'ano', type: 'INT64', mode: 'REQUIRED' },
+        { name: 'trimestre', type: 'INT64', mode: 'REQUIRED' },
+        { name: 'reg_ans', type: 'STRING', mode: 'REQUIRED' },
+        { name: 'cnpj', type: 'STRING' },
+        { name: 'row_count', type: 'INT64', mode: 'REQUIRED' },
+        { name: 'validation_status', type: 'STRING' },
+        { name: 'validation_errors_count', type: 'INT64' },
+        { name: 'approval_status', type: 'STRING', mode: 'REQUIRED' },
+        { name: 'approval_requested_at', type: 'TIMESTAMP' },
+        { name: 'approved_at', type: 'TIMESTAMP' },
+        { name: 'approved_by_uid', type: 'STRING' },
+        { name: 'approved_by_email', type: 'STRING' },
+        { name: 'rejected_at', type: 'TIMESTAMP' },
+        { name: 'rejected_by_uid', type: 'STRING' },
+        { name: 'rejected_by_email', type: 'STRING' },
+        { name: 'approval_notes', type: 'STRING' },
+        { name: 'updated_at', type: 'TIMESTAMP' },
+      ],
+      location: BQ_LOCATION,
+      timePartitioning: {
+        type: 'DAY',
+        field: 'uploaded_at',
+      },
+      clustering: {
+        fields: ['approval_status', 'reg_ans', 'competencia'],
+      },
+    })
+  }
+  return table
+}
+
 async function refreshAuxDemonstracoesLatestView() {
   const query = `
     CREATE OR REPLACE VIEW \`${AUX_DEMONSTRACOES_LATEST_VIEW_REF.fqn}\` AS
-    WITH ranked AS (
+    WITH approved_uploads AS (
       SELECT
         upload_id,
-        uploaded_at,
-        uploaded_by_uid,
-        uploaded_by_email,
-        source_file_name,
-        operator_name,
-        competencia,
-        ano,
-        trimestre,
-        data,
-        reg_ans,
-        cnpj,
-        cd_conta_contabil,
-        descricao,
-        vl_saldo_inicial,
-        vl_saldo_final,
-        vl_debitos,
-        vl_creditos,
-        moeda,
-        status_fechamento,
-        tipo_envio,
-        versao_envio,
-        dt_envio,
-        sistema_origem,
-        responsavel_nome,
-        responsavel_email,
-        qt_beneficiarios,
-        qt_prestadores,
-        modalidade,
-        porte,
-        observacoes,
-        arquivo_origem
-      FROM \`${AUX_DEMONSTRACOES_TABLE_REF.fqn}\`
+        approved_at,
+        approved_by_email
+      FROM \`${AUX_DEMONSTRACOES_UPLOADS_TABLE_REF.fqn}\`
+      WHERE approval_status = '${DEMONSTRACOES_APPROVAL_STATUS.APPROVED}'
+    ), ranked AS (
+      SELECT
+        src.upload_id,
+        src.uploaded_at,
+        src.uploaded_by_uid,
+        src.uploaded_by_email,
+        src.source_file_name,
+        src.operator_name,
+        src.competencia,
+        src.ano,
+        src.trimestre,
+        src.data,
+        src.reg_ans,
+        src.cnpj,
+        src.cd_conta_contabil,
+        src.descricao,
+        src.vl_saldo_inicial,
+        src.vl_saldo_final,
+        src.vl_debitos,
+        src.vl_creditos,
+        src.moeda,
+        src.status_fechamento,
+        src.tipo_envio,
+        src.versao_envio,
+        src.dt_envio,
+        src.sistema_origem,
+        src.responsavel_nome,
+        src.responsavel_email,
+        src.qt_beneficiarios,
+        src.qt_prestadores,
+        src.modalidade,
+        src.porte,
+        src.observacoes,
+        src.arquivo_origem,
+        approved_uploads.approved_at,
+        approved_uploads.approved_by_email,
+        '${DEMONSTRACOES_APPROVAL_STATUS.APPROVED}' AS approval_status
+      FROM \`${AUX_DEMONSTRACOES_TABLE_REF.fqn}\` src
+      INNER JOIN approved_uploads
+        ON src.upload_id = approved_uploads.upload_id
       QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY competencia, reg_ans, cd_conta_contabil
-        ORDER BY COALESCE(versao_envio, 0) DESC, uploaded_at DESC
+        PARTITION BY src.competencia, src.reg_ans, src.cd_conta_contabil
+        ORDER BY COALESCE(src.versao_envio, 0) DESC, src.uploaded_at DESC
       ) = 1
     )
     SELECT * FROM ranked
   `
+  await ensureAuxDemonstracoesUploadsTable()
   await bigquery.query({ query, location: BQ_LOCATION })
 }
 
@@ -4597,6 +5020,40 @@ app.get('/api/admin/uploads/report', async (req, res) => {
   }
 })
 
+app.get('/api/admin/uploads/:uploadId', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    const detail = await fetchAdminUploadDetail(req.params.uploadId)
+    res.setHeader('Cache-Control', 'no-store')
+    return res.json(detail)
+  } catch (err) {
+    console.error('[server] Falha ao carregar upload', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao carregar envio.' })
+  }
+})
+
+app.post('/api/admin/uploads/:uploadId/approve', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    const result = await updateAdminUploadApproval(req.params.uploadId, DEMONSTRACOES_APPROVAL_STATUS.APPROVED, req)
+    return res.json(result)
+  } catch (err) {
+    console.error('[server] Falha ao aprovar upload', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao aprovar envio.' })
+  }
+})
+
+app.post('/api/admin/uploads/:uploadId/reject', async (req, res) => {
+  if (!ensureAdminRequest(req, res)) return
+  try {
+    const result = await updateAdminUploadApproval(req.params.uploadId, DEMONSTRACOES_APPROVAL_STATUS.REJECTED, req)
+    return res.json(result)
+  } catch (err) {
+    console.error('[server] Falha ao rejeitar upload', err)
+    return res.status(err?.statusCode ?? 500).json({ error: err?.message ?? 'Falha ao rejeitar envio.' })
+  }
+})
+
 app.delete('/api/admin/uploads/:uploadId', async (req, res) => {
   if (!ensureAdminRequest(req, res)) return
   try {
@@ -5016,33 +5473,36 @@ async function handleOperadoraDemonstracoesUpload(req, res) {
     for (const chunk of chunks) {
       await table.insert(chunk)
     }
+    await saveDemonstracoesUploadApproval(
+      {
+        uploadId,
+        uploadedAt,
+        uploadedByUid: userUid,
+        uploadedByEmail: userEmail,
+        sourceFileName: fileName,
+        operatorName,
+        competencia: normalizedRows[0]?.competencia ?? batchMetadata.competencia,
+        ano: normalizedRows[0]?.ano,
+        trimestre: normalizedRows[0]?.trimestre,
+        regAns: operatorRegAns,
+        cnpj: batchMetadata.cnpj ?? normalizedRows[0]?.cnpj ?? null,
+        rowCount: records.length,
+      },
+      DEMONSTRACOES_APPROVAL_STATUS.PENDING,
+      { user: req.user },
+    )
     await refreshAuxDemonstracoesLatestView()
-    const refreshWarnings = []
-    if (SHOULD_REFRESH_CONSOLIDATED_VIEW) {
-      try {
-        await refreshConsolidatedDemonstracoesView()
-      } catch (err) {
-        refreshWarnings.push(err?.message ?? String(err))
-      }
-    }
-    if (SHOULD_REFRESH_CONSOLIDATED_INDICATORS) {
-      try {
-        await refreshConsolidatedIndicatorArtifacts()
-      } catch (err) {
-        refreshWarnings.push(err?.message ?? String(err))
-      }
-    }
     return res.json({
       success: true,
       uploadId,
+      approvalStatus: DEMONSTRACOES_APPROVAL_STATUS.PENDING,
       insertedRows: records.length,
       auxTable: AUX_DEMONSTRACOES_TABLE_REF.fqn,
+      uploadsTable: AUX_DEMONSTRACOES_UPLOADS_TABLE_REF.fqn,
       latestView: AUX_DEMONSTRACOES_LATEST_VIEW_REF.fqn,
-      consolidatedView: SHOULD_REFRESH_CONSOLIDATED_VIEW ? CONSOLIDATED_DEMONSTRACOES_VIEW_REF.fqn : null,
-      indicatorSnapshot: SHOULD_REFRESH_CONSOLIDATED_INDICATORS ? CONSOLIDATED_INDICATOR_SNAPSHOT_REF.fqn : null,
-      indicatorMartAns: SHOULD_REFRESH_CONSOLIDATED_INDICATORS ? CONSOLIDATED_MART_ANS_REF.fqn : null,
-      indicatorMartUniodonto: SHOULD_REFRESH_CONSOLIDATED_INDICATORS ? CONSOLIDATED_MART_UNIODONTO_REF.fqn : null,
-      warning: refreshWarnings.length ? refreshWarnings.join(' | ') : null,
+      published: false,
+      message: 'Envio validado e aguardando aprovação administrativa para publicação.',
+      warning: null,
     })
   } catch (err) {
     console.error('[server] Falha ao importar demonstracoes da operadora', err)
@@ -5210,8 +5670,17 @@ if (SHOULD_SERVE_STATIC) {
   })
 }
 
+const bootPublicationViewRefresh = refreshAuxDemonstracoesLatestView()
+  .then(() => {
+    console.log(`[server] View de uploads aprovados atualizada em ${AUX_DEMONSTRACOES_LATEST_VIEW_REF.fqn}`)
+  })
+  .catch((err) => {
+    console.warn('[server] Falha ao atualizar view de uploads aprovados no boot', err?.message ?? err)
+  })
+
 if (SHOULD_REFRESH_CONSOLIDATED_INDICATORS) {
-  refreshConsolidatedIndicatorArtifacts()
+  bootPublicationViewRefresh
+    .then(() => refreshConsolidatedIndicatorArtifacts())
     .then((result) => {
       const status = result?.executed ? 'atualizados' : 'verificados em dry-run'
       console.log(
