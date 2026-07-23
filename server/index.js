@@ -15,6 +15,10 @@ import {
   normalizePhoneForUhub,
   safeHash,
 } from './uhubOnboarding.js'
+import {
+  buildIgnoredAccountDescriptionIssue,
+  isIgnorableAccountDescriptionError,
+} from './demonstracoesUploadValidation.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -4924,6 +4928,7 @@ async function handleOperadoraDemonstracoesUpload(req, res) {
 
   const normalizedRows = []
   const validationErrors = []
+  const ignoredRows = []
   const duplicateKeys = new Set()
   const seenKeys = new Set()
 
@@ -4946,6 +4951,16 @@ async function handleOperadoraDemonstracoesUpload(req, res) {
       accountDescriptionMap,
     })
     if (parsed.error) {
+      if (isIgnorableAccountDescriptionError(parsed.error)) {
+        ignoredRows.push(
+          buildIgnoredAccountDescriptionIssue({
+            row: rowNumber,
+            code: normalizeRowObject(rawRow).cd_conta_contabil,
+            message: parsed.error,
+          }),
+        )
+        return
+      }
       validationErrors.push({ row: rowNumber, message: parsed.error })
       return
     }
@@ -4967,6 +4982,20 @@ async function handleOperadoraDemonstracoesUpload(req, res) {
       error: 'Falha na validação do arquivo.',
       details: validationErrors.slice(0, 50),
       duplicateCount: duplicateKeys.size,
+    })
+  }
+
+  if (!normalizedRows.length) {
+    return res.json({
+      success: true,
+      status: 'partial',
+      partial: true,
+      uploadId: null,
+      insertedRows: 0,
+      importedCount: 0,
+      ignoredCount: ignoredRows.length,
+      ignoredRows,
+      warning: 'Nenhuma linha válida foi importada; contas sem descrição foram ignoradas.',
     })
   }
 
@@ -5034,8 +5063,13 @@ async function handleOperadoraDemonstracoesUpload(req, res) {
     }
     return res.json({
       success: true,
+      status: ignoredRows.length ? 'partial' : 'completed',
+      partial: ignoredRows.length > 0,
       uploadId,
       insertedRows: records.length,
+      importedCount: records.length,
+      ignoredCount: ignoredRows.length,
+      ignoredRows,
       auxTable: AUX_DEMONSTRACOES_TABLE_REF.fqn,
       latestView: AUX_DEMONSTRACOES_LATEST_VIEW_REF.fqn,
       consolidatedView: SHOULD_REFRESH_CONSOLIDATED_VIEW ? CONSOLIDATED_DEMONSTRACOES_VIEW_REF.fqn : null,

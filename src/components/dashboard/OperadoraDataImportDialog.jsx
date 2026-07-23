@@ -148,6 +148,18 @@ function hasAnyValue(row = {}) {
   return Object.values(row).some((value) => toNullableString(value) !== '')
 }
 
+function getIgnoredRows(uploadResult) {
+  return Array.isArray(uploadResult?.ignoredRows) ? uploadResult.ignoredRows : []
+}
+
+function getIgnoredRowValue(row, keys) {
+  for (const key of keys) {
+    const value = toNullableString(row?.[key])
+    if (value) return value
+  }
+  return 'Não informado'
+}
+
 async function readSpreadsheetRows(file) {
   const buffer = await file.arrayBuffer()
   const XLSX = await import('xlsx')
@@ -228,7 +240,9 @@ export default function OperadoraDataImportDialog({
     () => uploadOperators.find((item) => item.regAns === selectedRegAns) ?? null,
     [selectedRegAns, uploadOperators],
   )
-  const isCompleted = Boolean(uploadResult?.success)
+  const ignoredRows = getIgnoredRows(uploadResult)
+  const isPartialUpload = uploadResult?.status === 'partial' || uploadResult?.partial === true || ignoredRows.length > 0
+  const isCompleted = Boolean(uploadResult?.success || uploadResult?.status === 'success' || isPartialUpload)
   const isFormLocked = isSubmitting || isCompleted
   const canSubmit =
     parsedRows.length > 0 &&
@@ -632,18 +646,17 @@ export default function OperadoraDataImportDialog({
                 </div>
               ) : null}
 
-              {uploadResult?.success ? (
-                <div className="space-y-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
+              {isCompleted ? (
+                <div className={`space-y-2 rounded-md border px-3 py-2 text-sm ${isPartialUpload ? 'border-amber-500/40 bg-amber-500/10 text-amber-800' : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'}`}>
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4" />
-                    <span>Upload concluído com sucesso.</span>
+                    {isPartialUpload ? <AlertCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+                    <span>{isPartialUpload ? 'Upload concluído parcialmente.' : 'Upload concluído com sucesso.'}</span>
                   </div>
                   <p>
-                    <strong>Upload ID:</strong> {uploadResult.uploadId}
+                    <strong>Linhas importadas:</strong> {uploadResult.insertedRows ?? 0}
                   </p>
-                  <p>
-                    <strong>Linhas inseridas:</strong> {uploadResult.insertedRows}
-                  </p>
+                  {isPartialUpload ? <p><strong>Linhas ignoradas:</strong> {uploadResult.ignoredRowsCount ?? ignoredRows.length}</p> : null}
+                  <p><strong>Upload ID:</strong> {uploadResult.uploadId}</p>
                   <p>
                     <strong>Tabela auxiliar:</strong> {uploadResult.auxTable}
                   </p>
@@ -651,6 +664,22 @@ export default function OperadoraDataImportDialog({
                     <strong>View auxiliar:</strong> {uploadResult.latestView}
                   </p>
                   {uploadResult.warning ? <p className="text-amber-700">Aviso: {uploadResult.warning}</p> : null}
+                  {isPartialUpload ? (
+                    <div className="rounded border border-amber-500/30 bg-background/60 p-3 text-foreground">
+                      <p className="font-medium">Contas ignoradas</p>
+                      {ignoredRows.length ? (
+                        <ul className="mt-2 max-h-52 space-y-1 overflow-y-auto text-xs">
+                          {ignoredRows.map((row, index) => (
+                            <li key={`${getIgnoredRowValue(row, ['row', 'line', 'linha'])}-${getIgnoredRowValue(row, ['account', 'conta', 'cd_conta_contabil', 'code', 'codigo'])}-${index}`}>
+                              Linha {getIgnoredRowValue(row, ['row', 'line', 'linha'])} · Conta {getIgnoredRowValue(row, ['account', 'conta', 'cd_conta_contabil', 'code', 'codigo'])} · {getIgnoredRowValue(row, ['reason', 'motivo', 'message', 'erro'])}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-1 text-xs text-muted-foreground">O servidor não retornou o detalhamento das linhas ignoradas.</p>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
