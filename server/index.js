@@ -1,4 +1,5 @@
 import express from 'express'
+import { buildUploadReport, validateReportCompetencia } from './uploadReport.js'
 import { BigQuery } from '@google-cloud/bigquery'
 import fs from 'fs'
 import path from 'path'
@@ -290,6 +291,7 @@ const operatorCatalogCache = {
   entries: [],
   expiresAt: 0,
 }
+const uhubBigQueryOperatorCatalogCache = { entries: [], expiresAt: 0 }
 const uhubOperatorCatalogCache = {
   entries: [],
   expiresAt: 0,
@@ -1033,8 +1035,8 @@ async function listUhubOperatorCatalog({ forceRefresh = false } = {}) {
 
 async function listUhubOperatorCatalogFromBigQuery({ forceRefresh = false } = {}) {
   const now = Date.now()
-  if (!forceRefresh && uhubOperatorCatalogCache.entries.length && uhubOperatorCatalogCache.expiresAt > now) {
-    return uhubOperatorCatalogCache.entries
+  if (!forceRefresh && uhubBigQueryOperatorCatalogCache.entries.length && uhubBigQueryOperatorCatalogCache.expiresAt > now) {
+    return uhubBigQueryOperatorCatalogCache.entries
   }
 
   const [rows] = await bigquery.query({
@@ -1065,8 +1067,8 @@ async function listUhubOperatorCatalogFromBigQuery({ forceRefresh = false } = {}
     .filter(Boolean)
     .filter((item, index, list) => list.findIndex((candidate) => candidate.regAns === item.regAns) === index)
 
-  uhubOperatorCatalogCache.entries = entries
-  uhubOperatorCatalogCache.expiresAt = now + Math.max(UHUB_OPERATOR_CACHE_TTL_MS, 60_000)
+  uhubBigQueryOperatorCatalogCache.entries = entries
+  uhubBigQueryOperatorCatalogCache.expiresAt = now + Math.max(UHUB_OPERATOR_CACHE_TTL_MS, 60_000)
   return entries
 }
 
@@ -3134,82 +3136,33 @@ function mapUploadReportRow(row = {}) {
   }
 }
 
-async function listAdminUploadReport() {
-  const operators = await listUhubOperatorCatalog().catch(() => listUhubOperatorCatalogFromBigQuery())
-  const table = await ensureAuxDemonstracoesTable()
+async function listAdminUploadReport(competencia) {
+  const requestedPeriod = validateReportCompetencia(competencia)
+  const snapshotOperators = await listUhubOperatorCatalogFromBigQuery()
+  if (!snapshotOperators.length) throw new Error('Catálogo de operadoras indisponível para o relatório.')
+  const currentOperators = await listUhubOperatorCatalog()
+  const operators = [...snapshotOperators, ...currentOperators]
+  await ensureAuxDemonstracoesTable()
   const [rows] = await bigquery.query({
     query: `
-      WITH periods AS (
-        SELECT DISTINCT competencia
-        FROM \`${AUX_DEMONSTRACOES_TABLE_REF.fqn}\`
-        WHERE NULLIF(TRIM(CAST(competencia AS STRING)), '') IS NOT NULL
-        ORDER BY competencia DESC
-        LIMIT 12
-      ), grouped AS (
+      SELECT upload_id, reg_ans, competencia, uploaded_at, latest.*, row_count
+      FROM (
         SELECT
           upload_id,
-          uploaded_at,
-          uploaded_by_email,
-          source_file_name,
-          operator_name,
+          REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', '') AS reg_ans,
           competencia,
-          reg_ans,
-          responsavel_nome,
-          responsavel_email,
-          COUNT(*) AS row_count,
-          ROW_NUMBER() OVER (
-            PARTITION BY REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', ''), competencia
-            ORDER BY uploaded_at DESC, upload_id DESC
-          ) AS rn
+          MAX(uploaded_at) AS uploaded_at,
+          ARRAY_AGG(STRUCT(uploaded_by_email, source_file_name, operator_name,
+            responsavel_nome, responsavel_email) ORDER BY uploaded_at DESC LIMIT 1)[OFFSET(0)] AS latest,
+          COUNT(*) AS row_count
         FROM \`${AUX_DEMONSTRACOES_TABLE_REF.fqn}\`
-        WHERE competencia IN (SELECT competencia FROM periods)
-        GROUP BY
-          upload_id,
-          uploaded_at,
-          uploaded_by_email,
-          source_file_name,
-          operator_name,
-          competencia,
-          reg_ans,
-          responsavel_nome,
-          responsavel_email
+        GROUP BY upload_id, REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', ''), competencia
       )
-      SELECT * EXCEPT(rn)
-      FROM grouped
-      WHERE rn = 1
-      ORDER BY competencia DESC, uploaded_at DESC
+      ORDER BY uploaded_at DESC, upload_id DESC
     `,
     location: BQ_LOCATION,
   })
-  void table
-  const uploads = normalizeBigQueryRows(rows).map(mapUploadReportRow)
-  const periods = [...new Set(uploads.map((item) => item.competencia).filter(Boolean))].sort((a, b) =>
-    b.localeCompare(a),
-  )
-  const uploadMap = new Map(uploads.map((item) => [`${item.regAns}|${item.competencia}`, item]))
-  const reportRows = operators.flatMap((operator) => {
-    const operatorPeriods = periods.length ? periods : [null]
-    return operatorPeriods.map((competencia) => {
-      const upload = competencia ? uploadMap.get(`${operator.regAns}|${competencia}`) : null
-      return {
-        regAns: operator.regAns,
-        operatorName: operator.operatorName,
-        competencia,
-        status: upload ? 'enviado' : 'pendente',
-        upload,
-      }
-    })
-  })
-  return {
-    periods,
-    rows: reportRows,
-    summary: {
-      operators: operators.length,
-      periods: periods.length,
-      sent: reportRows.filter((row) => row.status === 'enviado').length,
-      pending: reportRows.filter((row) => row.status !== 'enviado').length,
-    },
-  }
+  return buildUploadReport(operators, normalizeBigQueryRows(rows).map(mapUploadReportRow), requestedPeriod)
 }
 
 async function deleteAdminUpload(uploadId) {
@@ -4592,12 +4545,12 @@ app.post('/api/admin/accounts/:uid/request-completion', async (req, res) => {
 app.get('/api/admin/uploads/report', async (req, res) => {
   if (!ensureAdminRequest(req, res)) return
   try {
-    const report = await listAdminUploadReport()
+    const report = await listAdminUploadReport(req.query.competencia)
     res.setHeader('Cache-Control', 'no-store')
     return res.json(report)
   } catch (err) {
     console.error('[server] Falha ao gerar relatório de uploads', err)
-    return res.status(500).json({ error: 'Falha ao gerar relatório de envios.' })
+    return res.status(err?.statusCode ?? 500).json({ error: err?.statusCode === 400 ? err.message : 'Falha ao gerar relatório de envios.' })
   }
 })
 

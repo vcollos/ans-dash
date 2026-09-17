@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Dialog, DialogContent, DialogHeader } from '../ui/dialog'
 import AdminEmailTemplatesPanel from './AdminEmailTemplatesPanel'
+import AdminUploadDashboard from './AdminUploadDashboard'
 import {
   approveAccount,
   assignAccountOperator,
@@ -57,19 +58,6 @@ function normalizeSearchText(value) {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-}
-
-function formatDateTime(value) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '—'
-  return date.toLocaleString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 function accountToEditForm(account = {}) {
@@ -459,91 +447,8 @@ export default function AdminAccountsDialog({ open, onOpenChange, onOpenUploadFo
             ) : (
               <div className="space-y-5">
                 {activeTab === 'uploads' ? (
-                <section className="space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <h3 className="text-sm font-semibold">Envios de balancete</h3>
-                      <p className="text-xs text-muted-foreground">
-                        {uploadReport.summary?.sent ?? 0} enviado(s) · {uploadReport.summary?.pending ?? 0} pendente(s)
-                      </p>
-                    </div>
-                  </div>
-                  <div className="max-h-[280px] overflow-auto rounded-md border">
-                    <table className="w-full min-w-[920px] text-sm">
-                      <thead className="sticky top-0 bg-muted text-left text-xs uppercase text-muted-foreground">
-                        <tr>
-                          <th className="px-3 py-2">Operadora</th>
-                          <th className="px-3 py-2">Reg. ANS</th>
-                          <th className="px-3 py-2">Período</th>
-                          <th className="px-3 py-2">Status</th>
-                          <th className="px-3 py-2">Enviado em</th>
-                          <th className="px-3 py-2">Quem enviou</th>
-                          <th className="px-3 py-2">Arquivo</th>
-                          <th className="px-3 py-2">Linhas</th>
-                          <th className="px-3 py-2">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {uploadReport.rows.length ? (
-                          uploadReport.rows.map((row) => (
-                            <tr key={`${row.regAns}-${row.competencia ?? 'sem-periodo'}`} className="border-t">
-                              <td className="px-3 py-2 font-medium">{row.operatorName}</td>
-                              <td className="px-3 py-2">{row.regAns}</td>
-                              <td className="px-3 py-2">{row.competencia ?? '—'}</td>
-                              <td className="px-3 py-2">
-                                <span
-                                  className={
-                                    row.status === 'enviado'
-                                      ? 'rounded bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-700'
-                                      : 'rounded bg-muted px-2 py-1 text-xs font-semibold text-muted-foreground'
-                                  }
-                                >
-                                  {row.status === 'enviado' ? 'Enviado' : 'Pendente'}
-                                </span>
-                              </td>
-                              <td className="px-3 py-2">{formatDateTime(row.upload?.uploadedAt)}</td>
-                              <td className="px-3 py-2">
-                                {row.upload?.responsavelEmail ?? row.upload?.uploadedByEmail ?? '—'}
-                              </td>
-                              <td className="px-3 py-2">{row.upload?.sourceFileName ?? '—'}</td>
-                              <td className="px-3 py-2">{row.upload?.rowCount ?? '—'}</td>
-                              <td className="px-3 py-2">
-                                <div className="flex flex-wrap gap-2">
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleOpenUploadForReportRow(row)}
-                                    disabled={Boolean(actionKey)}
-                                  >
-                                    {row.status === 'enviado' ? 'Atualizar' : 'Enviar'}
-                                  </Button>
-                                  {row.upload?.uploadId ? (
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => handleDeleteUpload(row)}
-                                      disabled={Boolean(actionKey)}
-                                    >
-                                      {actionKey === `delete-upload:${row.upload.uploadId}` ? 'Excluindo...' : 'Excluir'}
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              </td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td className="px-3 py-4 text-muted-foreground" colSpan={9}>
-                              Nenhum envio encontrado.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
+                  <AdminUploadDashboard report={uploadReport} accounts={accounts} actionKey={actionKey}
+                    onRefresh={reloadUploadReport} onUpload={handleOpenUploadForReportRow} onDelete={handleDeleteUpload} />
                 ) : null}
 
                 {activeTab === 'accounts' ? (

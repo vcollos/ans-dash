@@ -150,6 +150,9 @@ export async function fetchAdminUploadReport() {
     periods: Array.isArray(payload?.periods) ? payload.periods : [],
     rows: Array.isArray(payload?.rows) ? payload.rows : [],
     summary: payload?.summary ?? null,
+    operators: Array.isArray(payload?.operators) ? payload.operators : [],
+    uploads: Array.isArray(payload?.uploads) ? payload.uploads : [],
+    historyNote: payload?.historyNote ?? null,
   }
 }
 
