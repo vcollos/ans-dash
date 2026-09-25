@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertCircle, CheckCircle2, Download, FileUp, Loader2 } from 'lucide-react'
 import { fetchWithAuth } from '../../lib/auth'
+import { resolveMissingFormulaResults, stripTrailingBalanceteSummary } from '../../lib/spreadsheetSanitizer'
 import { Button } from '../ui/button'
 import {
   Dialog,
@@ -163,10 +164,18 @@ function getIgnoredRowValue(row, keys) {
 async function readSpreadsheetRows(file) {
   const buffer = await file.arrayBuffer()
   const XLSX = await import('xlsx')
-  const workbook = XLSX.read(buffer, { type: 'array' })
+  const workbook = XLSX.read(buffer, { type: 'array', sheetStubs: true })
   const sheetName = workbook.SheetNames?.[0]
   if (!sheetName) return []
-  return XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' })
+  const sheet = workbook.Sheets[sheetName]
+  const initialRows = stripTrailingBalanceteSummary(XLSX.utils.sheet_to_json(sheet, { defval: '' }), resolveInputFieldName)
+  const lastDataRow = (initialRows.at(-1)?.__rowNum__ ?? 0) + 1
+  const headers = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })[0] ?? []
+  const finalBalanceIndex = headers.findIndex((header) => resolveInputFieldName(header) === 'vl_saldo_final')
+  if (finalBalanceIndex >= 0) {
+    resolveMissingFormulaResults(sheet, lastDataRow, XLSX.utils.encode_col(finalBalanceIndex))
+  }
+  return stripTrailingBalanceteSummary(XLSX.utils.sheet_to_json(sheet, { defval: '' }), resolveInputFieldName)
 }
 
 async function downloadCsv(endpoint, fallbackFileName) {
