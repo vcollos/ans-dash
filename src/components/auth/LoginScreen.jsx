@@ -9,6 +9,8 @@ import uniodontoLogo from '../../assets/uniodonto-logo.svg'
 
 function LoginScreen({
   onLogin,
+  onUhubLogin,
+  legacyLoginAllowed = true,
   onSignUp,
   onGoogleLogin,
   onSendEmailLink,
@@ -225,7 +227,14 @@ function LoginScreen({
           </div>
         </CardHeader>
         <CardContent>
-          <form className="space-y-4" onSubmit={handleSubmit}>
+          {onUhubLogin ? (
+            <div className="mb-5 space-y-2">
+              <Button type="button" className="w-full" onClick={onUhubLogin} disabled={isLoading}>Entrar com UHub</Button>
+              <p className="text-xs text-muted-foreground">Use sua conta central para acessar o PFC.</p>
+            </div>
+          ) : null}
+          {!legacyLoginAllowed && errorMessage ? <p role="alert" className="text-sm text-destructive">{errorMessage}</p> : null}
+          {legacyLoginAllowed ? <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -307,7 +316,7 @@ function LoginScreen({
                 Concluir login por link
               </Button>
             ) : null}
-          </form>
+          </form> : null}
         </CardContent>
         <CardFooter className="text-xs text-muted-foreground">
           Use as credenciais fornecidas pela equipe responsavel.

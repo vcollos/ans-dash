@@ -382,6 +382,9 @@ function AppContent() {
     user,
     isLoading,
     error,
+    ssoEnabled,
+    legacyLoginAllowed,
+    signInWithUhub,
     signInWithEmail,
     signUpWithEmail,
     signInWithGoogle,
@@ -635,6 +638,8 @@ function AppContent() {
   if (!user) {
     return (
       <LoginScreen
+        onUhubLogin={ssoEnabled ? signInWithUhub : null}
+        legacyLoginAllowed={legacyLoginAllowed}
         onLogin={handleLogin}
         onSignUp={allowSignUp ? handleSignUp : null}
         onGoogleLogin={handleGoogleLogin}
@@ -659,6 +664,9 @@ function AppContent() {
   if (accessProfileError) {
     return (
       <main className="flex min-h-screen w-full flex-col justify-center px-[3vw] py-[3vh]">
+        {user?.authSource === 'uhub-sso' ? <p role="status" className="mb-4 text-sm text-muted-foreground">Acesso pelo UHub. Algumas funções ainda não estão disponíveis nesta etapa da integração.</p> : null}
+        <Button type="button" variant="outline" className="mb-4 self-end" onClick={signOut}>Sair</Button>
+        {error ? <p role="alert" className="text-sm text-destructive">{error.message}</p> : null}
         <ErrorState error={accessProfileError} onRetry={() => window.location.reload()} />
       </main>
     )
@@ -714,6 +722,8 @@ function AppContent() {
 
   return (
     <>
+      {error ? <p role="alert" className="bg-destructive/10 p-3 text-sm text-destructive">{error.message}</p> : null}
+      {user?.authSource === 'uhub-sso' ? <p role="status" className="border-b bg-muted/30 px-4 py-3 text-sm text-muted-foreground">Acesso UHub: os comparativos estão restritos à sua operadora nesta etapa. Gestão de contas e alteração cadastral ainda não estão disponíveis.</p> : null}
       <DashboardApp
         onLogout={signOut}
         accessProfile={accessProfile}
@@ -735,7 +745,7 @@ function AppContent() {
         submitLabel="Salvar alterações"
         lockOpen={false}
         regAnsRequired={!accessProfile?.isAdmin}
-        onSendPasswordReset={handlePasswordReset}
+        onSendPasswordReset={user?.authSource === 'uhub-sso' ? undefined : handlePasswordReset}
         onSubmit={handleProfileCompletionSubmit}
       />
     </>

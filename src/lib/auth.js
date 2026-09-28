@@ -1,5 +1,6 @@
 import { onAuthStateChanged, signOut } from 'firebase/auth'
 import { auth } from './firebaseClient'
+import { getSsoState, setSsoState, ssoRequestOptions } from './ssoSession'
 
 const FIREBASE_AUTH_MESSAGES = {
   'auth/email-already-in-use': 'Este e-mail já está cadastrado. Faça login ou use a recuperação de senha.',
@@ -69,6 +70,10 @@ function notifyAuthExpired() {
 }
 
 export async function fetchWithAuth(url, options = {}) {
+  const session = getSsoState()
+  if (session.status === 'blocked') throw new Error('Entre novamente pelo UHub para continuar.')
+  const target = new URL(url, window.location.origin)
+  if (target.origin !== window.location.origin) throw new Error('Destino de API não autorizado.')
   const headers = new Headers(options.headers ?? {})
   const timeoutMs = Number(options.timeoutMs ?? 30000)
   const controller = options.signal ? null : new AbortController()
@@ -77,7 +82,9 @@ export async function fetchWithAuth(url, options = {}) {
       ? window.setTimeout(() => controller.abort(), timeoutMs)
       : null
   let sentAuth = false
-  if (import.meta.env.DEV && import.meta.env.VITE_DEV_AUTH_BYPASS === 'true') {
+  if (session.status === 'active') {
+    sentAuth = true
+  } else if (import.meta.env.DEV && import.meta.env.VITE_DEV_AUTH_BYPASS === 'true') {
     headers.set('X-Dev-Auth-Bypass', '1')
     sentAuth = true
   } else {
@@ -90,8 +97,10 @@ export async function fetchWithAuth(url, options = {}) {
   try {
     const fetchOptions = { ...options }
     delete fetchOptions.timeoutMs
-    const response = await fetch(url, { ...fetchOptions, headers, signal: options.signal ?? controller?.signal })
+    const requestOptions = { ...fetchOptions, headers, credentials: 'same-origin', signal: options.signal ?? controller?.signal }
+    const response = await fetch(url, session.status === 'active' ? ssoRequestOptions(requestOptions, session) : requestOptions)
     if (response.status === 401 && sentAuth) {
+      if (session.status === 'active') setSsoState({ status: 'blocked', csrf: null, user: null })
       try {
         await signOut(auth)
       } catch (err) {
