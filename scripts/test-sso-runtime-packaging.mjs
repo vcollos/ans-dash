@@ -24,6 +24,7 @@ try {
     copyFileSync('src/lib/'+file,path.join(dest,'src/lib',file))
   }
   copyFileSync('server/dataOperations.js',path.join(dest,'server/dataOperations.js'))
+  copyFileSync('server/bigQueryRefs.js',path.join(dest,'server/bigQueryRefs.js'))
   const r=spawnSync(process.execPath,['--input-type=module','-e',"await import('./server/dataOperations.js')"],{cwd:dest,encoding:'utf8'})
   assert.equal(r.status,0,r.stderr)
   console.log('PASS isolated Node runtime import; seven exact engine dependencies; build flags OFF; no runtime secrets in build')
