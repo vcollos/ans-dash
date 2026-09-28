@@ -1,4 +1,5 @@
 import express from 'express'
+import { createSsoConsumer, scopeSsoExport } from './centralSso.js'
 import { buildUploadReport, validateReportCompetencia } from './uploadReport.js'
 import { BigQuery } from '@google-cloud/bigquery'
 import fs from 'fs'
@@ -432,6 +433,17 @@ async function authMiddleware(req, res, next) {
   if (!req.path.startsWith('/api')) return next()
   if (req.method === 'OPTIONS') return next()
   if (AUTH_PUBLIC_PATHS.has(req.path)) return next()
+  try {
+    if (await ssoConsumer.authenticate(req, res)) {
+      if (req.path.startsWith('/api/admin/') || req.path === '/api/auth/profile/complete' ||
+          req.path === '/api/query') {
+        return res.status(403).json({ error: 'Fluxo ainda não habilitado para SSO.', code: 'SSO_ROUTE_NOT_READY' })
+      }
+      return next()
+    }
+  } catch (error) {
+    return res.status(error.status ?? 503).json({ error: 'SSO indisponível ou acesso não autorizado.' })
+  }
   const token = extractToken(req)
   if (!token) {
     if (DEV_AUTH_BYPASS && req.headers['x-dev-auth-bypass'] === '1') {
@@ -4217,9 +4229,24 @@ function buildNormalizedUploadRow(rawRow = {}, context = {}) {
   return { row }
 }
 
+// SSO reads the existing ACL on every request by verified UID only. No cache,
+// table creation, onboarding writes or e-mail inference in this path.
+async function loadSsoLocalAccess(uid) {
+  const [rows] = await bigquery.query({
+    query: `SELECT REGEXP_REPLACE(CAST(reg_ans AS STRING), r'\\D', '') AS reg_ans,
+      NULLIF(TRIM(CAST(operator_name AS STRING)), '') AS operator_name,
+      can_upload, LOWER(TRIM(CAST(role AS STRING))) AS role
+      FROM \`${USER_ACCESS_TABLE_REF.fqn}\`
+      WHERE active IS TRUE AND CAST(user_uid AS STRING) = @uid`,
+    params: { uid }, location: BQ_LOCATION,
+  })
+  return normalizeBigQueryRows(rows)
+}
+const ssoConsumer = createSsoConsumer({ loadLocalAccess: loadSsoLocalAccess })
 const app = express()
 app.use(express.json({ limit: '5mb' }))
 app.use(EMAIL_ASSETS_PUBLIC_PATH, express.static(path.join(EMAIL_TEMPLATES_DIR, 'pfc-uniodonto-assets')))
+ssoConsumer.register(app)
 app.use(authMiddleware)
 
 app.get('/api/auth/status', (req, res) => {
@@ -4263,6 +4290,11 @@ app.get('/api/auth/profile', async (req, res) => {
         requiresProfileCompletion: false,
         registrationProfile: null,
       })
+    }
+    if (req.user?.authSource === 'uhub-sso') {
+      return res.json({ uid: req.user.uid, email: null, ...req.accessContext,
+        noAccess: false, canAccess: true, requiresProfileCompletion: false,
+        approvalStatus: null, approvalReason: null, uhubLink: null, registrationProfile: null })
     }
     const accessContext = await resolveUserAccessContext(req.user)
     const payload = await buildAuthProfilePayload(req.user, accessContext)
@@ -4724,7 +4756,7 @@ app.get('/api/health', async (req, res) => {
 
 app.get('/api/indicadores.csv', async (req, res) => {
   try {
-    const scopedQuery = applyUserAccessScopeToSql(exportQuery, req.accessContext)
+    const scopedQuery = scopeSsoExport(exportQuery, req.accessContext)
     const result = await runBigQuery(scopedQuery)
     res.setHeader('Content-Type', 'text/csv; charset=utf-8')
     res.setHeader('Cache-Control', 'no-store')
