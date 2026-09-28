@@ -1,6 +1,7 @@
 import express from 'express'
 import { createSsoConsumer, scopeSsoExport } from './centralSso.js'
 import { executeDataOperation } from './dataOperations.js'
+import { parseBigQueryTableRef } from './bigQueryRefs.js'
 import { buildUploadReport, validateReportCompetencia } from './uploadReport.js'
 import { BigQuery } from '@google-cloud/bigquery'
 import fs from 'fs'
@@ -223,36 +224,7 @@ const SHOULD_REFRESH_CONSOLIDATED_INDICATORS = (process.env.BQ_REFRESH_CONSOLIDA
   .trim() === 'true'
 
 function parseTableRef(rawValue, defaultDataset = BQ_DATASET) {
-  const normalized = String(rawValue ?? '')
-    .trim()
-    .replace(/^`|`$/g, '')
-    .replace(/^"|"$/g, '')
-  if (!normalized) {
-    throw new Error('Referencia de tabela/view vazia.')
-  }
-  const parts = normalized.split('.').filter(Boolean)
-  if (parts.length === 1) {
-    return {
-      projectId: BQ_PROJECT_ID,
-      datasetId: defaultDataset,
-      objectId: parts[0],
-      fqn: `${BQ_PROJECT_ID}.${defaultDataset}.${parts[0]}`,
-    }
-  }
-  if (parts.length === 2) {
-    return {
-      projectId: BQ_PROJECT_ID,
-      datasetId: parts[0],
-      objectId: parts[1],
-      fqn: `${BQ_PROJECT_ID}.${parts[0]}.${parts[1]}`,
-    }
-  }
-  return {
-    projectId: parts[0],
-    datasetId: parts[1],
-    objectId: parts[2],
-    fqn: `${parts[0]}.${parts[1]}.${parts[2]}`,
-  }
+  return parseBigQueryTableRef(rawValue, defaultDataset, BQ_PROJECT_ID)
 }
 
 const AUX_DEMONSTRACOES_TABLE_REF = parseTableRef(BQ_AUX_DEMONSTRACOES_TABLE, BQ_AUX_DATASET)

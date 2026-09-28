@@ -132,3 +132,16 @@ test('provider enrichment also scopes both source scans and returns only current
   assert.equal(output.rows[0].qt_prestadores, 8)
   assert.equal(queries[1].split("WHERE CAST(reg_ans AS STRING) = '123456'").length - 1, 2)
 })
+
+test('runtime short mart names resolve through the existing canonical project/dataset resolver', () => {
+  const runtime = dataOperationEnvironment({
+    BQ_PROJECT_ID: 'bigdata-467917', BQ_DATASET: 'dash_ans', BQ_MART_DATASET: 'dash_ans',
+    BQ_EXPORT_VIEW: 'dash_ans.indicadores_curados_snapshot_consolidado',
+    BQ_MART_ANS_TABLE: 'indicadores_mart_ans_consolidado',
+    BQ_MART_UNIODONTO_TABLE: 'indicadores_mart_uniodonto_consolidado',
+  })
+  assert.deepEqual(runtime, dataOperationEnvironment({}))
+  const other = dataOperationEnvironment({ BQ_PROJECT_ID: 'approved-project', BQ_MART_DATASET: 'approved_dataset', BQ_MART_ANS_TABLE: 'reviewed_mart' })
+  assert.equal(other.VITE_MART_ANS_TABLE, 'approved-project.approved_dataset.reviewed_mart')
+  assert.throws(() => dataOperationEnvironment({ BQ_MART_ANS_TABLE: 'project.dataset.table.extra' }))
+})

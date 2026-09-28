@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { parseBigQueryTableRef } from './bigQueryRefs.js'
 import { createDataService } from '../src/lib/dataServiceCore.js'
 import { metricSql } from '../src/lib/metricFormulas.js'
 import { UNIODONTO_METRIC_SQL } from '../src/lib/metricFormulasModoUniodonto.js'
@@ -74,20 +75,26 @@ export function validateDataOperation(body) {
   return { operation, args: parsed.data }
 }
 
-function sourceName(value) {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)?$/.test(value)) {
+function sourceName(value, projectId, datasetId) {
+  if (typeof value !== 'string' || value.split('.').length > 3) throw new Error('Fonte de dados do servidor inválida.')
+  const { fqn } = parseBigQueryTableRef(value, datasetId, projectId)
+  if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+$/.test(fqn)) {
     throw new Error('Fonte de dados do servidor inválida.')
   }
-  return value
+  return fqn
 }
 
-// Server-controlled configuration only. Never accept table/view names from callers.
+// Same resolver/defaults as index.js. Runtime uses short names for the marts.
+// Server-controlled configuration only; callers cannot send table/view names.
 export function dataOperationEnvironment(env = process.env) {
+  const projectId = env.BQ_PROJECT_ID ?? env.GCLOUD_PROJECT ?? 'bigdata-467917'
+  const datasetId = env.BQ_MART_DATASET ?? 'dash_ans'
+  const source = (value) => sourceName(value, projectId, datasetId)
   return Object.freeze({
-    VITE_DATASET_VIEW: sourceName(env.BQ_EXPORT_VIEW ?? 'bigdata-467917.dash_ans.indicadores_curados_snapshot_consolidado'),
-    VITE_MART_ANS_TABLE: sourceName(env.BQ_MART_ANS_TABLE || 'bigdata-467917.dash_ans.indicadores_mart_ans_consolidado'),
-    VITE_MART_UNIODONTO_TABLE: sourceName(env.BQ_MART_UNIODONTO_TABLE || 'bigdata-467917.dash_ans.indicadores_mart_uniodonto_consolidado'),
-    VITE_PRESTADORES_TABLE: sourceName(env.BQ_PRESTADORES_TABLE ?? 'bigdata-467917.dash_ans.prestadores_ativos_uniodonto_origem'),
+    VITE_DATASET_VIEW: source(env.BQ_EXPORT_VIEW ?? `${datasetId}.indicadores_curados_snapshot_consolidado`),
+    VITE_MART_ANS_TABLE: source(env.BQ_MART_ANS_TABLE || 'indicadores_mart_ans_consolidado'),
+    VITE_MART_UNIODONTO_TABLE: source(env.BQ_MART_UNIODONTO_TABLE || 'indicadores_mart_uniodonto_consolidado'),
+    VITE_PRESTADORES_TABLE: source(env.BQ_PRESTADORES_TABLE ?? `${datasetId}.prestadores_ativos_uniodonto_origem`),
     VITE_PRESTADORES_ORIGEM: 'PRÓPRIA',
     // Errors must not be memoized across operations or sessions.
     VITE_PRESTADORES_ERROR_TTL_MS: 0,
