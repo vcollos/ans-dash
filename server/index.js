@@ -3218,7 +3218,7 @@ async function buildAuthProfilePayload(reqUser = {}, accessContext = {}) {
   let operators = accessContext?.operators ?? []
   if (accessContext?.isAdmin) {
     try {
-      const allOperators = (await listUhubOperatorCatalog()).map((item) => ({
+      const allOperators = (await listUhubOperatorCatalogFromBigQuery()).map((item) => ({
         regAns: item.regAns,
         operatorName: item.operatorName,
         canUpload: true,
