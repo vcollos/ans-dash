@@ -168,3 +168,8 @@ test('session bootstrap distinguishes absent cookie from an invalid or revoked s
   assert.equal(rejected.status, 401)
   assert.equal((await rejected.json()).code, undefined)
 })
+
+test('flag-off leaves legacy Firebase middleware reachable despite an old SSO cookie', async () => {
+  const consumer = createSsoConsumer({ config: { enabled: false }, loadLocalAccess: () => assert.fail('SSO disabled') })
+  assert.equal(await consumer.authenticate({ headers: { cookie: `__Host-pfc_sso=${session}`, authorization: 'Bearer legacy' } }, {}), false)
+})

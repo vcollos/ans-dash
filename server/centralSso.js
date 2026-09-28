@@ -147,10 +147,13 @@ export function createSsoConsumer({ config = ssoConfig(), fetchImpl = fetch, loa
     }))
   }
   const authenticate = async (req, res) => {
+    // Explicit flag-off restores the independently validated Firebase path even
+    // when a browser still carries an old SSO cookie. Cookie alone never logs in.
+    if (!config.enabled) return false
     const session = readCookie(req, SESSION)
     if (!session) return false
     headers(res)
-    if (!config.enabled || req.headers.authorization || req.headers['x-auth-token'] || req.headers['x-dev-auth-bypass']) fail(401)
+    if (req.headers.authorization || req.headers['x-auth-token'] || req.headers['x-dev-auth-bypass']) fail(401)
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) mutation(req, session)
     const principal = await inspect(session)
     req.user = principal.user
