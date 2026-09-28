@@ -21,6 +21,8 @@ steps:
       - --build-arg
       - VITE_DATASET_VIEW=${_VITE_DATASET_VIEW}
       - --build-arg
+      - VITE_PFC_SSO_ENABLED=${_VITE_PFC_SSO_ENABLED}
+      - --build-arg
       - VITE_MART_ANS_TABLE=${_VITE_MART_ANS_TABLE}
       - --build-arg
       - VITE_MART_UNIODONTO_TABLE=${_VITE_MART_UNIODONTO_TABLE}
@@ -39,6 +41,7 @@ steps:
         cat > /workspace/cloudrun-env.yaml <<'ENVVARS'
         NODE_ENV: "production"
         SERVE_STATIC: "true"
+        PFC_SSO_ENABLED: "${_PFC_SSO_ENABLED}"
         BQ_PROJECT_ID: "${_BQ_PROJECT_ID}"
         BQ_DATASET: "${_BQ_DATASET}"
         BQ_AUX_DATASET: "${_BQ_AUX_DATASET}"
@@ -94,6 +97,8 @@ options:
   logging: CLOUD_LOGGING_ONLY
 
 substitutions:
+  _VITE_PFC_SSO_ENABLED: "false"
+  _PFC_SSO_ENABLED: "false"
   _SERVICE: ans-dashboard
   _REGION: us-central1
   _RUN_SERVICE_ACCOUNT: ans-dashboard-run@bigdata-467917.iam.gserviceaccount.com

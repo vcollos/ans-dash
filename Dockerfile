@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
+ARG VITE_PFC_SSO_ENABLED=false
 ARG VITE_FIREBASE_API_KEY
 ARG VITE_FIREBASE_AUTH_DOMAIN
 ARG VITE_FIREBASE_PROJECT_ID
@@ -15,6 +16,7 @@ ARG VITE_DATASET_VIEW
 ARG VITE_MART_ANS_TABLE
 ARG VITE_MART_UNIODONTO_TABLE
 
+ENV VITE_PFC_SSO_ENABLED=$VITE_PFC_SSO_ENABLED
 ENV VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY
 ENV VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN
 ENV VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID
@@ -37,6 +39,7 @@ ENV PORT=8080
 
 COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/server ./server
+COPY --from=base /app/src/lib/dataServiceCore.js /app/src/lib/metricFormulas.js /app/src/lib/monetaryIndicators.js /app/src/lib/regulatoryScore.js /app/src/lib/uniodontoMetrics.js /app/src/lib/metricFormulasModoUniodonto.js /app/src/lib/uniodontoPerCapita.js ./src/lib/
 COPY --from=base /app/db ./db
 COPY --from=base /app/dist ./dist
 COPY --from=base /app/Emails-PFC/templates ./Emails-PFC/templates
