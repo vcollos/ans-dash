@@ -72,8 +72,10 @@ function notifyAuthExpired() {
 export async function fetchWithAuth(url, options = {}) {
   const session = getSsoState()
   if (session.status === 'blocked') throw new Error('Entre novamente pelo UHub para continuar.')
-  const target = new URL(url, window.location.origin)
-  if (target.origin !== window.location.origin) throw new Error('Destino de API não autorizado.')
+  if (session.status === 'active') {
+    const target = new URL(url, window.location.origin)
+    if (target.origin !== window.location.origin) throw new Error('Destino de API não autorizado.')
+  }
   const headers = new Headers(options.headers ?? {})
   const timeoutMs = Number(options.timeoutMs ?? 30000)
   const controller = options.signal ? null : new AbortController()
@@ -97,7 +99,7 @@ export async function fetchWithAuth(url, options = {}) {
   try {
     const fetchOptions = { ...options }
     delete fetchOptions.timeoutMs
-    const requestOptions = { ...fetchOptions, headers, credentials: 'same-origin', signal: options.signal ?? controller?.signal }
+    const requestOptions = { ...fetchOptions, headers, signal: options.signal ?? controller?.signal }
     const response = await fetch(url, session.status === 'active' ? ssoRequestOptions(requestOptions, session) : requestOptions)
     if (response.status === 401 && sentAuth) {
       if (session.status === 'active') setSsoState({ status: 'blocked', csrf: null, user: null })

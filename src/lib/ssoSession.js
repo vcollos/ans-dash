@@ -11,15 +11,18 @@ export function ssoRequestOptions(options = {}, session = state) {
   if (!['GET', 'HEAD', 'OPTIONS'].includes(String(options.method ?? 'GET').toUpperCase()) && session.csrf) {
     headers.set('x-csrf-token', session.csrf)
   }
-  return { ...options, headers, credentials: 'same-origin', cache: 'no-store' }
+  return { ...options, headers, credentials: 'same-origin', cache: 'no-store', redirect: 'error' }
 }
 export async function readSsoSession() {
-  const response = await fetch('/api/auth/sso/session', { credentials: 'same-origin', cache: 'no-store' })
+  const response = await fetch('/api/auth/sso/session', { credentials: 'same-origin', cache: 'no-store', redirect: 'error' })
   const payload = await response.json().catch(() => ({}))
   if (response.status === 404 || (response.status === 401 && payload.code === 'SSO_NO_SESSION')) {
     return { status: 'legacy', csrf: null, user: null, available: response.status !== 404 }
   }
-  if (!response.ok || payload.user?.authSource !== 'uhub-sso' || !payload.user?.uid || !payload.csrf || payload.expiresAt * 1000 <= Date.now()) {
+  const validUser = payload.user?.authSource === 'uhub-sso' && typeof payload.user?.uid === 'string' && payload.user.uid.trim().length > 0
+  const validCsrf = typeof payload.csrf === 'string' && /^[A-Za-z0-9_-]{43}$/.test(payload.csrf)
+  const validExpiry = Number.isSafeInteger(payload.expiresAt) && payload.expiresAt > Date.now() / 1000
+  if (!response.ok || !validUser || !validCsrf || !validExpiry) {
     throw new Error(response.status === 401 || response.status === 403
       ? 'Sua sessão UHub expirou ou o acesso não foi autorizado. Entre novamente pelo UHub.'
       : 'O acesso pelo UHub está indisponível. Tente novamente em instantes.')
