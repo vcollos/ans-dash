@@ -133,6 +133,7 @@ export function createSsoConsumer({ config = ssoConfig(), fetchImpl = fetch, loa
     app.get('/api/auth/sso/session', wrap(async (req, res) => {
       if (Object.keys(req.query).length || (req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site']))) fail()
       const session = readCookie(req, SESSION)
+      if (!session) return res.status(401).json({ error: 'Sessão SSO ausente.', code: 'SSO_NO_SESSION' })
       const principal = await inspect(session)
       return res.json({ user: { uid: principal.user.uid, authSource: 'uhub-sso' }, csrf: csrf(session), expiresAt: principal.expiresAt })
     }))

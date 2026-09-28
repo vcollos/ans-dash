@@ -1,0 +1,2647 @@
+import { metricFormulas, metricSql } from './metricFormulas.js'
+import {
+  applyDerivedMonetaryValues,
+  monetaryIndicatorColumnMap,
+  monetaryIndicatorColumns,
+  monetaryIndicatorPhysicalColumns,
+} from './monetaryIndicators.js'
+import {
+  REGULATORY_INDICATORS,
+  REGULATORY_PERCENTILE_KEYS,
+  REGULATORY_PERCENTILES,
+  getIndicatorSql,
+  evaluateRegulatoryScore,
+} from './regulatoryScore.js'
+import {
+  DEFAULT_UNIODONTO_RANKING_METRIC,
+  UNIODONTO_INDICATORS,
+  UNIODONTO_METRIC_SQL,
+  UNIODONTO_RANKING_METRICS,
+  getUniodontoMetricSql,
+  computeUniodontoMetrics,
+} from './uniodontoMetrics.js'
+import {
+  buildPaymentModalityWhereClause,
+  buildRevenueBaseExpression,
+  sanitizeUniodontoPerCapitaFilters,
+} from './uniodontoPerCapita.js'
+
+export const VIRTUAL_OPERATOR_UNIODONTO = 'Sistema Uniodonto'
+
+export const DETAIL_TABLE_FIELDS = [
+  'nome_operadora',
+  'modalidade',
+  'porte',
+  'reg_ans',
+  'ano',
+  'trimestre',
+  'qt_beneficiarios',
+  'qt_prestadores',
+  'sinistralidade_pct',
+  'sinistralidade_acumulada_pct',
+  'sinistralidade_trimestral_pct',
+  'margem_lucro_pct',
+  'despesas_adm_pct',
+  'despesas_comerciais_pct',
+  'despesas_operacionais_pct',
+  'indice_resultado_financeiro_pct',
+  'retorno_pl_pct',
+  'liquidez_corrente',
+  'liquidez_imediata',
+  'capital_terceiros_sobre_pl',
+  'pmcr',
+  'pmpe',
+  'resultado_financeiro',
+  'resultado_liquido',
+  'vr_receitas',
+  'vr_despesas',
+  'vr_receitas_patrimoniais',
+  'vr_contraprestacoes',
+  'vr_contraprestacoes_efetivas',
+  'vr_corresponsabilidade_cedida',
+  'vr_eventos_liquidos',
+]
+
+export function createDataService({ env = {}, executeQuery, scopeSource = (source) => source }) {
+const formatTableRef = (value) => {
+  const trimmed = String(value ?? '').trim()
+  if (!trimmed) return trimmed
+  if (trimmed.includes('`')) return trimmed
+  return `\`${trimmed}\``
+}
+
+const BASE_VIEW_RAW =
+  env.VITE_DATASET_VIEW ?? 'bigdata-467917.dash_ans.indicadores_curados_snapshot_consolidado'
+const MART_ANS_VIEW_RAW =
+  env.VITE_MART_ANS_TABLE ??
+  'bigdata-467917.dash_ans.indicadores_mart_ans_consolidado'
+const MART_UNIODONTO_VIEW_RAW =
+  env.VITE_MART_UNIODONTO_TABLE ??
+  'bigdata-467917.dash_ans.indicadores_mart_uniodonto_consolidado'
+const DEFAULT_VIEW_RAW = MART_ANS_VIEW_RAW || BASE_VIEW_RAW
+const UNIODONTO_VIEW_RAW = MART_UNIODONTO_VIEW_RAW || BASE_VIEW_RAW
+const DEFAULT_VIEW = scopeSource(formatTableRef(DEFAULT_VIEW_RAW))
+const UNIODONTO_VIEW = scopeSource(formatTableRef(UNIODONTO_VIEW_RAW))
+const HAS_ANS_MART = Boolean(MART_ANS_VIEW_RAW)
+const HAS_UNIODONTO_MART = Boolean(MART_UNIODONTO_VIEW_RAW)
+const viewColumnsCache = new Map()
+
+const PRESTADORES_TABLE_RAW =
+  env.VITE_PRESTADORES_TABLE ?? 'dash_ans.prestadores_ativos_uniodonto_origem'
+const PRESTADORES_TABLE = PRESTADORES_TABLE_RAW.replace(/`/g, '')
+const PRESTADORES_ORIGEM = env.VITE_PRESTADORES_ORIGEM ?? 'PRÓPRIA'
+const PRESTADORES_CACHE_TTL_MS = Number(env.VITE_PRESTADORES_CACHE_TTL_MS ?? 12 * 60 * 60 * 1000)
+const PRESTADORES_ERROR_TTL_MS = Number(env.VITE_PRESTADORES_ERROR_TTL_MS ?? 5 * 60 * 1000)
+const PRESTADORES_CACHE_ENABLED =
+  Number.isFinite(PRESTADORES_CACHE_TTL_MS) && PRESTADORES_CACHE_TTL_MS > 0
+let prestadoresCache = null
+let prestadoresCacheExpiresAt = 0
+let prestadoresCachePromise = null
+const QUERY_RESULT_CACHE_TTL_MS = Number(env.VITE_QUERY_CACHE_TTL_MS ?? 5 * 60 * 1000)
+const QUERY_RESULT_CACHE_MAX_ENTRIES = Number(env.VITE_QUERY_CACHE_MAX_ENTRIES ?? 150)
+const queryResultCache = new Map()
+const queryResultInFlight = new Map()
+
+const sanitizeList = (values = []) => values.filter((value) => value !== null && value !== undefined && value !== '')
+const sanitizeSql = (value) => (value ? value.replaceAll('\\', '\\\\').replaceAll("'", "''") : value)
+const quoteIdentifier = (value) => `\`${String(value).replace(/`/g, '\\`')}\``
+
+const ANS_METRIC_IDS = new Set(metricFormulas.map((metric) => metric.id))
+const UNIODONTO_METRIC_IDS = new Set(Object.keys(UNIODONTO_METRIC_SQL))
+const UNIODONTO_INDICATOR_IDS = new Set(UNIODONTO_INDICATORS.map((metric) => metric.id))
+
+function isUniodontoMetricId(metricId) {
+  return UNIODONTO_INDICATOR_IDS.has(metricId)
+}
+
+function isUniodontoMetricList(metrics = []) {
+  const filtered = (metrics ?? []).filter((metric) => metric && metric !== 'regulatory_score')
+  if (!filtered.length) return false
+  return filtered.every((metric) => UNIODONTO_INDICATOR_IDS.has(metric))
+}
+
+function resolveView({ mode, metrics } = {}) {
+  if (mode === 'uniodonto') return UNIODONTO_VIEW
+  if (mode === 'ans') return DEFAULT_VIEW
+  if (metrics && isUniodontoMetricList(metrics)) return UNIODONTO_VIEW
+  return DEFAULT_VIEW
+}
+
+function resolveMetricExpression(metricId, { mode = 'ans', source = 'base' } = {}) {
+  if (!metricId) return null
+  const allowPrecomputed = source === 'base'
+  if (mode === 'ans') {
+    if (allowPrecomputed && HAS_ANS_MART && ANS_METRIC_IDS.has(metricId)) {
+      return quoteIdentifier(metricId)
+    }
+    return metricSql[metricId] ?? getUniodontoMetricSql(metricId) ?? null
+  }
+  if (allowPrecomputed && HAS_UNIODONTO_MART && UNIODONTO_METRIC_IDS.has(metricId)) {
+    return quoteIdentifier(metricId)
+  }
+  return getUniodontoMetricSql(metricId) ?? metricSql[metricId] ?? null
+}
+
+const isVirtualUniodontoOperator = (operatorName) => operatorName === VIRTUAL_OPERATOR_UNIODONTO
+const stripOperatorSelection = (filters = {}) => {
+  const { operatorName: _operatorName, search: _search, regAns: _regAns, ...rest } = filters ?? {}
+  return {
+    ...rest,
+    operatorName: null,
+    search: '',
+    regAns: [],
+  }
+}
+
+function buildPorteExpression({ beneficiariosColumn = 'qt_beneficiarios' } = {}) {
+  return `
+    COALESCE(
+      porte,
+      CASE
+        WHEN ${beneficiariosColumn} IS NULL THEN NULL
+        WHEN ${beneficiariosColumn} <= 19999 THEN 'Pequeno Porte'
+        WHEN ${beneficiariosColumn} <= 99999 THEN 'Médio Porte'
+        ELSE 'Grande Porte'
+      END
+    )
+  `.trim()
+}
+
+function buildPeriodoIdClause(filters = {}) {
+  const anos = sanitizeList(filters.anos).map(Number).filter(Number.isFinite)
+  if (!anos.length) return null
+  const trimestresRaw = sanitizeList(filters.trimestres).map(Number).filter(Number.isFinite)
+  const trimestres = trimestresRaw.length ? trimestresRaw : [1, 2, 3, 4]
+  const ids = []
+  for (const ano of anos) {
+    for (const trimestre of trimestres) {
+      if (trimestre >= 1 && trimestre <= 4) {
+        ids.push(ano * 10 + trimestre)
+      }
+    }
+  }
+  if (!ids.length) return null
+  return `periodo_id IN (${ids.join(',')})`
+}
+
+function buildRegulatoryIndicatorProjection({ aggregate = false, source = 'base' } = {}) {
+  return REGULATORY_INDICATORS.map((indicator) => {
+    const expression = resolveMetricExpression(indicator.id, { mode: 'ans', source }) ?? getIndicatorSql(indicator.id)
+    if (!expression) {
+      throw new Error(`Sem expressão SQL para indicador ${indicator.id}`)
+    }
+    const trimmed = expression.trim()
+    if (aggregate) {
+      return `AVG(${trimmed}) AS ${indicator.id}`
+    }
+    return `${trimmed} AS ${indicator.id}`
+  })
+}
+
+function buildTrendMetricEntries(metrics = [], { mode = 'ans', source = 'base' } = {}) {
+  const unique = new Set()
+  return (metrics ?? [])
+    .map((metricId) => {
+      if (!metricId || metricId === 'regulatory_score') return null
+      if (unique.has(metricId)) return null
+      const expression = resolveMetricExpression(metricId, { mode, source })
+      if (!expression) return null
+      unique.add(metricId)
+      return {
+        id: metricId,
+        expression: expression.trim(),
+      }
+    })
+    .filter(Boolean)
+}
+
+function buildTrendMetricSelectList(entries = [], { aggregate = false } = {}) {
+  if (!entries.length) return ''
+  return entries
+    .map(({ id, expression }) => {
+      const resolved = aggregate ? `AVG(${expression})` : expression
+      return `${resolved} AS ${quoteIdentifier(id)}`
+    })
+    .join(',\n      ')
+}
+
+function buildRegulatoryPercentileFragments(baseAlias = 'peer_base') {
+  const fragments = []
+  REGULATORY_INDICATORS.forEach((indicator) => {
+    const column = `${baseAlias}.${indicator.id}`
+    REGULATORY_PERCENTILE_KEYS.forEach((key) => {
+      const percentileValue = REGULATORY_PERCENTILES[key]
+      const offset = Math.round(percentileValue * 100)
+      fragments.push(`APPROX_QUANTILES(${column}, 100)[OFFSET(${offset})] AS ${indicator.id}_${key}`)
+    })
+  })
+  return fragments
+}
+
+function buildWhereClause(filters = {}) {
+  const clauses = []
+  if (filters.modalidades?.length) {
+    const values = filters.modalidades.map((value) => `'${sanitizeSql(value).toLowerCase()}'`)
+    clauses.push(`LOWER(TRIM(modalidade)) IN (${values.join(',')})`)
+  }
+  if (filters.portes?.length) {
+    const values = filters.portes.map((value) => `'${sanitizeSql(value)}'`)
+    clauses.push(`${buildPorteExpression()} IN (${values.join(',')})`)
+  }
+  if (filters.anos?.length) {
+    clauses.push(`ano IN (${filters.anos.join(',')})`)
+  }
+  if (filters.trimestres?.length) {
+    clauses.push(`trimestre IN (${filters.trimestres.join(',')})`)
+  }
+  const periodoIdClause = buildPeriodoIdClause(filters)
+  if (periodoIdClause) clauses.push(periodoIdClause)
+  if (filters.ativa === true) clauses.push('ativa IS TRUE')
+  else if (filters.ativa === false) clauses.push('ativa IS FALSE')
+
+  const uniodontoClause = buildUniodontoClause(filters.uniodonto)
+  if (uniodontoClause) clauses.push(uniodontoClause)
+
+  if (filters.regAns?.length) clauses.push(`reg_ans IN (${filters.regAns.join(',')})`)
+
+  if (filters.search && !filters.operatorName) {
+    const v = sanitizeSql(filters.search).toLowerCase()
+    clauses.push(`lower(nome_operadora) LIKE '%${v}%'`)
+  }
+  if (filters.operatorName) {
+    if (isVirtualUniodontoOperator(filters.operatorName)) {
+      const virtualClause = buildUniodontoClause(true)
+      if (virtualClause) clauses.push(virtualClause)
+    } else {
+      clauses.push(`nome_operadora = '${sanitizeSql(filters.operatorName)}'`)
+    }
+  }
+
+  return clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+}
+
+function buildCohortFilters(filters = {}, { uniodonto } = {}) {
+  const { operatorName: _operatorName, search: _search, regAns: _regAns, ...rest } = filters ?? {}
+  return {
+    ...rest,
+    search: '',
+    regAns: [],
+    operatorName: null,
+    uniodonto,
+  }
+}
+
+const COHORT_AGGREGATE_SUM_COLUMNS = [
+  'qt_beneficiarios',
+  'prev_qt_beneficiarios',
+  'delta_qt_beneficiarios',
+  'qt_prestadores',
+  ...monetaryIndicatorPhysicalColumns,
+  'vr_desp_comerciais_promocoes',
+  'vr_conta_464',
+  'vr_conta_442129119',
+  'vr_conta_332129111',
+  'vr_conta_332189111',
+  'vr_conta_32',
+  'vr_conta_237',
+  'vr_conta_217',
+  'vr_conta_216',
+  'vr_conta_236',
+  'resultado_financeiro',
+  'resultado_liquido_calculado',
+  'resultado_liquido_final_ans',
+  'resultado_liquido_informado',
+  'resultado_liquido',
+]
+
+function resolveCohortColumnSource(column, availableColumns = []) {
+  if (monetaryIndicatorColumnMap[column]) {
+    return resolveMonetaryColumnSource(column, availableColumns)
+  }
+  return availableColumns.includes(column) ? column : null
+}
+
+function buildCohortAggregateSelectList(sumColumns = COHORT_AGGREGATE_SUM_COLUMNS, availableColumns = []) {
+  return sumColumns.map((column) => {
+    const source = resolveCohortColumnSource(column, availableColumns)
+    const alias = source ?? column
+    const expression = source ? `COALESCE(${quoteIdentifier(source)}, 0)` : 'CAST(NULL AS NUMERIC)'
+    return `SUM(${expression}) AS ${quoteIdentifier(alias)}`
+  })
+}
+
+async function fetchVirtualCohortSnapshot(filters = {}, { label = VIRTUAL_OPERATOR_UNIODONTO } = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
+  const cohortFilters = buildCohortFilters(filters, { uniodonto: true })
+  const { whereClause } = buildFilterClauses(cohortFilters, { latestOnlyDefault: false })
+  const availableColumns = await getViewColumns(viewRef)
+  const sumSelectList = buildCohortAggregateSelectList(COHORT_AGGREGATE_SUM_COLUMNS, availableColumns)
+  const cardMetricColumnsSql = buildCardMetricSelectSql({ aggregate: false, source: 'aggregate', mode: 'ans' })
+  const indicatorProjection = buildRegulatoryIndicatorProjection({ source: 'aggregate' }).join(',\n      ')
+  const query = `
+    WITH base AS (
+      SELECT *
+      FROM ${viewRef}
+      ${whereClause ?? ''}
+    ), aggregated AS (
+      SELECT
+        ano,
+        trimestre,
+        periodo,
+        periodo_id,
+        COUNT(DISTINCT nome_operadora) AS cohort_count
+        ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
+      FROM base
+      GROUP BY ano, trimestre, periodo, periodo_id
+    ), latest AS (
+      SELECT *
+      FROM aggregated
+      ORDER BY periodo_id DESC NULLS LAST, ano DESC, trimestre DESC
+      LIMIT 1
+    )
+    SELECT
+      '${sanitizeSql(label)}' AS nome_operadora,
+      CAST(NULL AS STRING) AS reg_ans,
+      CAST(NULL AS STRING) AS modalidade,
+      CAST(TRUE AS BOOL) AS uniodonto,
+      CAST(NULL AS BOOL) AS ativa,
+      CASE
+        WHEN latest.${quoteIdentifier('qt_beneficiarios')} IS NULL THEN NULL
+        WHEN latest.${quoteIdentifier('qt_beneficiarios')} <= 19999 THEN 'Pequeno Porte'
+        WHEN latest.${quoteIdentifier('qt_beneficiarios')} <= 99999 THEN 'Médio Porte'
+        ELSE 'Grande Porte'
+      END AS porte,
+      latest.*
+      ${cardMetricColumnsSql ? `,\n      ${cardMetricColumnsSql}` : ''}
+      ${indicatorProjection ? `,\n      ${indicatorProjection}` : ''}
+    FROM latest
+  `
+  const rows = await runQuery(query)
+  return rows[0] ?? null
+}
+
+async function fetchVirtualMarketSnapshot(filters = {}, { label = 'Mercado (sem Uniodonto)' } = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
+  const marketFilters = buildCohortFilters(filters, { uniodonto: false })
+  const { whereClause } = buildFilterClauses(marketFilters, { latestOnlyDefault: false })
+  const availableColumns = await getViewColumns(viewRef)
+  const sumSelectList = buildCohortAggregateSelectList(COHORT_AGGREGATE_SUM_COLUMNS, availableColumns)
+  const cardMetricColumnsSql = buildCardMetricSelectSql({ aggregate: false, source: 'aggregate', mode: 'ans' })
+  const indicatorProjection = buildRegulatoryIndicatorProjection({ source: 'aggregate' }).join(',\n      ')
+  const query = `
+    WITH base AS (
+      SELECT *
+      FROM ${viewRef}
+      ${whereClause ?? ''}
+    ), aggregated AS (
+      SELECT
+        ano,
+        trimestre,
+        periodo,
+        periodo_id,
+        COUNT(DISTINCT nome_operadora) AS cohort_count
+        ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
+      FROM base
+      GROUP BY ano, trimestre, periodo, periodo_id
+    ), latest AS (
+      SELECT *
+      FROM aggregated
+      ORDER BY periodo_id DESC NULLS LAST, ano DESC, trimestre DESC
+      LIMIT 1
+    )
+    SELECT
+      '${sanitizeSql(label)}' AS nome_operadora,
+      CAST(NULL AS STRING) AS reg_ans,
+      CAST(NULL AS STRING) AS modalidade,
+      CAST(FALSE AS BOOL) AS uniodonto,
+      CAST(NULL AS BOOL) AS ativa,
+      CASE
+        WHEN latest.${quoteIdentifier('qt_beneficiarios')} IS NULL THEN NULL
+        WHEN latest.${quoteIdentifier('qt_beneficiarios')} <= 19999 THEN 'Pequeno Porte'
+        WHEN latest.${quoteIdentifier('qt_beneficiarios')} <= 99999 THEN 'Médio Porte'
+        ELSE 'Grande Porte'
+      END AS porte,
+      latest.*
+      ${cardMetricColumnsSql ? `,\n      ${cardMetricColumnsSql}` : ''}
+      ${indicatorProjection ? `,\n      ${indicatorProjection}` : ''}
+    FROM latest
+  `
+  const rows = await runQuery(query)
+  return rows[0] ?? null
+}
+
+function buildFilterClauses(filters = {}, { latestOnlyDefault = true } = {}) {
+  const latestFilterApplies = latestOnlyDefault && sanitizeList(filters.trimestres).length === 0
+  let whereClause = buildWhereClause(filters)
+  if (latestFilterApplies) {
+    whereClause = whereClause ? `${whereClause} AND trimestre_rank = 1` : 'WHERE trimestre_rank = 1'
+  }
+
+  return {
+    whereClause,
+  }
+}
+
+function getWhereExpression(filters = {}) {
+  const clauses = []
+  if (filters.modalidades?.length) {
+    clauses.push(`LOWER(TRIM(modalidade)) IN (${filters.modalidades.map((value) => `'${sanitizeSql(value).toLowerCase()}'`).join(',')})`)
+  }
+  if (filters.portes?.length) {
+    clauses.push(`${buildPorteExpression()} IN (${filters.portes.map((value) => `'${sanitizeSql(value)}'`).join(',')})`)
+  }
+  const uniodontoClause = buildUniodontoClause(filters.uniodonto)
+  if (uniodontoClause) {
+    clauses.push(uniodontoClause)
+  }
+  if (filters.ativa !== undefined) {
+    clauses.push(`ativa IS ${filters.ativa ? 'TRUE' : 'FALSE'}`)
+  }
+  return clauses.join(' AND ')
+}
+
+function buildUniodontoClause(value) {
+  if (value !== true && value !== false) return ''
+  const nameMatch = "LOWER(COALESCE(nome_operadora, '')) LIKE '%uniodonto%'"
+  if (value) {
+    return `(COALESCE(uniodonto, FALSE) IS TRUE OR ${nameMatch})`
+  }
+  return `(COALESCE(uniodonto, FALSE) IS FALSE AND NOT (${nameMatch}))`
+}
+
+function resolveMonetaryColumnSource(column, availableColumns = []) {
+  const candidates = monetaryIndicatorColumnMap[column] ?? [column]
+  return candidates.find((candidate) => availableColumns.includes(candidate))
+}
+
+function buildMonetaryAggregateFragments(availableColumns = []) {
+  return monetaryIndicatorPhysicalColumns.map((column) => {
+    const source = resolveMonetaryColumnSource(column, availableColumns)
+    const expression = source ? `COALESCE(base.${quoteIdentifier(source)}, 0)` : 'CAST(NULL AS NUMERIC)'
+    return `SUM(${expression}) AS ${quoteIdentifier(column)}`
+  })
+}
+
+function buildMonetarySelectList(alias, prefix = '') {
+  if (!monetaryIndicatorPhysicalColumns.length) return ''
+  return monetaryIndicatorPhysicalColumns
+    .map((column) => `${alias}.${quoteIdentifier(column)} AS ${quoteIdentifier(`${prefix}${column}`)}`)
+    .join(',\n      ')
+}
+
+function buildSafeRatioSql(numeratorExpression, denominatorExpression) {
+  return `
+    CASE
+      WHEN (${denominatorExpression}) IS NULL OR (${denominatorExpression}) = 0 THEN NULL
+      ELSE (${numeratorExpression}) / (${denominatorExpression})
+    END
+  `.trim()
+}
+
+const computeDeltaPercent = (current, previous) => {
+  if (current === null || current === undefined) return null
+  if (previous === null || previous === undefined || previous === 0) return null
+  const delta = ((current - previous) / Math.abs(previous)) * 100
+  return Number.isFinite(delta) ? delta : null
+}
+
+const toNumeric = (value) => {
+  if (value === null || value === undefined) return null
+  const numeric = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+function normalizeRegAns(value) {
+  if (value === null || value === undefined) return null
+  const normalized = String(value).trim()
+  return normalized.length ? normalized : null
+}
+
+function isPrestadoresCacheValid() {
+  if (!prestadoresCache) return false
+  if (!PRESTADORES_CACHE_ENABLED) return true
+  return prestadoresCacheExpiresAt > Date.now()
+}
+
+async function fetchPrestadoresMap() {
+  const tableRef = scopeSource(`\`${PRESTADORES_TABLE}\``)
+  const origem = sanitizeSql(PRESTADORES_ORIGEM)
+  const sql = `
+    WITH latest AS (
+      SELECT MAX(COMPETENCIA) AS competencia
+      FROM ${tableRef}
+    )
+    SELECT
+      CAST(p.reg_ans AS STRING) AS reg_ans,
+      COUNT(DISTINCT p.ID_ESTABELECIMENTO_SAUDE) AS qt_prestadores
+    FROM ${tableRef} p
+    JOIN latest ON p.COMPETENCIA = latest.competencia
+    WHERE p.origem = '${origem}'
+    GROUP BY p.reg_ans
+  `
+  const rows = await runQuery(sql, { skipPrestadores: true })
+  const map = new Map()
+  rows.forEach((row) => {
+    const key = normalizeRegAns(row?.reg_ans)
+    if (!key) return
+    const count = Number(row?.qt_prestadores)
+    map.set(key, Number.isFinite(count) ? count : row?.qt_prestadores)
+  })
+  return map
+}
+
+async function getPrestadoresMap() {
+  if (isPrestadoresCacheValid()) {
+    return prestadoresCache
+  }
+  if (prestadoresCachePromise) {
+    return prestadoresCachePromise
+  }
+  prestadoresCachePromise = fetchPrestadoresMap()
+    .then((map) => {
+      prestadoresCache = map
+      prestadoresCacheExpiresAt = PRESTADORES_CACHE_ENABLED ? Date.now() + PRESTADORES_CACHE_TTL_MS : Number.POSITIVE_INFINITY
+      return map
+    })
+    .catch((err) => {
+      console.warn('[dataService] Falha ao carregar prestadores', err)
+      const shouldCacheError =
+        PRESTADORES_CACHE_ENABLED && Number.isFinite(PRESTADORES_ERROR_TTL_MS) && PRESTADORES_ERROR_TTL_MS > 0
+      if (shouldCacheError) {
+        prestadoresCache = new Map()
+        prestadoresCacheExpiresAt = Date.now() + PRESTADORES_ERROR_TTL_MS
+        return prestadoresCache
+      }
+      prestadoresCache = null
+      prestadoresCacheExpiresAt = 0
+      throw err
+    })
+    .finally(() => {
+      prestadoresCachePromise = null
+    })
+  return prestadoresCachePromise
+}
+
+function shouldAttachPrestadores(rows = []) {
+  return rows.some((row) => {
+    if (!row || row.qt_prestadores !== null && row.qt_prestadores !== undefined) return false
+    return normalizeRegAns(row.reg_ans) !== null
+  })
+}
+
+async function attachPrestadores(rows = []) {
+  if (!rows.length || !shouldAttachPrestadores(rows)) {
+    return rows
+  }
+  let map = null
+  try {
+    map = await getPrestadoresMap()
+  } catch {
+    return rows
+  }
+  if (!map || !map.size) return rows
+  return rows.map((row) => {
+    if (!row || row.qt_prestadores !== null && row.qt_prestadores !== undefined) {
+      return row
+    }
+    const key = normalizeRegAns(row.reg_ans)
+    if (!key) return row
+    if (!map.has(key)) return row
+    return {
+      ...row,
+      qt_prestadores: map.get(key),
+    }
+  })
+}
+
+function getCachedQueryPayload(cacheKey) {
+  if (!Number.isFinite(QUERY_RESULT_CACHE_TTL_MS) || QUERY_RESULT_CACHE_TTL_MS <= 0) return null
+  const cached = queryResultCache.get(cacheKey)
+  if (!cached) return null
+  if (cached.expiresAt <= Date.now()) {
+    queryResultCache.delete(cacheKey)
+    return null
+  }
+  queryResultCache.delete(cacheKey)
+  queryResultCache.set(cacheKey, cached)
+  return cached.payload
+}
+
+function setCachedQueryPayload(cacheKey, payload) {
+  if (!Number.isFinite(QUERY_RESULT_CACHE_TTL_MS) || QUERY_RESULT_CACHE_TTL_MS <= 0) return
+  queryResultCache.set(cacheKey, {
+    payload,
+    expiresAt: Date.now() + QUERY_RESULT_CACHE_TTL_MS,
+  })
+  while (queryResultCache.size > QUERY_RESULT_CACHE_MAX_ENTRIES) {
+    queryResultCache.delete(queryResultCache.keys().next().value)
+  }
+}
+
+async function fetchQueryPayload(sql, { includeFields = false } = {}) {
+  const cacheKey = `${includeFields ? 'fields' : 'rows'}:${sql}`
+  const cached = getCachedQueryPayload(cacheKey)
+  if (cached) return cached
+  const inflight = queryResultInFlight.get(cacheKey)
+  if (inflight) return inflight
+
+  const request = executeQuery(sql, { includeFields })
+    .then((payload) => {
+      setCachedQueryPayload(cacheKey, payload)
+      return payload
+    })
+    .finally(() => {
+      queryResultInFlight.delete(cacheKey)
+    })
+
+  queryResultInFlight.set(cacheKey, request)
+  return request
+}
+
+async function runQuery(sql, options = {}) {
+  const payload = await fetchQueryPayload(sql)
+  const rows = payload.rows ?? []
+  if (options.skipPrestadores) {
+    return rows
+  }
+  return attachPrestadores(rows)
+}
+
+async function runQueryWithFields(sql) {
+  const payload = await fetchQueryPayload(sql, { includeFields: true })
+  return {
+    rows: payload.rows ?? [],
+    fields: payload.fields ?? [],
+  }
+}
+
+async function getViewColumns(viewRef = DEFAULT_VIEW) {
+  const cacheKey = viewRef ?? DEFAULT_VIEW
+  if (viewColumnsCache.has(cacheKey)) {
+    return viewColumnsCache.get(cacheKey)
+  }
+  const { fields } = await runQueryWithFields(`SELECT * FROM ${cacheKey} WHERE 1=0`)
+  if (fields.length) {
+    const columns = fields.map((field) => field.name)
+    viewColumnsCache.set(cacheKey, columns)
+    return columns
+  }
+  const sampleRows = await runQuery(`SELECT * FROM ${cacheKey} LIMIT 1`, { skipPrestadores: true })
+  if (sampleRows[0]) {
+    const columns = Object.keys(sampleRows[0])
+    viewColumnsCache.set(cacheKey, columns)
+    return columns
+  }
+  const columns = []
+  viewColumnsCache.set(cacheKey, columns)
+  return columns
+}
+
+async function assertDatasetReady() {
+  const viewRef = resolveView({ mode: 'ans' })
+  await runQuery(`SELECT 1 FROM ${viewRef} WHERE 1=0`, { skipPrestadores: true })
+  return {
+    source: 'bigquery',
+    view: viewRef,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+async function fetchAvailablePeriods() {
+  const viewRef = resolveView({ mode: 'ans' })
+  const rows = await runQuery(`
+    SELECT DISTINCT ano, trimestre, CONCAT(ano, 'T', trimestre) AS periodo
+    FROM ${viewRef}
+    WHERE ano IS NOT NULL AND trimestre IS NOT NULL
+    ORDER BY ano DESC, trimestre DESC
+  `)
+  return rows.map((row) => ({
+    ano: row.ano,
+    trimestre: row.trimestre,
+    periodo: row.periodo ?? `${row.ano}T${row.trimestre}`,
+  }))
+}
+
+async function fetchOperatorOptions({ anos = [], trimestres = [] } = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
+  const clauses = []
+  if (anos.length) clauses.push(`ano IN (${anos.join(',')})`)
+  if (trimestres.length) clauses.push(`trimestre IN (${trimestres.join(',')})`)
+  const whereClause = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+  const rows = await runQuery(`
+    SELECT DISTINCT nome_operadora
+    FROM ${viewRef}
+    ${whereClause}
+    ORDER BY nome_operadora
+  `)
+  const options = rows.map((row) => row.nome_operadora).filter(Boolean)
+  return [VIRTUAL_OPERATOR_UNIODONTO, ...options]
+}
+
+async function fetchDashboardBootstrap() {
+  const viewRef = resolveView({ mode: 'ans' })
+  const rows = await runQuery(
+    `
+    WITH periodos AS (
+      SELECT DISTINCT ano, trimestre, CONCAT(ano, 'T', trimestre) AS periodo
+      FROM ${viewRef}
+      WHERE ano IS NOT NULL AND trimestre IS NOT NULL
+    ), operadoras AS (
+      SELECT DISTINCT nome_operadora
+      FROM ${viewRef}
+      WHERE nome_operadora IS NOT NULL
+    )
+    SELECT
+      (SELECT ARRAY_AGG(nome_operadora ORDER BY nome_operadora) FROM operadoras) AS operadoras,
+      (SELECT ARRAY_AGG(STRUCT(ano, trimestre, periodo) ORDER BY ano DESC, trimestre DESC) FROM periodos) AS periodos
+  `,
+    { skipPrestadores: true },
+  )
+  const row = rows[0] ?? {}
+  const operatorNames = Array.isArray(row.operadoras)
+    ? row.operadoras.filter((name) => name && name !== VIRTUAL_OPERATOR_UNIODONTO)
+    : []
+  const availablePeriods = Array.isArray(row.periodos)
+    ? row.periodos
+        .filter((period) => period?.ano !== null && period?.ano !== undefined && period?.trimestre)
+        .map((period) => ({
+          ano: period.ano,
+          trimestre: period.trimestre,
+          periodo: period.periodo ?? `${period.ano}T${period.trimestre}`,
+        }))
+    : []
+  return {
+    operatorNames: [VIRTUAL_OPERATOR_UNIODONTO, ...operatorNames],
+    availablePeriods,
+  }
+}
+
+async function fetchOperatorPeriods(operatorName) {
+  if (!operatorName) return []
+  const viewRef = resolveView({ mode: 'ans' })
+  if (isVirtualUniodontoOperator(operatorName)) {
+    const rows = await runQuery(`
+      SELECT DISTINCT ano, trimestre
+      FROM ${viewRef}
+      WHERE COALESCE(uniodonto, FALSE) IS TRUE
+      ORDER BY ano, trimestre
+    `)
+    return rows
+  }
+  const rows = await runQuery(`
+    SELECT DISTINCT ano, trimestre
+    FROM ${viewRef}
+    WHERE nome_operadora = '${sanitizeSql(operatorName)}'
+    ORDER BY ano, trimestre
+  `)
+  return rows
+}
+
+const cardMetricDefinitions = metricFormulas.filter((metric) => metric.showInCards)
+
+function buildCardMetricSelectSql({ aggregate = true, source = 'base', mode = 'ans' } = {}) {
+  return cardMetricDefinitions
+    .map((metric) => {
+      const expression = resolveMetricExpression(metric.id, { mode, source })
+      if (!expression) return null
+      if (aggregate) {
+        return `AVG(${expression.trim()}) AS ${metric.id}`
+      }
+      return `${expression.trim()} AS ${metric.id}`
+    })
+    .filter(Boolean)
+    .join(',\n        ')
+}
+
+async function summarizePeriod(filters) {
+  const viewRef = resolveView({ mode: 'ans' })
+  const isVirtual = isVirtualUniodontoOperator(filters?.operatorName)
+  const { whereClause } = buildFilterClauses(isVirtual ? buildCohortFilters(filters, { uniodonto: true }) : filters)
+  const cardMetricSelectSql = buildCardMetricSelectSql({ aggregate: true, source: 'base', mode: 'ans' })
+  const cardMetricColumnsSql = buildCardMetricSelectSql({ aggregate: false, source: 'aggregate', mode: 'ans' })
+  const query = `
+    WITH base AS (
+      SELECT *
+      FROM ${viewRef}
+      ${whereClause}
+    ), period_raw AS (
+      SELECT
+        periodo_id,
+        periodo,
+        COUNT(DISTINCT nome_operadora) AS operadoras,
+        SUM(COALESCE(qt_beneficiarios, 0)) AS beneficiarios,
+        SUM(COALESCE(qt_beneficiarios, 0)) AS qt_beneficiarios,
+        SUM(COALESCE(prev_qt_beneficiarios, 0)) AS prev_qt_beneficiarios,
+        SUM(COALESCE(delta_qt_beneficiarios, 0)) AS delta_qt_beneficiarios,
+        SUM(COALESCE(qt_prestadores, 0)) AS qt_prestadores,
+        ${isVirtual ? cardMetricColumnsSql : cardMetricSelectSql},
+        SUM(COALESCE(vr_receitas, 0)) AS vr_receitas,
+        SUM(COALESCE(vr_despesas, 0)) AS vr_despesas,
+        SUM(COALESCE(vr_contraprestacoes, 0)) AS vr_contraprestacoes,
+        SUM(COALESCE(vr_contraprestacoes_efetivas, 0)) AS vr_contraprestacoes_efetivas,
+        SUM(COALESCE(vr_contraprestacoes_pre, 0)) AS vr_contraprestacoes_pre,
+        SUM(COALESCE(vr_corresponsabilidade_cedida, 0)) AS vr_corresponsabilidade_cedida,
+        SUM(COALESCE(vr_creditos_operacoes_saude, 0)) AS vr_creditos_operacoes_saude,
+        SUM(COALESCE(vr_eventos_liquidos, 0)) AS vr_eventos_liquidos,
+        SUM(COALESCE(vr_eventos_a_liquidar, 0)) AS vr_eventos_a_liquidar,
+        SUM(COALESCE(vr_desp_comerciais, 0)) AS vr_desp_comerciais,
+        SUM(COALESCE(vr_desp_comerciais_promocoes, 0)) AS vr_desp_comerciais_promocoes,
+        SUM(COALESCE(vr_conta_464, 0)) AS vr_conta_464,
+        SUM(COALESCE(vr_desp_administrativas, 0)) AS vr_desp_administrativas,
+        SUM(COALESCE(vr_outras_desp_oper, 0)) AS vr_outras_desp_oper,
+        SUM(COALESCE(vr_conta_442129119, 0)) AS vr_conta_442129119,
+        SUM(COALESCE(vr_desp_tributos, 0)) AS vr_desp_tributos,
+        SUM(COALESCE(vr_receitas_fin, 0)) AS vr_receitas_fin,
+        SUM(COALESCE(vr_despesas_fin, 0)) AS vr_despesas_fin,
+        SUM(COALESCE(resultado_financeiro, 0)) AS resultado_financeiro,
+        SUM(COALESCE(vr_receitas_patrimoniais, 0)) AS vr_receitas_patrimoniais,
+        SUM(COALESCE(vr_outras_receitas_operacionais, 0)) AS vr_outras_receitas_operacionais,
+        SUM(COALESCE(vr_conta_332129111, 0)) AS vr_conta_332129111,
+        SUM(COALESCE(vr_conta_332189111, 0)) AS vr_conta_332189111,
+        SUM(COALESCE(vr_ativo_circulante, 0)) AS vr_ativo_circulante,
+        SUM(COALESCE(vr_conta_1213, 0)) AS vr_conta_1213,
+        SUM(COALESCE(vr_conta_1214, 0)) AS vr_conta_1214,
+        SUM(COALESCE(vr_conta_122, 0)) AS vr_conta_122,
+        SUM(COALESCE(vr_ativo_permanente, 0)) AS vr_ativo_permanente,
+        SUM(COALESCE(vr_passivo_circulante, 0)) AS vr_passivo_circulante,
+        SUM(COALESCE(vr_passivo_nao_circulante, 0)) AS vr_passivo_nao_circulante,
+        SUM(COALESCE(vr_patrimonio_liquido, 0)) AS vr_patrimonio_liquido,
+        SUM(COALESCE(vr_ativos_garantidores, 0)) AS vr_ativos_garantidores,
+        SUM(COALESCE(vr_provisoes_tecnicas, 0)) AS vr_provisoes_tecnicas,
+        SUM(COALESCE(vr_conta_32, 0)) AS vr_conta_32,
+        SUM(COALESCE(vr_conta_216, 0)) AS vr_conta_216,
+        SUM(COALESCE(vr_conta_217, 0)) AS vr_conta_217,
+        SUM(COALESCE(vr_conta_236, 0)) AS vr_conta_236,
+        SUM(COALESCE(vr_conta_237, 0)) AS vr_conta_237,
+        SUM(COALESCE(vr_pl_ajustado, 0)) AS vr_pl_ajustado,
+        SUM(COALESCE(vr_margem_solvencia_exigida, 0)) AS vr_margem_solvencia_exigida,
+        SUM(COALESCE(vr_conta_61, 0)) AS vr_conta_61,
+        SUM(COALESCE(resultado_liquido_calculado, 0)) AS resultado_liquido_calculado,
+        SUM(COALESCE(resultado_liquido_final_ans, 0)) AS resultado_liquido_final_ans,
+        SUM(COALESCE(resultado_liquido_informado, 0)) AS resultado_liquido_informado,
+        SUM(COALESCE(resultado_liquido, 0)) AS resultado_liquido
+      FROM base
+      GROUP BY periodo_id, periodo
+    ), period_data AS (
+      SELECT *
+      FROM period_raw
+    )
+    SELECT
+      *
+    FROM period_data
+    ORDER BY periodo_id DESC
+    LIMIT 1
+  `
+  const rows = await runQuery(query)
+  return rows[0] ?? null
+}
+
+async function fetchKpiSummary(filters) {
+  const current = await summarizePeriod(filters)
+  if (!current) return null
+  const periodId = current.periodo_id
+  let previous = null
+  if (periodId && periodId >= 10) {
+    const previousFilters = {
+      ...filters,
+      anos: [Math.floor((periodId - 10) / 10)],
+      trimestres: [Number(String(periodId - 10).slice(-1))],
+    }
+    previous = await summarizePeriod(previousFilters)
+  }
+  return { ...current, previousPeriod: previous }
+}
+
+async function fetchUniodontoPeerSummary(filters = {}, options = {}) {
+  const viewRef = resolveView({ mode: 'uniodonto' })
+  const { excludeOperatorName = null } = options ?? {}
+  const sanitizedName = excludeOperatorName ? sanitizeSql(excludeOperatorName) : null
+  const { whereClause } = buildFilterClauses(stripOperatorSelection(filters), { latestOnlyDefault: false })
+  const wherePieces = []
+  if (whereClause) {
+    wherePieces.push(whereClause.replace(/^WHERE\s+/i, ''))
+  }
+  if (sanitizedName) {
+    wherePieces.push(`nome_operadora <> '${sanitizedName}'`)
+  }
+  const finalWhere = wherePieces.length ? `WHERE ${wherePieces.join(' AND ')}` : ''
+  const entries = buildTrendMetricEntries(UNIODONTO_INDICATORS.map((metric) => metric.id), {
+    mode: 'uniodonto',
+    source: 'base',
+  })
+  const metricSelectList = buildTrendMetricSelectList(entries, { aggregate: true })
+  const query = `
+    SELECT
+      COUNT(DISTINCT nome_operadora) AS peer_count
+      ${metricSelectList ? `,\n      ${metricSelectList}` : ''}
+    FROM ${viewRef}
+    ${finalWhere}
+  `
+  const rows = await runQuery(query)
+  if (!rows[0]) return null
+  const { peer_count: peerCount, ...metrics } = rows[0]
+  return {
+    peer_count: peerCount ?? null,
+    metrics,
+    ...metrics,
+  }
+}
+
+async function fetchAnsPeerSummary(filters = {}, options = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
+  const { excludeOperatorName = null } = options ?? {}
+  const sanitizedName = excludeOperatorName ? sanitizeSql(excludeOperatorName) : null
+  const { whereClause } = buildFilterClauses(stripOperatorSelection(filters), { latestOnlyDefault: false })
+  const wherePieces = []
+  if (whereClause) {
+    wherePieces.push(whereClause.replace(/^WHERE\s+/i, ''))
+  }
+  if (sanitizedName) {
+    wherePieces.push(`nome_operadora <> '${sanitizedName}'`)
+  }
+  const finalWhere = wherePieces.length ? `WHERE ${wherePieces.join(' AND ')}` : ''
+  const metricSelectList = buildCardMetricSelectSql({ aggregate: true, source: 'base', mode: 'ans' })
+  const query = `
+    SELECT
+      COUNT(DISTINCT nome_operadora) AS peer_count
+      ${metricSelectList ? `,\n      ${metricSelectList}` : ''}
+    FROM ${viewRef}
+    ${finalWhere}
+  `
+  const rows = await runQuery(query)
+  if (!rows[0]) return null
+  const { peer_count: peerCount, ...metrics } = rows[0]
+  return {
+    peer_count: peerCount ?? null,
+    metrics,
+    ...metrics,
+  }
+}
+
+function extractMonetaryValues(row) {
+  const baseValues = {}
+  monetaryIndicatorPhysicalColumns.forEach((column) => {
+    baseValues[column] = row?.[column] === null || row?.[column] === undefined ? null : Number(row[column])
+  })
+  applyDerivedMonetaryValues(baseValues)
+  const resolved = {}
+  monetaryIndicatorColumns.forEach((column) => {
+    resolved[column] = baseValues[column] ?? null
+  })
+  return resolved
+}
+
+async function queryMonetarySnapshot(filters, availableColumns, options = {}, viewRef = DEFAULT_VIEW) {
+  const { whereClause } = buildFilterClauses(filters, options)
+  const aggregateFragments = buildMonetaryAggregateFragments(availableColumns)
+  const selectList = buildMonetarySelectList('latest')
+  const query = `
+    WITH base AS (
+      SELECT *
+      FROM ${viewRef}
+      ${whereClause}
+    ), aggregated AS (
+      SELECT
+        periodo_id,
+        periodo,
+        ano,
+        trimestre,
+        ${aggregateFragments.join(',\n        ')}
+      FROM base
+      GROUP BY periodo_id, periodo, ano, trimestre
+    ), latest AS (
+      SELECT *
+      FROM aggregated
+      ORDER BY periodo_id DESC NULLS LAST, ano DESC, trimestre DESC
+      LIMIT 1
+    )
+    SELECT
+      latest.periodo_id,
+      latest.periodo,
+      latest.ano,
+      latest.trimestre
+      ${selectList ? `,\n      ${selectList}` : ''}
+    FROM latest
+  `
+  const rows = await runQuery(query)
+  return rows[0] ?? null
+}
+
+async function fetchMonetarySummary(filters = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
+  const availableColumns = await getViewColumns(viewRef)
+  const currentRow = await queryMonetarySnapshot(filters, availableColumns, {}, viewRef)
+  if (!currentRow) return null
+  const currentValues = extractMonetaryValues(currentRow)
+  let previousRow = null
+  if (typeof currentRow.ano === 'number' && typeof currentRow.trimestre === 'number' && currentRow.ano > 0) {
+    const previousFilters = {
+      ...filters,
+      anos: [currentRow.ano - 1],
+      trimestres: [currentRow.trimestre],
+    }
+    previousRow = await queryMonetarySnapshot(previousFilters, availableColumns, { latestOnlyDefault: false }, viewRef)
+  }
+  const previousComputedValues = previousRow ? extractMonetaryValues(previousRow) : null
+  const values = {}
+  const previousValues = {}
+  const deltas = {}
+  monetaryIndicatorColumns.forEach((column) => {
+    values[column] = currentValues[column] ?? null
+    previousValues[column] = previousComputedValues?.[column] ?? null
+    deltas[column] = computeDeltaPercent(values[column], previousValues[column])
+  })
+  return {
+    period: currentRow.periodo
+      ? {
+          label: currentRow.periodo,
+          ano: currentRow.ano,
+          trimestre: currentRow.trimestre,
+          periodo_id: currentRow.periodo_id ?? null,
+        }
+      : null,
+    previousPeriod:
+      previousRow && previousRow.periodo
+        ? {
+            label: previousRow.periodo,
+            ano: previousRow.ano,
+            trimestre: previousRow.trimestre,
+          }
+        : null,
+    values,
+    previousValues,
+    deltas,
+  }
+}
+
+async function fetchRegulatoryReport(operatorFilters = {}, peerFilters = {}) {
+  if (!operatorFilters?.operatorName) return null
+  const viewRef = resolveView({ mode: 'ans' })
+  const indicatorProjection = buildRegulatoryIndicatorProjection({ source: 'base' }).join(',\n        ')
+  const percentileFragments = buildRegulatoryPercentileFragments()
+  const isVirtual = isVirtualUniodontoOperator(operatorFilters.operatorName)
+  if (isVirtual) {
+    const operator = await fetchVirtualCohortSnapshot(operatorFilters)
+    if (!operator) return null
+    const peers = await fetchRegulatoryPeerStats(peerFilters)
+    return { operator, peers }
+  }
+  const { whereClause: operatorWhereClause } = buildFilterClauses(
+    isVirtual ? buildCohortFilters(operatorFilters, { uniodonto: true }) : operatorFilters,
+    { latestOnlyDefault: false },
+  )
+  const { whereClause: peerWhereClause } = buildFilterClauses(peerFilters, { latestOnlyDefault: false })
+  const peerWhere = peerWhereClause ?? ''
+  const query = `
+    WITH operator_row AS (
+      SELECT
+        ${isVirtual ? `'${sanitizeSql(VIRTUAL_OPERATOR_UNIODONTO)}' AS nome_operadora` : 'nome_operadora'},
+        ${isVirtual ? 'CAST(NULL AS STRING) AS reg_ans' : 'reg_ans'},
+        ano,
+        trimestre,
+        periodo
+        ${indicatorProjection ? `,\n        ${indicatorProjection}` : ''}
+      FROM ${viewRef}
+      ${operatorWhereClause}
+      ORDER BY ano DESC, trimestre DESC
+      LIMIT 1
+    ), peer_base AS (
+      SELECT
+        ${indicatorProjection}
+      FROM ${viewRef}
+      ${peerWhere}
+    ), peer_stats AS (
+      SELECT
+        COUNT(*) AS peer_total
+        ${percentileFragments.length ? `,\n        ${percentileFragments.join(',\n        ')}` : ''}
+      FROM peer_base
+    )
+    SELECT
+      operator_row AS operator,
+      peer_stats AS peers
+    FROM operator_row
+    CROSS JOIN peer_stats
+  `
+  const rows = await runQuery(query)
+  const payload = rows[0]
+  if (!payload?.operator) {
+    return null
+  }
+  return {
+    operator: payload.operator,
+    peers: payload.peers,
+  }
+}
+
+async function fetchRegulatoryScoreForFilters(baseFilters = {}, peerFilters = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
+  const indicatorProjection = buildRegulatoryIndicatorProjection({ source: 'base' }).join(',\n        ')
+  const aggregateProjection = buildRegulatoryIndicatorProjection({ aggregate: true, source: 'base' }).join(',\n        ')
+  const percentileFragments = buildRegulatoryPercentileFragments()
+  const { whereClause: baseWhereClause } = buildFilterClauses(baseFilters, { latestOnlyDefault: false })
+  const { whereClause: peerWhereClause } = buildFilterClauses(peerFilters, { latestOnlyDefault: false })
+  const query = `
+    WITH aggregate_operator AS (
+      SELECT
+        'Média dos filtros' AS nome_operadora,
+        CAST(NULL AS STRING) AS reg_ans,
+        CAST(NULL AS INT64) AS ano,
+        CAST(NULL AS INT64) AS trimestre,
+        CAST(NULL AS STRING) AS periodo
+        ${aggregateProjection ? `,\n        ${aggregateProjection}` : ''}
+      FROM ${viewRef}
+      ${baseWhereClause ?? ''}
+    ), peer_base AS (
+      SELECT
+        ${indicatorProjection}
+      FROM ${viewRef}
+      ${peerWhereClause ?? ''}
+    ), peer_stats AS (
+      SELECT
+        COUNT(*) AS peer_total
+        ${percentileFragments.length ? `,\n        ${percentileFragments.join(',\n        ')}` : ''}
+      FROM peer_base
+    )
+    SELECT
+      aggregate_operator AS operator,
+      peer_stats AS peers
+    FROM aggregate_operator
+    CROSS JOIN peer_stats
+  `
+  const rows = await runQuery(query)
+  const payload = rows[0]
+  if (!payload?.operator) {
+    return null
+  }
+  return {
+    operator: payload.operator,
+    peers: payload.peers,
+  }
+}
+
+async function fetchRegulatoryPeerStats(filters = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
+  const indicatorProjection = buildRegulatoryIndicatorProjection({ source: 'base' }).join(',\n        ')
+  const percentileFragments = buildRegulatoryPercentileFragments()
+  const { whereClause } = buildFilterClauses(stripOperatorSelection(filters), { latestOnlyDefault: false })
+  const query = `
+    WITH peer_base AS (
+      SELECT
+        ${indicatorProjection}
+      FROM ${viewRef}
+      ${whereClause ?? ''}
+    )
+    SELECT
+      COUNT(*) AS peer_total
+      ${percentileFragments.length ? `,\n        ${percentileFragments.join(',\n        ')}` : ''}
+    FROM peer_base
+  `
+  const rows = await runQuery(query)
+  return rows[0] ?? null
+}
+
+async function fetchTrendSeries(metric, filters, comparisonContext = null) {
+  if (metric === 'regulatory_score') {
+    return fetchRegulatoryScoreTrend(filters, comparisonContext)
+  }
+  const resolvedMetric = metric ?? 'sinistralidade_pct'
+  const mode = isUniodontoMetricId(resolvedMetric) ? 'uniodonto' : 'ans'
+  const viewRef = resolveView({ mode, metrics: [resolvedMetric] })
+  const sqlMetricBase =
+    resolveMetricExpression(resolvedMetric, { mode, source: 'base' }) ??
+    metricSql[resolvedMetric] ??
+    metricSql.sinistralidade_pct
+  const sqlMetricAggregate =
+    resolveMetricExpression(resolvedMetric, { mode, source: 'aggregate' }) ??
+    metricSql[resolvedMetric] ??
+    metricSql.sinistralidade_pct
+  if (comparisonContext?.operatorName) {
+    const sanitizedName = sanitizeSql(comparisonContext.operatorName)
+    const isVirtual = isVirtualUniodontoOperator(comparisonContext.operatorName)
+    const baseFilter = buildWhereClause({ ...filters, search: '' })
+    const operatorFilter = baseFilter ? baseFilter.replace(/^WHERE\s+/i, '') : ''
+    const comparisonFilter = getWhereExpression(comparisonContext.filters ?? {})
+    const { uniodonto: _ignoredUniodonto, ...comparisonWithoutUniodonto } = comparisonContext.filters ?? {}
+    const operatorComparisonFilter = getWhereExpression(comparisonWithoutUniodonto)
+    const peerWherePieces = [isVirtual ? 'COALESCE(uniodonto, FALSE) IS FALSE' : `nome_operadora <> '${sanitizedName}'`]
+    if (comparisonFilter) {
+      peerWherePieces.push(`(${comparisonFilter})`)
+    }
+    const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\n        AND ')}` : ''
+    if (isVirtual) {
+      const availableColumns = await getViewColumns(viewRef)
+      const sumSelectList = buildCohortAggregateSelectList(COHORT_AGGREGATE_SUM_COLUMNS, availableColumns)
+      const cohortQuery = `
+        WITH operador_base AS (
+          SELECT *
+          FROM ${viewRef}
+          WHERE COALESCE(uniodonto, FALSE) IS TRUE
+          ${operatorFilter ? ` AND ${operatorFilter}` : ''}
+          ${operatorComparisonFilter ? ` AND (${operatorComparisonFilter})` : ''}
+        ), operador_agg AS (
+          SELECT
+            ano,
+            trimestre,
+            periodo
+            ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
+          FROM operador_base
+          GROUP BY ano, trimestre, periodo
+        ), pares_base AS (
+          SELECT *
+          FROM ${viewRef}
+          ${peerWhere}
+          ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
+        ), pares_agg AS (
+          SELECT
+            ano,
+            trimestre,
+            periodo
+            ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
+          FROM pares_base
+          GROUP BY ano, trimestre, periodo
+        ), operador AS (
+          SELECT ano, trimestre, periodo, ${sqlMetricAggregate} AS valor
+          FROM operador_agg
+        ), pares AS (
+          SELECT ano, trimestre, periodo, ${sqlMetricAggregate} AS valor
+          FROM pares_agg
+        )
+        SELECT
+          COALESCE(operador.ano, pares.ano) AS ano,
+          COALESCE(operador.trimestre, pares.trimestre) AS trimestre,
+          COALESCE(operador.periodo, pares.periodo) AS periodo,
+          operador.valor AS operador_valor,
+          pares.valor AS pares_valor
+        FROM operador
+        FULL OUTER JOIN pares ON operador.ano = pares.ano AND operador.trimestre = pares.trimestre
+        ORDER BY ano, trimestre
+      `
+      return runQuery(cohortQuery)
+    }
+    const query = `
+      WITH operador AS (
+        SELECT ano, trimestre, periodo, ${sqlMetricBase} AS valor
+        FROM ${viewRef}
+        WHERE nome_operadora = '${sanitizedName}'
+        ${operatorFilter ? ` AND ${operatorFilter}` : ''}
+      ), pares AS (
+        SELECT ano, trimestre, periodo, AVG(${sqlMetricBase}) AS valor
+        FROM ${viewRef}
+        ${peerWhere}
+        ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
+        GROUP BY ano, trimestre, periodo
+      )
+      SELECT
+        COALESCE(operador.ano, pares.ano) AS ano,
+        COALESCE(operador.trimestre, pares.trimestre) AS trimestre,
+        COALESCE(operador.periodo, pares.periodo) AS periodo,
+        operador.valor AS operador_valor,
+        pares.valor AS pares_valor
+      FROM operador
+      FULL OUTER JOIN pares ON operador.ano = pares.ano AND operador.trimestre = pares.trimestre
+      ORDER BY ano, trimestre
+    `
+    return runQuery(query)
+  }
+  const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
+  if (comparisonContext) {
+    const periodScopedComparisonFilters = {
+      ...(comparisonContext.filters ?? {}),
+    }
+    if (sanitizeList(filters?.anos).length) {
+      periodScopedComparisonFilters.anos = sanitizeList(filters.anos)
+    }
+    if (sanitizeList(filters?.trimestres).length) {
+      periodScopedComparisonFilters.trimestres = sanitizeList(filters.trimestres)
+    }
+    const comparisonWhereClause = buildWhereClause(periodScopedComparisonFilters)
+    const query = `
+      WITH base AS (
+        SELECT ano, trimestre, periodo, AVG(${sqlMetricBase}) AS valor
+        FROM ${viewRef}
+        ${whereClause}
+        GROUP BY ano, trimestre, periodo
+      ), pares AS (
+        SELECT ano, trimestre, periodo, AVG(${sqlMetricBase}) AS valor
+        FROM ${viewRef}
+        ${comparisonWhereClause}
+        GROUP BY ano, trimestre, periodo
+      )
+      SELECT
+        COALESCE(base.ano, pares.ano) AS ano,
+        COALESCE(base.trimestre, pares.trimestre) AS trimestre,
+        COALESCE(base.periodo, pares.periodo) AS periodo,
+        base.valor AS operador_valor,
+        pares.valor AS pares_valor
+      FROM base
+      FULL OUTER JOIN pares ON base.ano = pares.ano AND base.trimestre = pares.trimestre
+      ORDER BY ano, trimestre
+    `
+    return runQuery(query)
+  }
+  const query = `
+    SELECT ano, trimestre, periodo, AVG(${sqlMetricBase}) AS valor
+    FROM ${viewRef}
+    ${whereClause}
+    GROUP BY ano, trimestre, periodo
+    ORDER BY ano, trimestre
+  `
+  return runQuery(query)
+}
+
+function appendWhereClause(baseWhereClause, extraExpression) {
+  if (!extraExpression) return baseWhereClause ?? ''
+  if (!baseWhereClause) return `WHERE ${extraExpression}`
+  return `${baseWhereClause} AND (${extraExpression})`
+}
+
+function mapUniodontoPerCapitaRows(rows = [], { withComparison = false } = {}) {
+  return (rows ?? []).map((row) => ({
+    ano: row?.ano ?? null,
+    trimestre: row?.trimestre ?? null,
+    periodo: row?.periodo ?? (row?.ano && row?.trimestre ? `${row.ano}T${row.trimestre}` : null),
+    primaryRevenuePerCapita: withComparison ? row?.operador_receita_per_capita ?? null : row?.receita_per_capita ?? null,
+    primaryEventsPerCapita: withComparison ? row?.operador_eventos_per_capita ?? null : row?.eventos_per_capita ?? null,
+    comparisonRevenuePerCapita: withComparison ? row?.pares_receita_per_capita ?? null : null,
+    comparisonEventsPerCapita: withComparison ? row?.pares_eventos_per_capita ?? null : null,
+  }))
+}
+
+async function fetchUniodontoPerCapitaSeries(filters = {}, perCapitaFilters = {}, comparisonContext = null) {
+  const viewRef = resolveView({ mode: 'uniodonto' })
+  const resolvedChartFilters = sanitizeUniodontoPerCapitaFilters(perCapitaFilters)
+  const availableColumns = await getViewColumns(viewRef)
+  const paymentWhereExpression = buildPaymentModalityWhereClause(resolvedChartFilters.paymentModality, {
+    availableColumns,
+  })
+  const revenueExpression = buildRevenueBaseExpression(resolvedChartFilters.revenueBase)
+  const beneficiariesTotalExpression = 'SUM(COALESCE(qt_beneficiarios, 0))'
+  const perCapita12mDenominatorExpression = `(${beneficiariesTotalExpression}) * 12`
+  const revenuePerCapitaExpression = buildSafeRatioSql(`SUM(${revenueExpression})`, perCapita12mDenominatorExpression)
+  const eventsPerCapitaExpression = buildSafeRatioSql(
+    'SUM(COALESCE(vr_eventos_liquidos, 0))',
+    perCapita12mDenominatorExpression,
+  )
+
+  if (comparisonContext?.operatorName) {
+    const sanitizedName = sanitizeSql(comparisonContext.operatorName)
+    const isVirtual = isVirtualUniodontoOperator(comparisonContext.operatorName)
+    const baseFilter = buildWhereClause({ ...filters, search: '' })
+    const operatorFilter = baseFilter ? baseFilter.replace(/^WHERE\s+/i, '') : ''
+    const comparisonFilter = getWhereExpression(comparisonContext.filters ?? {})
+
+    if (isVirtual) {
+      const { uniodonto: _ignoredUniodonto, ...comparisonWithoutUniodonto } = comparisonContext.filters ?? {}
+      const operatorComparisonFilter = getWhereExpression(comparisonWithoutUniodonto)
+      const operatorWhere = [
+        'COALESCE(uniodonto, FALSE) IS TRUE',
+        operatorFilter,
+        operatorComparisonFilter ? `(${operatorComparisonFilter})` : '',
+        paymentWhereExpression,
+      ]
+        .filter(Boolean)
+        .join('\n      AND ')
+      const peerWhere = [
+        'COALESCE(uniodonto, FALSE) IS FALSE',
+        operatorFilter,
+        comparisonFilter ? `(${comparisonFilter})` : '',
+        paymentWhereExpression,
+      ]
+        .filter(Boolean)
+        .join('\n      AND ')
+      const query = `
+        WITH operador AS (
+          SELECT
+            ano,
+            trimestre,
+            periodo,
+            ${revenuePerCapitaExpression} AS operador_receita_per_capita,
+            ${eventsPerCapitaExpression} AS operador_eventos_per_capita
+          FROM ${viewRef}
+          WHERE ${operatorWhere}
+          GROUP BY ano, trimestre, periodo
+        ), pares AS (
+          SELECT
+            ano,
+            trimestre,
+            periodo,
+            ${revenuePerCapitaExpression} AS pares_receita_per_capita,
+            ${eventsPerCapitaExpression} AS pares_eventos_per_capita
+          FROM ${viewRef}
+          WHERE ${peerWhere}
+          GROUP BY ano, trimestre, periodo
+        )
+        SELECT
+          COALESCE(operador.ano, pares.ano) AS ano,
+          COALESCE(operador.trimestre, pares.trimestre) AS trimestre,
+          COALESCE(operador.periodo, pares.periodo) AS periodo,
+          operador.operador_receita_per_capita,
+          operador.operador_eventos_per_capita,
+          pares.pares_receita_per_capita,
+          pares.pares_eventos_per_capita
+        FROM operador
+        FULL OUTER JOIN pares ON operador.ano = pares.ano AND operador.trimestre = pares.trimestre
+        ORDER BY ano, trimestre
+      `
+      const rows = await runQuery(query)
+      return mapUniodontoPerCapitaRows(rows, { withComparison: true })
+    }
+
+    const operatorWhere = [
+      `nome_operadora = '${sanitizedName}'`,
+      operatorFilter,
+      paymentWhereExpression,
+    ]
+      .filter(Boolean)
+      .join('\n      AND ')
+    const peerWhere = [
+      `nome_operadora <> '${sanitizedName}'`,
+      operatorFilter,
+      comparisonFilter ? `(${comparisonFilter})` : '',
+      paymentWhereExpression,
+    ]
+      .filter(Boolean)
+      .join('\n      AND ')
+    const query = `
+      WITH operador AS (
+        SELECT
+          ano,
+          trimestre,
+          periodo,
+          ${revenuePerCapitaExpression} AS operador_receita_per_capita,
+          ${eventsPerCapitaExpression} AS operador_eventos_per_capita
+        FROM ${viewRef}
+        WHERE ${operatorWhere}
+        GROUP BY ano, trimestre, periodo
+      ), pares AS (
+        SELECT
+          ano,
+          trimestre,
+          periodo,
+          ${revenuePerCapitaExpression} AS pares_receita_per_capita,
+          ${eventsPerCapitaExpression} AS pares_eventos_per_capita
+        FROM ${viewRef}
+        WHERE ${peerWhere}
+        GROUP BY ano, trimestre, periodo
+      )
+      SELECT
+        COALESCE(operador.ano, pares.ano) AS ano,
+        COALESCE(operador.trimestre, pares.trimestre) AS trimestre,
+        COALESCE(operador.periodo, pares.periodo) AS periodo,
+        operador.operador_receita_per_capita,
+        operador.operador_eventos_per_capita,
+        pares.pares_receita_per_capita,
+        pares.pares_eventos_per_capita
+      FROM operador
+      FULL OUTER JOIN pares ON operador.ano = pares.ano AND operador.trimestre = pares.trimestre
+      ORDER BY ano, trimestre
+    `
+    const rows = await runQuery(query)
+    return mapUniodontoPerCapitaRows(rows, { withComparison: true })
+  }
+
+  const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
+  const finalWhereClause = appendWhereClause(whereClause, paymentWhereExpression)
+  const query = `
+    SELECT
+      ano,
+      trimestre,
+      periodo,
+      ${revenuePerCapitaExpression} AS receita_per_capita,
+      ${eventsPerCapitaExpression} AS eventos_per_capita
+    FROM ${viewRef}
+    ${finalWhereClause ?? ''}
+    GROUP BY ano, trimestre, periodo
+    ORDER BY ano, trimestre
+  `
+  const rows = await runQuery(query)
+  return mapUniodontoPerCapitaRows(rows)
+}
+
+async function fetchTrendSeriesBatch(metrics = [], filters = {}, comparisonContext = null) {
+  const metricList = (metrics ?? []).filter((metric) => metric && metric !== 'regulatory_score')
+  const hasRegulatoryScore = Boolean(metrics?.includes?.('regulatory_score'))
+  const mode = isUniodontoMetricList(metricList) ? 'uniodonto' : 'ans'
+  const maxMetricsPerQuery = mode === 'uniodonto' ? (HAS_UNIODONTO_MART ? 24 : 10) : 24
+
+  function resolveMetricExpressionWithColumns(metricId, { source, availableColumns } = {}) {
+    if (!metricId) return null
+    if (source === 'base' && availableColumns?.includes?.(metricId)) {
+      return quoteIdentifier(metricId)
+    }
+    if (mode === 'uniodonto') {
+      return getUniodontoMetricSql(metricId) ?? metricSql[metricId] ?? null
+    }
+    return metricSql[metricId] ?? getUniodontoMetricSql(metricId) ?? null
+  }
+
+  function buildTrendMetricEntriesWithColumns(batchMetrics, { source, availableColumns } = {}) {
+    const unique = new Set()
+    return (batchMetrics ?? [])
+      .map((metricId) => {
+        if (!metricId || metricId === 'regulatory_score') return null
+        if (unique.has(metricId)) return null
+        const expression =
+          source === 'aggregate'
+            ? resolveMetricExpression(metricId, { mode, source })
+            : resolveMetricExpressionWithColumns(metricId, { source, availableColumns })
+        if (!expression) return null
+        unique.add(metricId)
+        return {
+          id: metricId,
+          expression: expression.trim(),
+        }
+      })
+      .filter(Boolean)
+  }
+
+  async function runBatch(batchMetrics) {
+    const viewRef = resolveView({ mode, metrics: batchMetrics })
+    const availableColumns =
+      mode === 'uniodonto' && HAS_UNIODONTO_MART ? await getViewColumns(viewRef) : null
+    const baseEntries = buildTrendMetricEntriesWithColumns(batchMetrics, {
+      source: 'base',
+      availableColumns,
+    })
+    const aggregateEntries = buildTrendMetricEntriesWithColumns(batchMetrics, { source: 'aggregate' })
+    const entries = baseEntries
+    const result = {}
+
+    if (!entries.length) {
+      return result
+    }
+
+    const isOperatorComparison = Boolean(comparisonContext?.operatorName)
+    if (isOperatorComparison) {
+      const sanitizedName = sanitizeSql(comparisonContext.operatorName)
+      const isVirtual = isVirtualUniodontoOperator(comparisonContext.operatorName)
+      const baseFilter = buildWhereClause({ ...filters, search: '' })
+      const operatorFilter = baseFilter ? baseFilter.replace(/^WHERE\s+/i, '') : ''
+      const comparisonFilter = getWhereExpression(comparisonContext.filters ?? {})
+      const { uniodonto: _ignoredUniodonto, ...comparisonWithoutUniodonto } = comparisonContext.filters ?? {}
+      const operatorComparisonFilter = getWhereExpression(comparisonWithoutUniodonto)
+
+      if (isVirtual) {
+        const availableColumns = await getViewColumns(viewRef)
+        const sumSelectList = buildCohortAggregateSelectList(COHORT_AGGREGATE_SUM_COLUMNS, availableColumns)
+        const operatorMetricSelect = buildTrendMetricSelectList(aggregateEntries)
+        const peerMetricSelect = buildTrendMetricSelectList(aggregateEntries)
+        const peerWherePieces = ['COALESCE(uniodonto, FALSE) IS FALSE']
+        if (comparisonFilter) {
+          peerWherePieces.push(`(${comparisonFilter})`)
+        }
+        const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\n        AND ')}` : ''
+        const aliasSelectList = [
+          ...aggregateEntries.map(({ id }) => `operador.${quoteIdentifier(id)} AS ${quoteIdentifier(`operador_${id}`)}`),
+          ...aggregateEntries.map(({ id }) => `pares.${quoteIdentifier(id)} AS ${quoteIdentifier(`pares_${id}`)}`),
+        ]
+          .filter(Boolean)
+          .join(',\n      ')
+        const query = `
+          WITH operador_base AS (
+            SELECT *
+            FROM ${viewRef}
+            WHERE COALESCE(uniodonto, FALSE) IS TRUE
+            ${operatorFilter ? ` AND ${operatorFilter}` : ''}
+            ${operatorComparisonFilter ? ` AND (${operatorComparisonFilter})` : ''}
+          ), operador_agg AS (
+            SELECT
+              ano,
+              trimestre,
+              periodo
+              ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
+            FROM operador_base
+            GROUP BY ano, trimestre, periodo
+          ), operador AS (
+            SELECT
+              ano,
+              trimestre,
+              periodo
+              ${operatorMetricSelect ? `,\n      ${operatorMetricSelect}` : ''}
+            FROM operador_agg
+          ), pares_base AS (
+            SELECT *
+            FROM ${viewRef}
+            ${peerWhere}
+            ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
+          ), pares_agg AS (
+            SELECT
+              ano,
+              trimestre,
+              periodo
+              ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
+            FROM pares_base
+            GROUP BY ano, trimestre, periodo
+          ), pares AS (
+            SELECT
+              ano,
+              trimestre,
+              periodo
+              ${peerMetricSelect ? `,\n      ${peerMetricSelect}` : ''}
+            FROM pares_agg
+          )
+          SELECT
+            COALESCE(operador.ano, pares.ano) AS ano,
+            COALESCE(operador.trimestre, pares.trimestre) AS trimestre,
+            COALESCE(operador.periodo, pares.periodo) AS periodo
+            ${aliasSelectList ? `,\n      ${aliasSelectList}` : ''}
+          FROM operador
+          FULL OUTER JOIN pares ON operador.ano = pares.ano AND operador.trimestre = pares.trimestre
+          ORDER BY ano, trimestre
+        `
+        const rows = await runQuery(query)
+        aggregateEntries.forEach(({ id }) => {
+          result[id] = rows.map((row) => ({
+            ano: row.ano,
+            trimestre: row.trimestre,
+            periodo: row.periodo,
+            operador_valor: row[`operador_${id}`] ?? null,
+            pares_valor: row[`pares_${id}`] ?? null,
+          }))
+        })
+        return result
+      }
+
+      const operatorMetricSelect = buildTrendMetricSelectList(baseEntries)
+      const peerMetricSelect = buildTrendMetricSelectList(baseEntries, { aggregate: true })
+      const peerWherePieces = [`nome_operadora <> '${sanitizedName}'`]
+      if (comparisonFilter) {
+        peerWherePieces.push(`(${comparisonFilter})`)
+      }
+      const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\n        AND ')}` : ''
+      const aliasSelectList = [
+        ...baseEntries.map(({ id }) => `operador.${quoteIdentifier(id)} AS ${quoteIdentifier(`operador_${id}`)}`),
+        ...baseEntries.map(({ id }) => `pares.${quoteIdentifier(id)} AS ${quoteIdentifier(`pares_${id}`)}`),
+      ]
+        .filter(Boolean)
+        .join(',\n      ')
+      const query = `
+        WITH operador AS (
+          SELECT
+            ano,
+            trimestre,
+            periodo
+            ${operatorMetricSelect ? `,\n      ${operatorMetricSelect}` : ''}
+          FROM ${viewRef}
+          WHERE nome_operadora = '${sanitizedName}'
+          ${operatorFilter ? ` AND ${operatorFilter}` : ''}
+        ), pares AS (
+          SELECT
+            ano,
+            trimestre,
+            periodo
+            ${peerMetricSelect ? `,\n      ${peerMetricSelect}` : ''}
+          FROM ${viewRef}
+          ${peerWhere}
+          ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
+          GROUP BY ano, trimestre, periodo
+        )
+        SELECT
+          COALESCE(operador.ano, pares.ano) AS ano,
+          COALESCE(operador.trimestre, pares.trimestre) AS trimestre,
+          COALESCE(operador.periodo, pares.periodo) AS periodo
+          ${aliasSelectList ? `,\n      ${aliasSelectList}` : ''}
+        FROM operador
+        FULL OUTER JOIN pares ON operador.ano = pares.ano AND operador.trimestre = pares.trimestre
+        ORDER BY ano, trimestre
+      `
+      const rows = await runQuery(query)
+      baseEntries.forEach(({ id }) => {
+        result[id] = rows.map((row) => ({
+          ano: row.ano,
+          trimestre: row.trimestre,
+          periodo: row.periodo,
+          operador_valor: row[`operador_${id}`] ?? null,
+          pares_valor: row[`pares_${id}`] ?? null,
+        }))
+      })
+      return result
+    }
+
+    const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
+    const metricSelectList = buildTrendMetricSelectList(baseEntries, { aggregate: true })
+    const query = `
+      SELECT
+        ano,
+        trimestre,
+        periodo
+        ${metricSelectList ? `,\n      ${metricSelectList}` : ''}
+      FROM ${viewRef}
+      ${whereClause ?? ''}
+      GROUP BY ano, trimestre, periodo
+      ORDER BY ano, trimestre
+    `
+    const rows = await runQuery(query)
+    baseEntries.forEach(({ id }) => {
+      result[id] = rows.map((row) => ({
+        ano: row.ano,
+        trimestre: row.trimestre,
+        periodo: row.periodo,
+        valor: row?.[id] ?? null,
+      }))
+    })
+    return result
+  }
+
+  async function runBatchSafely(batchMetrics, depth = 0) {
+    if (!batchMetrics.length) return {}
+    if (batchMetrics.length > maxMetricsPerQuery) {
+      const chunks = []
+      for (let i = 0; i < batchMetrics.length; i += maxMetricsPerQuery) {
+        chunks.push(batchMetrics.slice(i, i + maxMetricsPerQuery))
+      }
+      const results = await Promise.all(chunks.map((chunk) => runBatchSafely(chunk, depth + 1)))
+      return Object.assign({}, ...results)
+    }
+    try {
+      return await runBatch(batchMetrics)
+    } catch (err) {
+      if (batchMetrics.length <= 1 || depth >= 4) {
+        console.warn('[Dashboard] Falha ao carregar séries históricas em lote', err)
+        return {}
+      }
+      const mid = Math.ceil(batchMetrics.length / 2)
+      const [left, right] = await Promise.all([
+        runBatchSafely(batchMetrics.slice(0, mid), depth + 1),
+        runBatchSafely(batchMetrics.slice(mid), depth + 1),
+      ])
+      return { ...left, ...right }
+    }
+  }
+
+  const result = await runBatchSafely(metricList)
+  if (hasRegulatoryScore) {
+    result.regulatory_score = await fetchRegulatoryScoreTrend(filters, comparisonContext)
+  }
+  return result
+}
+
+async function fetchRegulatoryScoreTrend(filters, comparisonContext = null) {
+  const viewRef = resolveView({ mode: 'ans' })
+  if (comparisonContext?.operatorName) {
+    const sanitizedName = sanitizeSql(comparisonContext.operatorName)
+    const isVirtual = isVirtualUniodontoOperator(comparisonContext.operatorName)
+    const indicatorProjectionBase = buildRegulatoryIndicatorProjection({ source: 'base' }).join(',\n        ')
+    const indicatorProjectionAggregate = buildRegulatoryIndicatorProjection({ source: 'aggregate' }).join(',\n        ')
+    const aggregateProjection = buildRegulatoryIndicatorProjection({ aggregate: true, source: 'base' }).join(',\n        ')
+    const baseFilter = buildWhereClause({ ...filters, search: '' })
+    const operatorFilter = baseFilter ? baseFilter.replace(/^WHERE\s+/i, '') : ''
+    if (isVirtual) {
+      const availableColumns = await getViewColumns(viewRef)
+      const sumSelectList = buildCohortAggregateSelectList(COHORT_AGGREGATE_SUM_COLUMNS, availableColumns)
+      const { uniodonto: _ignoredUniodonto, ...comparisonWithoutUniodonto } = comparisonContext.filters ?? {}
+      const operatorComparisonFilter = getWhereExpression(comparisonWithoutUniodonto)
+      const operatorQuery = `
+        WITH operador_base AS (
+          SELECT *
+          FROM ${viewRef}
+          WHERE COALESCE(uniodonto, FALSE) IS TRUE
+          ${operatorFilter ? ` AND ${operatorFilter}` : ''}
+          ${operatorComparisonFilter ? ` AND (${operatorComparisonFilter})` : ''}
+        ), operador_agg AS (
+          SELECT
+            ano,
+            trimestre,
+            periodo
+            ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
+          FROM operador_base
+          GROUP BY ano, trimestre, periodo
+        )
+        SELECT
+          ano,
+          trimestre,
+          periodo
+          ${indicatorProjectionAggregate ? `,\n        ${indicatorProjectionAggregate}` : ''}
+        FROM operador_agg
+        ORDER BY ano, trimestre
+      `
+      const operatorRows = await runQuery(operatorQuery)
+      if (!operatorRows.length) {
+        return []
+      }
+
+      const comparisonFilters = {
+        ...(comparisonContext.filters ?? {}),
+      }
+      const yearList = sanitizeList(filters?.anos)
+      const quarterList = sanitizeList(filters?.trimestres)
+      if (yearList.length) {
+        comparisonFilters.anos = yearList
+      }
+      if (quarterList.length) {
+        comparisonFilters.trimestres = quarterList
+      }
+      if (comparisonFilters.uniodonto === undefined) {
+        comparisonFilters.uniodonto = false
+      }
+      const comparisonExpression = getWhereExpression(comparisonFilters)
+      const peerWherePieces = ['COALESCE(uniodonto, FALSE) IS FALSE']
+      if (comparisonExpression) {
+        peerWherePieces.push(`(${comparisonExpression})`)
+      }
+      const peerWhere = peerWherePieces.length ? `WHERE ${peerWherePieces.join('\n          AND ')}` : ''
+      const peersQuery = `
+        WITH pares_base AS (
+          SELECT *
+          FROM ${viewRef}
+          ${peerWhere}
+          ${operatorFilter ? `${peerWhere ? ' AND ' : ' WHERE '}${operatorFilter}` : ''}
+        ), pares_agg AS (
+          SELECT
+            ano,
+            trimestre,
+            periodo
+            ${sumSelectList.length ? `,\n        ${sumSelectList.join(',\n        ')}` : ''}
+          FROM pares_base
+          GROUP BY ano, trimestre, periodo
+        )
+        SELECT
+          ano,
+          trimestre,
+          periodo
+          ${indicatorProjectionAggregate ? `,\n        ${indicatorProjectionAggregate}` : ''}
+        FROM pares_agg
+        ORDER BY ano, trimestre
+      `
+      const peerRows = await runQuery(peersQuery)
+
+      const peerStatsCache = new Map()
+      async function getPeerStats(ano, trimestre) {
+        const key = `${ano}-${trimestre}`
+        if (peerStatsCache.has(key)) {
+          return peerStatsCache.get(key)
+        }
+        const periodFilters = {
+          ...comparisonFilters,
+          anos: [ano],
+          trimestres: [trimestre],
+          uniodonto: false,
+        }
+        const stats = await fetchRegulatoryPeerStats(periodFilters)
+        peerStatsCache.set(key, stats)
+        return stats
+      }
+
+      const seriesMap = new Map()
+      for (const row of operatorRows) {
+        const periodPeerStats = await getPeerStats(row.ano, row.trimestre)
+        const evaluation = evaluateRegulatoryScore({ operator: row, peers: periodPeerStats })
+        const key = `${row.ano}-${row.trimestre}`
+        seriesMap.set(key, {
+          ano: row.ano,
+          trimestre: row.trimestre,
+          periodo: row.periodo,
+          operador_valor: evaluation?.finalScore?.value ?? null,
+          pares_valor: null,
+        })
+      }
+      for (const row of peerRows) {
+        const periodPeerStats = await getPeerStats(row.ano, row.trimestre)
+        const evaluation = evaluateRegulatoryScore({ operator: row, peers: periodPeerStats })
+        const key = `${row.ano}-${row.trimestre}`
+        const entry =
+          seriesMap.get(key) ??
+          {
+            ano: row.ano,
+            trimestre: row.trimestre,
+            periodo: row.periodo,
+            operador_valor: null,
+            pares_valor: null,
+          }
+        entry.pares_valor = evaluation?.finalScore?.value ?? null
+        if (!entry.periodo) {
+          entry.periodo = row.periodo
+        }
+        seriesMap.set(key, entry)
+      }
+      return Array.from(seriesMap.values()).sort((a, b) => {
+        if (a.ano === b.ano) {
+          return a.trimestre - b.trimestre
+        }
+        return a.ano - b.ano
+      })
+    }
+    const operatorQuery = `
+      SELECT
+        ano,
+        trimestre,
+        periodo
+        ${indicatorProjectionBase ? `,\n        ${indicatorProjectionBase}` : ''}
+      FROM ${viewRef}
+      WHERE nome_operadora = '${sanitizedName}'
+      ${operatorFilter ? ` AND ${operatorFilter}` : ''}
+      ORDER BY ano, trimestre
+    `
+    const operatorRows = await runQuery(operatorQuery)
+    if (!operatorRows.length) {
+      return []
+    }
+    const comparisonFilters = {
+      ...(comparisonContext.filters ?? {}),
+    }
+    const yearList = sanitizeList(filters?.anos)
+    const quarterList = sanitizeList(filters?.trimestres)
+    if (yearList.length) {
+      comparisonFilters.anos = yearList
+    }
+    if (quarterList.length) {
+      comparisonFilters.trimestres = quarterList
+    }
+    const { whereClause: comparisonWhereClause } = buildFilterClauses(comparisonFilters, { latestOnlyDefault: false })
+    const peersQuery = `
+      SELECT
+        ano,
+        trimestre,
+        periodo
+        ${aggregateProjection ? `,\n        ${aggregateProjection}` : ''}
+      FROM ${viewRef}
+      ${comparisonWhereClause ?? ''}
+      GROUP BY ano, trimestre, periodo
+      ORDER BY ano, trimestre
+    `
+    const peerRows = await runQuery(peersQuery)
+    const peerStatsCache = new Map()
+    async function getPeerStats(ano, trimestre) {
+      const key = `${ano}-${trimestre}`
+      if (peerStatsCache.has(key)) {
+        return peerStatsCache.get(key)
+      }
+      const periodFilters = {
+        ...comparisonFilters,
+        anos: [ano],
+        trimestres: [trimestre],
+      }
+      const stats = await fetchRegulatoryPeerStats(periodFilters)
+      peerStatsCache.set(key, stats)
+      return stats
+    }
+    const seriesMap = new Map()
+    for (const row of operatorRows) {
+      const periodPeerStats = await getPeerStats(row.ano, row.trimestre)
+      const evaluation = evaluateRegulatoryScore({ operator: row, peers: periodPeerStats })
+      const key = `${row.ano}-${row.trimestre}`
+      const entry =
+        seriesMap.get(key) ??
+        {
+          ano: row.ano,
+          trimestre: row.trimestre,
+          periodo: row.periodo,
+          operador_valor: null,
+          pares_valor: null,
+        }
+      entry.operador_valor = evaluation?.finalScore?.value ?? null
+      seriesMap.set(key, entry)
+    }
+    for (const row of peerRows) {
+      const periodPeerStats = await getPeerStats(row.ano, row.trimestre)
+      const evaluation = evaluateRegulatoryScore({ operator: row, peers: periodPeerStats })
+      const key = `${row.ano}-${row.trimestre}`
+      const entry =
+        seriesMap.get(key) ??
+        {
+          ano: row.ano,
+          trimestre: row.trimestre,
+          periodo: row.periodo,
+          operador_valor: null,
+          pares_valor: null,
+        }
+      entry.pares_valor = evaluation?.finalScore?.value ?? null
+      if (!entry.periodo) {
+        entry.periodo = row.periodo
+      }
+      seriesMap.set(key, entry)
+    }
+    return Array.from(seriesMap.values()).sort((a, b) => {
+      if (a.ano === b.ano) {
+        return a.trimestre - b.trimestre
+      }
+      return a.ano - b.ano
+    })
+  }
+  const aggregateProjection = buildRegulatoryIndicatorProjection({ aggregate: true, source: 'base' }).join(',\n        ')
+  const { whereClause } = buildFilterClauses(filters, { latestOnlyDefault: false })
+  const query = `
+    SELECT
+      ano,
+      trimestre,
+      periodo
+      ${aggregateProjection ? `,\n        ${aggregateProjection}` : ''}
+    FROM ${viewRef}
+    ${whereClause ?? ''}
+    GROUP BY ano, trimestre, periodo
+    ORDER BY ano, trimestre
+  `
+  const rows = await runQuery(query)
+  if (!rows.length) {
+    return []
+  }
+  const peerStats = await fetchRegulatoryPeerStats(filters)
+  return rows.map((row) => {
+    const evaluation = evaluateRegulatoryScore({ operator: row, peers: peerStats })
+    return {
+      ano: row.ano,
+      trimestre: row.trimestre,
+      periodo: row.periodo,
+      operador_valor: evaluation?.finalScore?.value ?? null,
+      pares_valor: null,
+    }
+  })
+}
+
+async function fetchOperatorSnapshot(nomeOperadora, targetPeriod = {}, comparisonFilters = {}) {
+  if (!nomeOperadora) {
+    return {
+      operator: null,
+      peers: null,
+      availablePeriods: [],
+      selectedPeriod: null,
+    }
+  }
+  const viewRef = resolveView({ mode: 'ans' })
+  if (isVirtualUniodontoOperator(nomeOperadora)) {
+    const periods = await runQuery(`
+      SELECT DISTINCT ano, trimestre, periodo
+      FROM ${viewRef}
+      WHERE COALESCE(uniodonto, FALSE) IS TRUE
+      ORDER BY ano DESC, trimestre DESC
+    `)
+    if (!periods.length) {
+      return {
+        operator: null,
+        peers: null,
+        availablePeriods: [],
+        selectedPeriod: null,
+      }
+    }
+    const resolved =
+      periods.find((item) => item.ano === targetPeriod?.ano && item.trimestre === targetPeriod?.trimestre) ?? periods[0]
+    const basePeriodFilters = {
+      anos: [resolved.ano],
+      trimestres: [resolved.trimestre],
+    }
+    const operator = await fetchVirtualCohortSnapshot({ ...basePeriodFilters, ...comparisonFilters })
+    const peers = await fetchVirtualMarketSnapshot({ ...basePeriodFilters, ...comparisonFilters })
+    return {
+      operator,
+      peers: peers
+        ? {
+            peer_count: peers.cohort_count ?? null,
+            ...peers,
+          }
+        : null,
+      availablePeriods: periods,
+      selectedPeriod: resolved,
+    }
+  }
+  const sanitizedName = sanitizeSql(nomeOperadora)
+  const periods = await runQuery(
+    `SELECT ano, trimestre, periodo FROM ${viewRef} WHERE nome_operadora = '${sanitizedName}' ORDER BY ano DESC, trimestre DESC`,
+  )
+  if (!periods.length) {
+    return {
+      operator: null,
+      peers: null,
+      availablePeriods: [],
+      selectedPeriod: null,
+    }
+  }
+  const resolved =
+    periods.find((item) => item.ano === targetPeriod?.ano && item.trimestre === targetPeriod?.trimestre) ?? periods[0]
+  const cardMetricColumnsSql = buildCardMetricSelectSql({ aggregate: false, source: 'base', mode: 'ans' })
+  const operatorQuery = `
+    SELECT
+      base.*
+      ${cardMetricColumnsSql ? `,\n      ${cardMetricColumnsSql}` : ''}
+    FROM ${viewRef} base
+    WHERE nome_operadora = '${sanitizedName}'
+      AND ano = ${resolved.ano}
+      AND trimestre = ${resolved.trimestre}
+    LIMIT 1
+  `
+  const operator = (await runQuery(operatorQuery))[0] ?? null
+
+  const comparisonExpression = getWhereExpression(comparisonFilters)
+  const wherePieces = [
+    `ano = ${resolved.ano}`,
+    `trimestre = ${resolved.trimestre}`,
+    `nome_operadora <> '${sanitizedName}'`,
+  ]
+  if (comparisonExpression) {
+    wherePieces.push(`(${comparisonExpression})`)
+  }
+  const peerMetricSelect = metricFormulas
+    .filter((metric) => metric.showInCards)
+    .map((metric) => {
+      const expression = resolveMetricExpression(metric.id, { mode: 'ans', source: 'base' })
+      return expression ? `AVG(${expression.trim()}) AS ${metric.id}` : null
+    })
+    .filter(Boolean)
+    .join(',\n        ')
+  const peerQuery = `
+    SELECT
+      COUNT(DISTINCT nome_operadora) AS peer_count,
+      ${peerMetricSelect}
+    FROM ${viewRef}
+    WHERE ${wherePieces.join('\n        AND ')}
+  `
+  const peers = (await runQuery(peerQuery))[0] ?? null
+
+  return {
+    operator,
+    peers,
+    availablePeriods: periods,
+    selectedPeriod: resolved,
+  }
+}
+
+async function fetchOperatorLatestSnapshot(nomeOperadora) {
+  if (!nomeOperadora) return null
+  if (isVirtualUniodontoOperator(nomeOperadora)) {
+    return fetchVirtualCohortSnapshot({})
+  }
+  const viewRef = resolveView({ mode: 'ans' })
+  const query = `
+    SELECT *
+    FROM ${viewRef}
+    WHERE nome_operadora = '${sanitizeSql(nomeOperadora)}'
+    ORDER BY ano DESC, trimestre DESC
+    LIMIT 1
+  `
+  const rows = await runQuery(query)
+  return rows[0] ?? null
+}
+
+const rankingMetrics = metricFormulas.filter((metric) => metric.showInCards)
+const uniodontoRankingMetricIds = new Set(UNIODONTO_RANKING_METRICS.map((metric) => metric.id))
+
+function buildUniodontoRankingSelectList({ source = 'base' } = {}) {
+  return UNIODONTO_RANKING_METRICS
+    .map((metric) => {
+      const expression = resolveMetricExpression(metric.id, { mode: 'uniodonto', source })
+      if (!expression) return null
+      return `${expression} AS ${quoteIdentifier(metric.id)}`
+    })
+    .filter(Boolean)
+    .join(',\n      ')
+}
+
+function buildUniodontoRankingQuery(whereClause, metricId, order = 'DESC', limitClause = '', { viewRef, selectList } = {}) {
+  const metricColumn = uniodontoRankingMetricIds.has(metricId) ? metricId : DEFAULT_UNIODONTO_RANKING_METRIC
+  const metricIdentifier = quoteIdentifier(metricColumn)
+  const resolvedSelectList = selectList ?? buildUniodontoRankingSelectList()
+  const resolvedView = viewRef ?? DEFAULT_VIEW
+  return {
+    metricColumn,
+    query: `
+    WITH base AS (
+      SELECT
+        nome_operadora,
+        reg_ans,
+        porte,
+        modalidade,
+        qt_beneficiarios,
+        ${resolvedSelectList}
+      FROM ${resolvedView}
+      ${whereClause ?? ''}
+    ), ranked AS (
+      SELECT
+        base.*,
+        base.${metricIdentifier} AS valor,
+        DENSE_RANK() OVER (ORDER BY base.${metricIdentifier} ${order}) AS rank
+      FROM base
+    )
+    SELECT *
+    FROM ranked
+    ORDER BY rank
+    ${limitClause}
+  `,
+  }
+}
+
+async function fetchRanking(metric, filters, limit = null, order = 'DESC', options = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
+  const sqlMetric =
+    resolveMetricExpression(metric, { mode: 'ans', source: 'base' }) ??
+    resolveMetricExpression('sinistralidade_pct', { mode: 'ans', source: 'base' }) ??
+    metricSql.sinistralidade_pct
+  const metricSelectList = rankingMetrics
+    .map((item) => {
+      const expression = resolveMetricExpression(item.id, { mode: 'ans', source: 'base' })
+      return expression ? `${expression.trim()} AS ${item.id}` : null
+    })
+    .filter(Boolean)
+    .join(',\n      ')
+  const { whereClause } = buildFilterClauses(stripOperatorSelection(filters))
+  const operatorName = options.operatorName ? sanitizeSql(options.operatorName) : null
+  const limitClause = Number.isFinite(limit) && limit > 0 ? `LIMIT ${limit}` : ''
+  const query = `
+    WITH base AS (
+      SELECT nome_operadora, reg_ans, porte, modalidade, qt_beneficiarios, ${sqlMetric} AS valor${
+        metricSelectList ? `,\n      ${metricSelectList}` : ''
+      }
+      FROM ${viewRef}
+      ${whereClause}
+    ), ranked AS (
+      SELECT
+        base.*,
+        ROW_NUMBER() OVER (ORDER BY valor ${order}) AS rank
+      FROM base
+    )
+    SELECT *
+    FROM ranked
+    ORDER BY rank
+    ${limitClause}
+  `
+  const rows = await runQuery(query)
+  let operatorRow = null
+  if (operatorName) {
+    if (isVirtualUniodontoOperator(options.operatorName)) {
+      const cohortFilters = buildCohortFilters(stripOperatorSelection(filters), { uniodonto: true })
+      const snapshot = await fetchVirtualCohortSnapshot(cohortFilters)
+      if (snapshot) {
+        operatorRow = {
+          ...snapshot,
+          nome_operadora: VIRTUAL_OPERATOR_UNIODONTO,
+          valor: snapshot[metric] ?? snapshot.valor ?? null,
+        }
+      }
+    } else {
+      const operatorQuery = `
+        SELECT nome_operadora, reg_ans, porte, modalidade, qt_beneficiarios, ${sqlMetric} AS valor
+        FROM ${viewRef}
+        WHERE nome_operadora = '${operatorName}'
+        ${whereClause ? ` AND ${whereClause.replace(/^WHERE\s+/i, '')}` : ''}
+        LIMIT 1
+      `
+      const result = await runQuery(operatorQuery)
+      operatorRow = result[0] ?? null
+    }
+    const operatorValue = toNumeric(operatorRow?.valor ?? operatorRow?.[metric])
+    if (operatorValue !== null) {
+      const values = rows.map((row) => toNumeric(row.valor ?? row[metric])).filter((value) => value !== null)
+      const betterCount = values.filter((value) => (order === 'ASC' ? value < operatorValue : value > operatorValue)).length
+      operatorRow.rank_position = betterCount + 1
+      operatorRow.rank = operatorRow.rank_position
+    }
+  }
+  return { rows, operatorRow }
+}
+
+async function fetchUniodontoRanking(metric, filters, limit = null, order = 'DESC', options = {}) {
+  const viewRef = resolveView({ mode: 'uniodonto' })
+  const { whereClause } = buildFilterClauses(stripOperatorSelection(filters))
+  const operatorName = options.operatorName ? sanitizeSql(options.operatorName) : null
+  const limitClause = Number.isFinite(limit) && limit > 0 ? `LIMIT ${limit}` : ''
+  const metricSelectList = buildUniodontoRankingSelectList({ source: 'base' })
+  const { query, metricColumn } = buildUniodontoRankingQuery(whereClause, metric, order, limitClause, {
+    viewRef,
+    selectList: metricSelectList,
+  })
+  const rows = await runQuery(query)
+  let operatorRow = null
+  if (operatorName) {
+    if (isVirtualUniodontoOperator(options.operatorName)) {
+      const cohortFilters = buildCohortFilters(stripOperatorSelection(filters), { uniodonto: true })
+      const snapshot = await fetchVirtualCohortSnapshot(cohortFilters)
+      if (snapshot) {
+        const derived = computeUniodontoMetrics(snapshot)
+        operatorRow = {
+          ...snapshot,
+          ...derived,
+          nome_operadora: VIRTUAL_OPERATOR_UNIODONTO,
+          valor: derived[metricColumn] ?? null,
+        }
+      }
+    } else {
+      const operatorFilters = { ...stripOperatorSelection(filters), operatorName }
+      const { whereClause: operatorWhereClause } = buildFilterClauses(operatorFilters)
+      const operatorQuery = buildUniodontoRankingQuery(operatorWhereClause, metric, order, 'LIMIT 1', {
+        viewRef,
+        selectList: metricSelectList,
+      })
+      const result = await runQuery(operatorQuery.query)
+      operatorRow = result[0] ?? null
+    }
+    const operatorValue = toNumeric(operatorRow?.valor ?? operatorRow?.[metricColumn])
+    if (operatorValue !== null) {
+      const values = rows.map((row) => toNumeric(row[metricColumn] ?? row.valor)).filter((value) => value !== null)
+      const distinctValues = Array.from(new Set(values.map((value) => String(value))))
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value))
+      const betterCount = distinctValues.filter((value) =>
+        order === 'ASC' ? value < operatorValue : value > operatorValue,
+      ).length
+      operatorRow.rank_position = betterCount + 1
+      operatorRow.rank = operatorRow.rank_position
+    }
+  }
+  return { rows, operatorRow }
+}
+
+const monetaryRankingColumns = [
+  'vr_receitas',
+  'vr_despesas',
+  'vr_contraprestacoes',
+  'vr_contraprestacoes_efetivas',
+  'vr_contraprestacoes_pre',
+  'vr_corresponsabilidade_cedida',
+  'vr_creditos_operacoes_saude',
+  'vr_eventos_liquidos',
+  'vr_eventos_a_liquidar',
+  'vr_desp_comerciais',
+  'vr_desp_comerciais_promocoes',
+  'vr_desp_administrativas',
+  'vr_outras_desp_oper',
+  'vr_desp_tributos',
+  'vr_receitas_fin',
+  'vr_despesas_fin',
+  'vr_receitas_patrimoniais',
+  'vr_outras_receitas_operacionais',
+  'vr_ativo_circulante',
+  'vr_conta_1213',
+  'vr_conta_1214',
+  'vr_conta_122',
+  'vr_ativo_permanente',
+  'vr_passivo_circulante',
+  'vr_passivo_nao_circulante',
+  'vr_patrimonio_liquido',
+  'vr_ativos_garantidores',
+  'vr_provisoes_tecnicas',
+  'vr_pl_ajustado',
+  'vr_margem_solvencia_exigida',
+  'vr_conta_61',
+  'resultado_financeiro',
+  'resultado_liquido_final_ans',
+  'resultado_liquido',
+]
+
+async function fetchMonetaryRanking(metricColumn, filters, limit = null, order = 'DESC', options = {}) {
+  const metricKey = String(metricColumn ?? '').trim()
+  if (!metricKey) {
+    return { rows: [], operatorRow: null }
+  }
+  if (!monetaryRankingColumns.includes(metricKey)) {
+    throw new Error(`Métrica monetária inválida: ${metricKey}`)
+  }
+  const viewRef = resolveView({ mode: 'ans' })
+  const { whereClause } = buildFilterClauses(stripOperatorSelection(filters))
+  const operatorName = options.operatorName ? sanitizeSql(options.operatorName) : null
+  const limitClause = Number.isFinite(limit) && limit > 0 ? `LIMIT ${limit}` : ''
+
+  const monetarySelectList = monetaryRankingColumns
+    .map((column) => `COALESCE(base.${quoteIdentifier(column)}, 0) AS ${quoteIdentifier(column)}`)
+    .join(',\n      ')
+  const valueExpr = `COALESCE(base.${quoteIdentifier(metricKey)}, 0)`
+  const query = `
+    WITH base AS (
+      SELECT
+        nome_operadora,
+        reg_ans,
+        porte,
+        modalidade,
+        qt_beneficiarios,
+        ${valueExpr} AS valor
+        ${monetarySelectList ? `,\n      ${monetarySelectList}` : ''}
+      FROM ${viewRef} base
+      ${whereClause}
+    ), ranked AS (
+      SELECT
+        base.*,
+        ROW_NUMBER() OVER (ORDER BY valor ${order}) AS rank
+      FROM base
+    )
+    SELECT *
+    FROM ranked
+    ORDER BY rank
+    ${limitClause}
+  `
+  const rows = await runQuery(query)
+
+  let operatorRow = null
+  if (operatorName) {
+    if (isVirtualUniodontoOperator(options.operatorName)) {
+      const cohortFilters = buildCohortFilters(stripOperatorSelection(filters), { uniodonto: true })
+      const snapshot = await fetchVirtualCohortSnapshot(cohortFilters)
+      if (snapshot) {
+        operatorRow = {
+          ...snapshot,
+          nome_operadora: VIRTUAL_OPERATOR_UNIODONTO,
+          valor: snapshot[metricKey] ?? null,
+        }
+      }
+    } else {
+      const operatorQuery = `
+        SELECT
+          nome_operadora,
+          reg_ans,
+          porte,
+          modalidade,
+          qt_beneficiarios,
+          COALESCE(${quoteIdentifier(metricKey)}, 0) AS valor
+          ${monetaryRankingColumns.map((column) => `,\n          COALESCE(${quoteIdentifier(column)}, 0) AS ${quoteIdentifier(column)}`).join('')}
+        FROM ${viewRef}
+        WHERE nome_operadora = '${operatorName}'
+        ${whereClause ? ` AND ${whereClause.replace(/^WHERE\s+/i, '')}` : ''}
+        LIMIT 1
+      `
+      const result = await runQuery(operatorQuery)
+      operatorRow = result[0] ?? null
+    }
+    const operatorValue = toNumeric(operatorRow?.valor ?? operatorRow?.[metricKey])
+    if (operatorValue !== null) {
+      const values = rows.map((row) => toNumeric(row.valor ?? row[metricKey])).filter((value) => value !== null)
+      const betterCount = values.filter((value) => (order === 'ASC' ? value < operatorValue : value > operatorValue)).length
+      operatorRow.rank_position = betterCount + 1
+      operatorRow.rank = operatorRow.rank_position
+    }
+  }
+  return { rows, operatorRow }
+}
+
+async function fetchRegulatoryScoreRanking(filters, limit = null, order = 'DESC', options = {}) {
+  const viewRef = resolveView({ mode: 'ans' })
+  const metricSelectList = rankingMetrics
+    .map((item) => {
+      const expression = resolveMetricExpression(item.id, { mode: 'ans', source: 'base' })
+      return expression ? `${expression.trim()} AS ${item.id}` : null
+    })
+    .filter(Boolean)
+    .join(',\n      ')
+  const indicatorProjection = buildRegulatoryIndicatorProjection({ source: 'base' }).join(',\n      ')
+  const { whereClause } = buildFilterClauses(stripOperatorSelection(filters), { latestOnlyDefault: false })
+  const query = `
+    SELECT
+      nome_operadora,
+      reg_ans,
+      porte,
+      modalidade,
+      qt_beneficiarios,
+      ano,
+      trimestre,
+      periodo${
+        metricSelectList ? `,\n      ${metricSelectList}` : ''
+      }
+      ${indicatorProjection ? `,\n      ${indicatorProjection}` : ''}
+    FROM ${viewRef}
+    ${whereClause ?? ''}
+  `
+  const rows = await runQuery(query)
+  if (!rows.length) {
+    return { rows: [], operatorRow: null }
+  }
+  const peerStats = await fetchRegulatoryPeerStats(filters)
+  const scoredRows = rows
+    .map((row) => {
+      const evaluation = evaluateRegulatoryScore({ operator: row, peers: peerStats })
+      return {
+        ...row,
+        valor: evaluation?.finalScore?.value ?? null,
+        score_label: evaluation?.finalScore?.label ?? 'SEM DADO',
+        regulatory_score: evaluation?.finalScore?.value ?? null,
+        regulatory_score_label: evaluation?.finalScore?.label ?? 'SEM DADO',
+      }
+    })
+    .filter((row) => row.valor !== null)
+
+  scoredRows.sort((a, b) => {
+    const aVal = a.valor ?? (order === 'ASC' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY)
+    const bVal = b.valor ?? (order === 'ASC' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY)
+    if (aVal === bVal) return 0
+    if (order === 'ASC') {
+      return aVal > bVal ? 1 : -1
+    }
+    return aVal > bVal ? -1 : 1
+  })
+  scoredRows.forEach((row, index) => {
+    row.rank_position = index + 1
+  })
+  const operatorName = options.operatorName ?? null
+  let operatorRow = operatorName ? scoredRows.find((row) => row.nome_operadora === operatorName) ?? null : null
+  if (operatorName && isVirtualUniodontoOperator(operatorName)) {
+    const cohortFilters = buildCohortFilters(stripOperatorSelection(filters), { uniodonto: true })
+    const cohortRow = await fetchVirtualCohortSnapshot(cohortFilters)
+    if (cohortRow) {
+      const evaluation = evaluateRegulatoryScore({ operator: cohortRow, peers: peerStats })
+      const value = evaluation?.finalScore?.value ?? null
+      const baseRow = {
+        ...cohortRow,
+        nome_operadora: VIRTUAL_OPERATOR_UNIODONTO,
+        valor: value,
+        score_label: evaluation?.finalScore?.label ?? 'SEM DADO',
+        regulatory_score: value,
+        regulatory_score_label: evaluation?.finalScore?.label ?? 'SEM DADO',
+      }
+      if (value !== null) {
+        const betterCount = scoredRows.filter((row) => {
+          const rowValue = row.valor ?? null
+          if (rowValue === null || rowValue === undefined) return false
+          return order === 'ASC' ? rowValue < value : rowValue > value
+        }).length
+        baseRow.rank_position = betterCount + 1
+      }
+      operatorRow = baseRow
+    }
+  }
+  return {
+    rows: Number.isFinite(limit) && limit > 0 ? scoredRows.slice(0, limit) : scoredRows,
+    operatorRow,
+  }
+}
+
+async function fetchScatter(xMetric, yMetric, filters, limit = 200) {
+  const viewRef = resolveView({ mode: 'ans' })
+  const { whereClause } = buildFilterClauses(filters)
+  const query = `
+    WITH base AS (
+      SELECT *
+      FROM ${viewRef}
+      ${whereClause}
+    )
+    SELECT
+      nome_operadora,
+      porte,
+      modalidade,
+      qt_beneficiarios,
+      ${xMetric} AS x_value,
+      ${yMetric} AS y_value,
+      resultado_liquido
+    FROM base
+    ORDER BY qt_beneficiarios DESC NULLS LAST
+    LIMIT ${limit}
+  `
+  return runQuery(query)
+}
+
+async function fetchTableData(filters, options = {}) {
+  const includeAllColumns = options.includeAllColumns === true
+  const ignorePeriodFilters = options.ignorePeriodFilters === true
+  const exactOperatorName = options.operatorName ?? null
+  const viewRef = resolveView({ mode: 'ans' })
+
+  let effectiveFilters = { ...filters }
+  if (ignorePeriodFilters) {
+    effectiveFilters = {
+      ...effectiveFilters,
+      anos: [],
+      trimestres: [],
+    }
+  }
+
+  const { whereClause } = buildFilterClauses(effectiveFilters, {
+    latestOnlyDefault: ignorePeriodFilters ? false : true,
+  })
+
+  let finalWhereClause = whereClause
+  if (exactOperatorName) {
+    if (isVirtualUniodontoOperator(exactOperatorName)) {
+      const clause = 'COALESCE(uniodonto, FALSE) IS TRUE'
+      finalWhereClause = finalWhereClause ? `${finalWhereClause} AND ${clause}` : `WHERE ${clause}`
+    } else {
+      const clause = `nome_operadora = '${sanitizeSql(exactOperatorName)}'`
+      finalWhereClause = finalWhereClause ? `${finalWhereClause} AND ${clause}` : `WHERE ${clause}`
+    }
+  }
+
+  let selectedFields = options.columns?.length ? options.columns : DETAIL_TABLE_FIELDS
+  if (includeAllColumns) {
+    selectedFields = await getViewColumns(viewRef)
+  }
+  if (!selectedFields || !selectedFields.length) {
+    selectedFields = ['*']
+  }
+
+  const projection = selectedFields
+    .map((field) => {
+      const expression = resolveMetricExpression(field, { mode: 'ans', source: 'base' })
+      if (expression) {
+        return `(${expression.trim()}) AS ${field}`
+      }
+      return field
+    })
+    .join(', ')
+  const limit = options.limit ?? 500
+  const offset = options.offset ?? 0
+  const query = `
+    SELECT ${projection}
+    FROM ${viewRef}
+    ${finalWhereClause ?? ''}
+    ORDER BY ano DESC, trimestre DESC, nome_operadora
+    LIMIT ${limit} OFFSET ${offset}
+  `
+  const rows = await runQuery(query)
+  return {
+    rows,
+    columns: selectedFields,
+  }
+}
+
+async function fetchTableColumns() {
+  return getViewColumns(resolveView({ mode: 'ans' }))
+}
+
+function getMetricsCatalog() {
+  return metricFormulas.map(({ id, label, description, format }) => ({ id, label, description, format }))
+}
+
+return { assertDatasetReady, fetchAvailablePeriods, fetchOperatorOptions, fetchDashboardBootstrap, fetchOperatorPeriods, fetchKpiSummary, fetchUniodontoPeerSummary, fetchAnsPeerSummary, fetchMonetarySummary, fetchRegulatoryReport, fetchRegulatoryScoreForFilters, fetchTrendSeries, fetchUniodontoPerCapitaSeries, fetchTrendSeriesBatch, fetchOperatorSnapshot, fetchOperatorLatestSnapshot, fetchRanking, fetchUniodontoRanking, fetchMonetaryRanking, fetchRegulatoryScoreRanking, fetchScatter, fetchTableData, fetchTableColumns, getMetricsCatalog }
+}

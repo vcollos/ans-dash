@@ -7,9 +7,9 @@ import {
   PMPG_WEIGHT_RULES,
   PMRC_WEIGHT_RULES,
   RESULT_WEIGHT_RULES,
-} from './metricFormulasModoUniodonto'
+} from './metricFormulasModoUniodonto.js'
 
-export { getUniodontoMetricSql, UNIODONTO_METRIC_SQL } from './metricFormulasModoUniodonto'
+export { getUniodontoMetricSql, UNIODONTO_METRIC_SQL } from './metricFormulasModoUniodonto.js'
 
 const WORKING_DAYS_PER_MONTH = 22
 const WORKING_HOURS_PER_DAY = 8

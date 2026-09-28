@@ -1,5 +1,6 @@
 import express from 'express'
 import { createSsoConsumer, scopeSsoExport } from './centralSso.js'
+import { executeDataOperation } from './dataOperations.js'
 import { buildUploadReport, validateReportCompetencia } from './uploadReport.js'
 import { BigQuery } from '@google-cloud/bigquery'
 import fs from 'fs'
@@ -5074,6 +5075,19 @@ async function handleOperadoraDemonstracoesUpload(req, res) {
 
 app.post('/api/import/operadora-demonstracoes', handleOperadoraDemonstracoesUpload)
 app.post('/api/import/singular-demonstracoes', handleOperadoraDemonstracoesUpload)
+
+app.post('/api/data/operation', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store')
+  try {
+    const result = await executeDataOperation({
+      body: req.body, access: req.accessContext, executeQuery: runBigQuery,
+    })
+    return res.json({ result })
+  } catch (error) {
+    return res.status(error.status ?? 503).json({ error: error.status === 400
+      ? 'Operação ou parâmetros inválidos.' : 'Não foi possível consultar os dados autorizados.' })
+  }
+})
 
 app.post('/api/query', async (req, res) => {
   const startedAt = Date.now()

@@ -154,3 +154,17 @@ test('central rejection of replayed/expired code cannot issue a consumer session
   assert.equal(callback.headers.get('location'), '/?sso=error')
   assert.match(callback.headers.get('set-cookie'), /__Host-pfc_sso=; Path=\/; Max-Age=0/)
 })
+
+test('session bootstrap distinguishes absent cookie from an invalid or revoked session', async (t) => {
+  const f = await fixture(t)
+  const absent = await f.request('/api/auth/sso/session')
+  assert.equal(absent.status, 401)
+  assert.equal((await absent.json()).code, 'SSO_NO_SESSION')
+  const invalid = await f.request('/api/auth/sso/session', { headers: { cookie: '__Host-pfc_sso=invalid' } })
+  assert.equal(invalid.status, 401)
+  assert.equal((await invalid.json()).code, undefined)
+  const revoked = await fixture(t, { fetchImpl: async () => ({ ok: false, status: 401 }) })
+  const rejected = await revoked.request('/api/auth/sso/session', { headers: { cookie: `__Host-pfc_sso=${session}` } })
+  assert.equal(rejected.status, 401)
+  assert.equal((await rejected.json()).code, undefined)
+})
