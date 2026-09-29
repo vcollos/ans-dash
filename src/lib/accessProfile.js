@@ -7,6 +7,7 @@ function mapAccessProfilePayload(payload = {}) {
     email: payload?.email ?? null,
     enforced: payload?.enforced === true,
     isAdmin: payload?.isAdmin === true,
+    canReadAllIndicators: payload?.canReadAllIndicators === true,
     operators: Array.isArray(payload?.operators)
       ? payload.operators.map((item) => ({
           regAns: String(item?.regAns ?? '').trim(),
