@@ -1,5 +1,5 @@
 import { onAuthStateChanged, signOut } from 'firebase/auth'
-import { auth } from './firebaseClient'
+import { auth, SSO_QA_ISOLATED } from './firebaseClient'
 import { getSsoState, setSsoState, ssoRequestOptions } from './ssoSession'
 
 const FIREBASE_AUTH_MESSAGES = {
@@ -37,6 +37,7 @@ export function getAuthErrorMessage(error, fallback = 'Falha ao autenticar.') {
 }
 
 function waitForAuthUser(timeoutMs = 1500) {
+  if (!auth) return Promise.resolve(null)
   if (auth.currentUser) return Promise.resolve(auth.currentUser)
   return new Promise((resolve) => {
     let settled = false
@@ -71,7 +72,7 @@ function notifyAuthExpired() {
 
 export async function fetchWithAuth(url, options = {}) {
   const session = getSsoState()
-  if (session.status === 'blocked') throw new Error('Entre novamente pelo UHub para continuar.')
+  if (session.status === 'blocked' || (SSO_QA_ISOLATED && session.status !== 'active')) throw new Error('Entre novamente pelo UHub para continuar.')
   if (session.status === 'active') {
     const target = new URL(url, window.location.origin)
     if (target.origin !== window.location.origin) throw new Error('Destino de API não autorizado.')
@@ -104,7 +105,7 @@ export async function fetchWithAuth(url, options = {}) {
     if (response.status === 401 && sentAuth) {
       if (session.status === 'active') setSsoState({ status: 'blocked', csrf: null, user: null })
       try {
-        await signOut(auth)
+        if (auth) await signOut(auth)
       } catch (err) {
         console.warn('[auth] Falha ao encerrar sessao', err)
       }

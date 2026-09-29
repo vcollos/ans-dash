@@ -10,7 +10,7 @@ import {
   isSignInWithEmailLink,
   signInWithEmailLink,
 } from 'firebase/auth'
-import { auth, googleProvider } from '../lib/firebaseClient'
+import { auth, googleProvider, SSO_QA_ISOLATED } from '../lib/firebaseClient'
 import AuthContext from './auth-context'
 import { getSsoState, setSsoState, readSsoSession, ssoRequestOptions } from '../lib/ssoSession'
 
@@ -38,12 +38,17 @@ export function AuthProvider({ children }) {
     async function initialize() {
       if (SSO_ENABLED) {
         try {
-          const session = await readSsoSession()
+          const session = await readSsoSession({ isolated: SSO_QA_ISOLATED })
           if (cancelled) return
           setSsoState(session)
           setSsoAvailable(session.available !== false)
           if (new URLSearchParams(window.location.search).get('sso') === 'error') {
             throw new Error('Não foi possível concluir o acesso pelo UHub. Tente novamente.')
+          }
+          if (session.status === 'blocked') {
+            setAuthError(new Error('Ambiente de QA isolado. Entre pelo UHub para continuar.'))
+            setIsLoading(false)
+            return
           }
           if (session.status === 'active') {
             setUser(session.user)
@@ -74,28 +79,28 @@ export function AuthProvider({ children }) {
   }, [])
 
   const signInWithEmail = useCallback(async (email, password) => {
-    if (getSsoState().status !== 'legacy') throw new Error('Use o UHub para gerenciar sua sessão e credenciais.')
+    if (SSO_QA_ISOLATED || getSsoState().status !== 'legacy') throw new Error('Use o UHub para gerenciar sua sessão e credenciais.')
     setAuthError(null)
     const result = await signInWithEmailAndPassword(auth, email, password)
     return result.user
   }, [])
 
   const signUpWithEmail = useCallback(async (email, password) => {
-    if (getSsoState().status !== 'legacy') throw new Error('Use o UHub para gerenciar sua sessão e credenciais.')
+    if (SSO_QA_ISOLATED || getSsoState().status !== 'legacy') throw new Error('Use o UHub para gerenciar sua sessão e credenciais.')
     setAuthError(null)
     const result = await createUserWithEmailAndPassword(auth, email, password)
     return result.user
   }, [])
 
   const signInWithGoogle = useCallback(async () => {
-    if (getSsoState().status !== 'legacy') throw new Error('Use o UHub para gerenciar sua sessão e credenciais.')
+    if (SSO_QA_ISOLATED || getSsoState().status !== 'legacy') throw new Error('Use o UHub para gerenciar sua sessão e credenciais.')
     setAuthError(null)
     const result = await signInWithPopup(auth, googleProvider)
     return result.user
   }, [])
 
   const sendEmailLink = useCallback(async (email, continueUrl) => {
-    if (getSsoState().status !== 'legacy') throw new Error('Use o UHub para gerenciar sua sessão e credenciais.')
+    if (SSO_QA_ISOLATED || getSsoState().status !== 'legacy') throw new Error('Use o UHub para gerenciar sua sessão e credenciais.')
     setAuthError(null)
     const trimmed = String(email ?? '').trim()
     if (!trimmed) {
@@ -111,7 +116,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   const completeEmailLinkSignIn = useCallback(async (email, link) => {
-    if (getSsoState().status !== 'legacy') throw new Error('Use o UHub para gerenciar sua sessão e credenciais.')
+    if (SSO_QA_ISOLATED || getSsoState().status !== 'legacy') throw new Error('Use o UHub para gerenciar sua sessão e credenciais.')
     setAuthError(null)
     const trimmed = String(email ?? '').trim()
     if (!trimmed) {
@@ -124,6 +129,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   const isEmailLink = useCallback((link) => {
+    if (SSO_QA_ISOLATED) return false
     const target = link ?? window.location.href
     return isSignInWithEmailLink(auth, target)
   }, [])
@@ -136,12 +142,12 @@ export function AuthProvider({ children }) {
         setSsoState({ status: 'blocked', csrf: null, user: null })
       } catch (error) { setAuthError(error); return }
     }
-    await firebaseSignOut(auth)
+    if (auth) await firebaseSignOut(auth)
     setUser(getSsoState().status === 'legacy' && DEV_AUTH_BYPASS_ENABLED ? { uid: 'local-preview-admin', email: DEV_AUTH_EMAIL } : null)
   }, [])
 
   const sendPasswordReset = useCallback(async (email) => {
-    if (getSsoState().status !== 'legacy') throw new Error('Use o UHub para gerenciar sua sessão e credenciais.')
+    if (SSO_QA_ISOLATED || getSsoState().status !== 'legacy') throw new Error('Use o UHub para gerenciar sua sessão e credenciais.')
     setAuthError(null)
     const fallback = auth.currentUser?.email ?? ''
     const target = String(email ?? fallback).trim()
@@ -164,7 +170,7 @@ export function AuthProvider({ children }) {
     () => ({
       user,
       ssoEnabled: ssoAvailable,
-      legacyLoginAllowed: getSsoState().status === 'legacy',
+      legacyLoginAllowed: !SSO_QA_ISOLATED && getSsoState().status === 'legacy',
       signInWithUhub,
       isLoading,
       error: authError,

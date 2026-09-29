@@ -722,6 +722,7 @@ function AppContent() {
 
   return (
     <>
+      {accessProfile?.qaFixture === true && accessProfile?.dataMode === 'fixtures' ? <p role="status" className="border-b bg-amber-100 px-4 py-3 text-sm font-semibold text-amber-950">QA — dados simulados; uploads desabilitados</p> : null}
       {error ? <p role="alert" className="bg-destructive/10 p-3 text-sm text-destructive">{error.message}</p> : null}
       {user?.authSource === 'uhub-sso' ? (
         <p role="status" className="border-b bg-muted/30 px-4 py-3 text-sm text-muted-foreground">

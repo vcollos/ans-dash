@@ -13,11 +13,11 @@ export function ssoRequestOptions(options = {}, session = state) {
   }
   return { ...options, headers, credentials: 'same-origin', cache: 'no-store', redirect: 'error' }
 }
-export async function readSsoSession() {
+export async function readSsoSession({ isolated = false } = {}) {
   const response = await fetch('/api/auth/sso/session', { credentials: 'same-origin', cache: 'no-store', redirect: 'error' })
   const payload = await response.json().catch(() => ({}))
   if (response.status === 404 || (response.status === 401 && payload.code === 'SSO_NO_SESSION')) {
-    return { status: 'legacy', csrf: null, user: null, available: response.status !== 404 }
+    return { status: isolated ? 'blocked' : 'legacy', csrf: null, user: null, available: isolated || response.status !== 404 }
   }
   const validUser = payload.user?.authSource === 'uhub-sso' && typeof payload.user?.uid === 'string' && payload.user.uid.trim().length > 0
   const validCsrf = typeof payload.csrf === 'string' && /^[A-Za-z0-9_-]{43}$/.test(payload.csrf)

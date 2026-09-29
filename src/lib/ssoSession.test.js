@@ -20,6 +20,9 @@ test('bootstrap permits legacy only for absent SSO or disabled backend, never re
   })
   reply(401, { code: 'SSO_NO_SESSION' })
   assert.equal((await readSsoSession()).status, 'legacy')
+  const isolated = await readSsoSession({ isolated: true })
+  assert.equal(isolated.status, 'blocked')
+  assert.equal(isolated.available, true)
   reply(401, {})
   await assert.rejects(readSsoSession(), /expirou/)
   reply(403, {})
@@ -37,6 +40,8 @@ test('bootstrap permits legacy only for absent SSO or disabled backend, never re
     reply(200, invalid)
     await assert.rejects(readSsoSession(), /indisponível/)
   }
+  reply(404, {})
+  assert.equal((await readSsoSession({ isolated: true })).status, 'blocked')
   reply(200, valid)
   const session = await readSsoSession()
   assert.equal(session.status, 'active')

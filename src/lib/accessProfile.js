@@ -4,6 +4,8 @@ function mapAccessProfilePayload(payload = {}) {
   const registrationProfile = payload?.registrationProfile
   return {
     uid: payload?.uid ?? null,
+    qaFixture: payload?.qaFixture === true,
+    dataMode: payload?.dataMode ?? null,
     email: payload?.email ?? null,
     enforced: payload?.enforced === true,
     isAdmin: payload?.isAdmin === true,

@@ -4,7 +4,7 @@ import { app } from './firebaseClient'
 let analyticsPromise = null
 
 function getAnalyticsInstance() {
-  if (typeof window === 'undefined') return Promise.resolve(null)
+  if (!app || typeof window === 'undefined') return Promise.resolve(null)
   if (!analyticsPromise) {
     analyticsPromise = isSupported()
       .then((supported) => (supported ? getAnalytics(app) : null))
