@@ -3,6 +3,8 @@ import crypto from 'node:crypto'
 export const PFC_ORIGIN = 'https://pfc.uniodonto.coop.br'
 export const HUB_ORIGIN = 'https://uhub.uniodonto.coop.br'
 export const CALLBACK = `${PFC_ORIGIN}/auth/sso/callback`
+export const PFC_QA_ORIGIN = 'https://pfc.collos.cloud:8444'
+export const HUB_QA_ORIGIN = 'https://uhub-staging.collos.cloud:8443'
 const TRANSACTION = '__Host-pfc_sso_tx'
 const SESSION = '__Host-pfc_sso'
 const opaque = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{43}$/.test(v)
@@ -16,7 +18,7 @@ export function ssoConfig(env = process.env) {
   if (!/^[a-f0-9]{64}$/i.test(env.PFC_SSO_COOKIE_KEY ?? '') || !opaque(env.PFC_SSO_CLIENT_SECRET)) {
     throw new Error('Configuração SSO obrigatória ausente ou inválida.')
   }
-  return { enabled: true, key: Buffer.from(env.PFC_SSO_COOKIE_KEY, 'hex'), clientSecret: env.PFC_SSO_CLIENT_SECRET }
+  return { enabled: true, key: Buffer.from(env.PFC_SSO_COOKIE_KEY, 'hex'), clientSecret: env.PFC_SSO_CLIENT_SECRET, isolatedQa: env.PFC_SSO_QA_ISOLATED === 'true' }
 }
 
 function readCookie(req, name) {
@@ -88,10 +90,13 @@ export async function relaySsoFragment() {
   }
 }
 
-export function createSsoConsumer({ config = ssoConfig(), fetchImpl = fetch, loadLocalAccess, now = () => Math.floor(Date.now() / 1000) }) {
+export function createSsoConsumer({ config = ssoConfig(), fetchImpl = fetch, loadLocalAccess, validateInspection = () => {}, now = () => Math.floor(Date.now() / 1000) }) {
+  const browserOrigin = config.isolatedQa === true ? PFC_QA_ORIGIN : PFC_ORIGIN
+  const hubOrigin = config.isolatedQa === true ? HUB_QA_ORIGIN : HUB_ORIGIN
+  const callback = `${browserOrigin}/auth/sso/callback`
   const csrf = (session) => crypto.createHmac('sha256', config.key).update(`csrf:${session}`).digest('base64url')
   const call = async (path, body) => {
-    const response = await fetchImpl(`${HUB_ORIGIN}/api/sso/${path}`, {
+    const response = await fetchImpl(`${hubOrigin}/api/sso/${path}`, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000),
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.clientSecret}`, 'x-sso-client-id': 'pfc' },
       body: JSON.stringify(body),
@@ -103,11 +108,12 @@ export function createSsoConsumer({ config = ssoConfig(), fetchImpl = fetch, loa
     if (!opaque(session)) fail(401)
     const data = await call('introspect', { session })
     if (data?.legacyIdentity?.namespace !== 'firebase:bigdata-467917' || typeof data.legacyIdentity.uid !== 'string' || !data.legacyIdentity.uid || data.legacyIdentity.uid.length > 128) fail()
+    await validateInspection(data)
     const rows = await loadLocalAccess(data.legacyIdentity.uid)
     return { ...intersectSsoAccess(data, rows, now()), expiresAt: data.expiresAt }
   }
   const mutation = (req, session) => {
-    if (req.headers.origin !== PFC_ORIGIN || !equal(req.headers['x-csrf-token'], csrf(session))) fail()
+    if (req.headers.origin !== browserOrigin || !equal(req.headers['x-csrf-token'], csrf(session))) fail()
   }
   const headers = (res) => {
     res.setHeader('Cache-Control', 'no-store')
@@ -127,8 +133,8 @@ export function createSsoConsumer({ config = ssoConfig(), fetchImpl = fetch, loa
       if (Object.keys(req.query).length || (req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site']))) fail(400)
       const state = random(), verifier = random()
       cookie(res, TRANSACTION, seal({ state, verifier, expiresAt: now() + 300 }, config.key), 300)
-      const target = new URL('/auth/sso', HUB_ORIGIN)
-      target.search = new URLSearchParams({ clientId: 'pfc', callback: CALLBACK, state, challenge: hash(verifier) }).toString()
+      const target = new URL('/auth/sso', hubOrigin)
+      target.search = new URLSearchParams({ clientId: 'pfc', callback, state, challenge: hash(verifier) }).toString()
       return res.redirect(303, target.href)
     }))
     app.get('/auth/sso/callback', wrap(async (req, res) => {
@@ -141,14 +147,14 @@ export function createSsoConsumer({ config = ssoConfig(), fetchImpl = fetch, loa
     }))
     app.post('/auth/sso/callback', wrap(async (req, res) => {
       // Validate Origin before clearing cookies to prevent cross-site logout/DoS.
-      if (req.headers.origin !== PFC_ORIGIN || Object.keys(req.query).length || !req.is('application/json')) fail(403)
+      if (req.headers.origin !== browserOrigin || Object.keys(req.query).length || !req.is('application/json')) fail(403)
       cookie(res, TRANSACTION, '', 0)
       try {
         const { code, state } = req.body ?? {}
         if (!req.body || Array.isArray(req.body) || Object.keys(req.body).length !== 2 || !opaque(code) || !opaque(state)) fail(400)
         const tx = unseal(readCookie(req, TRANSACTION), config.key)
         if (!opaque(tx.state) || !opaque(tx.verifier) || !Number.isSafeInteger(tx.expiresAt) || tx.expiresAt <= now() || tx.expiresAt > now() + 300 || !equal(state, tx.state)) fail(401)
-        const result = await call('token', { code, callback: CALLBACK, verifier: tx.verifier })
+        const result = await call('token', { code, callback, verifier: tx.verifier })
         const principal = await inspect(result.session)
         const expiresAt = Math.min(result.expiresAt, principal.expiresAt, now() + 28800)
         if (!Number.isSafeInteger(expiresAt) || expiresAt <= now()) fail(401)

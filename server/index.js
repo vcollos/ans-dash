@@ -24,6 +24,10 @@ import {
   isIgnorableAccountDescriptionError,
 } from './demonstracoesUploadValidation.js'
 
+if (process.env.PFC_SSO_QA_ISOLATED === 'true') {
+  throw new Error('QA isolado exige server/qaSsoServer.js; servidor principal não pode iniciar nesse modo.')
+}
+
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
