@@ -723,7 +723,14 @@ function AppContent() {
   return (
     <>
       {error ? <p role="alert" className="bg-destructive/10 p-3 text-sm text-destructive">{error.message}</p> : null}
-      {user?.authSource === 'uhub-sso' ? <p role="status" className="border-b bg-muted/30 px-4 py-3 text-sm text-muted-foreground">Acesso UHub: os comparativos estão restritos à sua operadora nesta etapa. Gestão de contas e alteração cadastral ainda não estão disponíveis.</p> : null}
+      {user?.authSource === 'uhub-sso' ? (
+        <p role="status" className="border-b bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          {accessProfile?.canReadAllIndicators === true
+            ? 'Acesso UHub: os comparativos gerais estão disponíveis conforme seu perfil. '
+            : 'Acesso UHub: os comparativos estão restritos à sua operadora nesta etapa. '}
+          O envio de dados depende da autorização para cada operadora. Gestão de contas e alteração cadastral ainda não estão disponíveis.
+        </p>
+      ) : null}
       <DashboardApp
         onLogout={signOut}
         accessProfile={accessProfile}
