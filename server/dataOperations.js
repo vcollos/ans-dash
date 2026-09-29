@@ -110,6 +110,9 @@ export async function executeDataOperation({ body, access, executeQuery, env }) 
   const allowedSources = new Set(Object.values(trustedEnv).filter((v) => typeof v === 'string' && v !== 'PRÓPRIA').map((s) => `\`${s}\``))
   const scopeSource = (source) => {
     if (!allowedSources.has(source)) throw new Error('Fonte não autorizada pelo servidor.')
+    // Explicit capability comes from the inspected grant intersected with active
+    // local ACL, never from request arguments or an administrator role.
+    if (access.canReadAllIndicators === true) return source
     // Both source and tenant are server-owned and validated. Filter each relation
     // before aggregates, joins, ranking and metadata reads; never rewrite client SQL.
     return `(SELECT * FROM ${source} WHERE CAST(reg_ans AS STRING) = '${access.allowedRegAns[0]}')`

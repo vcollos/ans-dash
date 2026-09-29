@@ -145,3 +145,44 @@ test('runtime short mart names resolve through the existing canonical project/da
   assert.equal(other.VITE_MART_ANS_TABLE, 'approved-project.approved_dataset.reviewed_mart')
   assert.throws(() => dataOperationEnvironment({ BQ_MART_ANS_TABLE: 'project.dataset.table.extra' }))
 })
+
+test('explicit indicator read-all supports global benchmarks with fixed sources and no raw SQL', async () => {
+  const queries = []
+  await executeDataOperation({
+    body: { operation: 'fetchAnsPeerSummary', args: [{}, {}] },
+    access: { ...access(), canReadAllIndicators: true }, env: {},
+    executeQuery: async (sql) => { queries.push(sql); return result() },
+  })
+  assert.ok(queries.length > 0)
+  for (const sql of queries) {
+    assert.doesNotMatch(sql, /WHERE CAST\(reg_ans AS STRING\)/)
+    assert.ok(sql.includes('`bigdata-467917.dash_ans.indicadores_mart_ans_consolidado`'))
+  }
+  for (const value of [undefined, false, 'true', 1, 'pfc.indicadores.read.all']) {
+    await executeDataOperation({ body: { operation: 'fetchDashboardBootstrap', args: [] },
+      access: { ...access(), canReadAllIndicators: value }, env: {},
+      executeQuery: async (sql) => { assertScoped(sql, '123456'); return result() },
+    })
+  }
+  await assert.rejects(() => executeDataOperation({
+    body: { operation: 'fetchDashboardBootstrap', args: [], canReadAllIndicators: true },
+    access: access(), env: {}, executeQuery: async () => assert.fail('caller cannot add capabilities'),
+  }), { status: 400 })
+  await assert.rejects(() => executeDataOperation({
+    body: { operation: 'query', args: ['SELECT * FROM secrets'] },
+    access: { ...access(), canReadAllIndicators: true }, env: {}, executeQuery: async () => assert.fail('raw SQL forbidden'),
+  }), { status: 400 })
+})
+
+test('read-all capability cannot reuse global result cache after downgrade', async () => {
+  const queries = []
+  const body = { operation: 'fetchAvailablePeriods', args: [] }
+  for (const canReadAllIndicators of [true, false, true]) {
+    await executeDataOperation({ body, access: { ...access(), canReadAllIndicators }, env: {},
+      executeQuery: async (sql) => { queries.push(sql); return result() },
+    })
+  }
+  assert.equal(queries.length, 3)
+  assert.notEqual(queries[0], queries[1])
+  assertScoped(queries[1], '123456')
+})

@@ -60,6 +60,7 @@ export function intersectSsoAccess(inspection, rows, now = Math.floor(Date.now()
     user: { uid: identity.uid, email: null, claims: {}, pessoaId: inspection.pessoaId, authSource: 'uhub-sso' },
     accessContext: {
       enforced: true, isAdmin: false, sso: true,
+      canReadAllIndicators: grant.scopes.includes('pfc.indicadores.read.all'),
       operators: [{ regAns: grant.reg_ans, operatorName: matches[0].operator_name ?? null, canUpload }],
       allowedRegAns: [grant.reg_ans], canUploadRegAns: canUpload ? [grant.reg_ans] : [],
     },
@@ -168,5 +169,6 @@ export function createSsoConsumer({ config = ssoConfig(), fetchImpl = fetch, loa
 export function scopeSsoExport(exportSql, access) {
   if (!access?.sso) return exportSql
   if (access.allowedRegAns?.length !== 1 || !/^[0-9]{6}$/.test(access.allowedRegAns[0])) fail()
+  if (access.enforced === true && access.canReadAllIndicators === true) return exportSql
   return `SELECT * FROM (${exportSql}) AS pfc_export WHERE CAST(reg_ans AS STRING) = '${access.allowedRegAns[0]}'`
 }

@@ -173,3 +173,48 @@ test('flag-off leaves legacy Firebase middleware reachable despite an old SSO co
   const consumer = createSsoConsumer({ config: { enabled: false }, loadLocalAccess: () => assert.fail('SSO disabled') })
   assert.equal(await consumer.authenticate({ headers: { cookie: `__Host-pfc_sso=${session}`, authorization: 'Bearer legacy' } }, {}), false)
 })
+
+test('global indicator capability requires exact central scope plus local ACL; uploads remain contextual', () => {
+  const data = inspection()
+  const global = { ...data, grant: { ...data.grant, scopes: [...data.grant.scopes, 'pfc.indicadores.read.all'] } }
+  const principal = intersectSsoAccess(global, rows, now)
+  assert.equal(principal.accessContext.canReadAllIndicators, true)
+  assert.equal(principal.accessContext.isAdmin, false)
+  assert.deepEqual(principal.accessContext.allowedRegAns, ['123456'])
+  assert.deepEqual(principal.accessContext.canUploadRegAns, ['123456'])
+  assert.throws(() => intersectSsoAccess(global, [], now))
+  assert.throws(() => intersectSsoAccess({ ...global, grant: { ...global.grant, scopes: ['pfc.indicadores.read.all'] } }, rows, now))
+  assert.throws(() => intersectSsoAccess(global, [{ ...rows[0], reg_ans: '654321' }], now))
+  const noUpload = intersectSsoAccess(global, [{ ...rows[0], can_upload: false }], now)
+  assert.deepEqual(noUpload.accessContext.canUploadRegAns, [])
+  for (const malformed of ['pfc.read.all', 'PFC.INDICADORES.READ.ALL', 'pfc.indicadores.read.all ', 'pfc.*', '*']) {
+    const restricted = intersectSsoAccess({ ...data, grant: { ...data.grant, role: 'admin', scopes: [...data.grant.scopes, malformed] } }, rows, now)
+    assert.equal(restricted.accessContext.canReadAllIndicators, false)
+    assert.equal(restricted.accessContext.isAdmin, false)
+  }
+  const readOnly = intersectSsoAccess({ ...global, grant: { ...global.grant, scopes: ['pfc.read', 'pfc.indicadores.read.all'] } }, rows, now)
+  assert.deepEqual(readOnly.accessContext.canUploadRegAns, [])
+})
+
+test('capability revocation and local ACL revocation are effective on the next request', async (t) => {
+  const f = await fixture(t)
+  const data = inspection()
+  f.setInspection({ ...data, grant: { ...data.grant, scopes: [...data.grant.scopes, 'pfc.indicadores.read.all'] } })
+  const headers = { cookie: `__Host-pfc_sso=${session}` }
+  assert.equal((await (await f.request('/private', { headers })).json()).access.canReadAllIndicators, true)
+  f.setInspection(data)
+  assert.equal((await (await f.request('/private', { headers })).json()).access.canReadAllIndicators, false)
+  f.setRows([])
+  assert.equal((await f.request('/private', { headers })).status, 403)
+})
+
+test('fixed CSV is global only for the explicit verified capability', () => {
+  const sql = 'SELECT reg_ans, valor FROM server_owned_view'
+  const data = inspection()
+  const local = intersectSsoAccess(data, rows, now).accessContext
+  const global = intersectSsoAccess({ ...data, grant: { ...data.grant, scopes: [...data.grant.scopes, 'pfc.indicadores.read.all'] } }, rows, now).accessContext
+  assert.equal(scopeSsoExport(sql, global), sql)
+  assert.notEqual(scopeSsoExport(sql, local), sql)
+  assert.notEqual(scopeSsoExport(sql, { ...local, canReadAllIndicators: 'true' }), sql)
+  assert.throws(() => scopeSsoExport(sql, { ...global, allowedRegAns: [] }))
+})
