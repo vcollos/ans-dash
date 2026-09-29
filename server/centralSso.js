@@ -67,6 +67,27 @@ export function intersectSsoAccess(inspection, rows, now = Math.floor(Date.now()
   }
 }
 
+// Served inline under a per-response CSP nonce; no app bundle or external resource
+// runs while the fragment is present. Secrets remain only in this short-lived closure.
+export async function relaySsoFragment() {
+  const fragment = location.hash
+  history.replaceState(null, '', '/auth/sso/callback')
+  try {
+    const params = new URLSearchParams(fragment.slice(1))
+    if ([...params.keys()].length !== 2 || params.getAll('code').length !== 1 || params.getAll('state').length !== 1) throw new Error()
+    const code = params.get('code'), state = params.get('state')
+    if (!/^[A-Za-z0-9_-]{43}$/.test(code) || !/^[A-Za-z0-9_-]{43}$/.test(state)) throw new Error()
+    const response = await fetch('/auth/sso/callback', {
+      method: 'POST', credentials: 'same-origin', redirect: 'error', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, state }),
+    })
+    if (!response.ok) throw new Error()
+    location.replace('/')
+  } catch {
+    location.replace('/?sso=error')
+  }
+}
+
 export function createSsoConsumer({ config = ssoConfig(), fetchImpl = fetch, loadLocalAccess, now = () => Math.floor(Date.now() / 1000) }) {
   const csrf = (session) => crypto.createHmac('sha256', config.key).update(`csrf:${session}`).digest('base64url')
   const call = async (path, body) => {
@@ -110,13 +131,21 @@ export function createSsoConsumer({ config = ssoConfig(), fetchImpl = fetch, loa
       target.search = new URLSearchParams({ clientId: 'pfc', callback: CALLBACK, state, challenge: hash(verifier) }).toString()
       return res.redirect(303, target.href)
     }))
-    app.get('/auth/sso/callback', async (req, res) => {
-      headers(res)
+    app.get('/auth/sso/callback', wrap(async (req, res) => {
+      // Query-based callbacks are retired; never exchange or reflect their values.
+      if (Object.keys(req.query).length) return res.redirect(303, '/?sso=error')
+      const nonce = random()
+      res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`)
+      res.setHeader('X-Content-Type-Options', 'nosniff')
+      return res.type('html').send(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Acesso UHub</title></head><body><p>Concluindo acesso…</p><script nonce="${nonce}">(${relaySsoFragment.toString()})();</script></body></html>`)
+    }))
+    app.post('/auth/sso/callback', wrap(async (req, res) => {
+      // Validate Origin before clearing cookies to prevent cross-site logout/DoS.
+      if (req.headers.origin !== PFC_ORIGIN || Object.keys(req.query).length || !req.is('application/json')) fail(403)
       cookie(res, TRANSACTION, '', 0)
       try {
-        if (!config.enabled) fail(404)
-        const { code, state } = req.query
-        if (Object.keys(req.query).length !== 2 || !opaque(code) || !opaque(state)) fail(400)
+        const { code, state } = req.body ?? {}
+        if (!req.body || Array.isArray(req.body) || Object.keys(req.body).length !== 2 || !opaque(code) || !opaque(state)) fail(400)
         const tx = unseal(readCookie(req, TRANSACTION), config.key)
         if (!opaque(tx.state) || !opaque(tx.verifier) || !Number.isSafeInteger(tx.expiresAt) || tx.expiresAt <= now() || tx.expiresAt > now() + 300 || !equal(state, tx.state)) fail(401)
         const result = await call('token', { code, callback: CALLBACK, verifier: tx.verifier })
@@ -124,13 +153,12 @@ export function createSsoConsumer({ config = ssoConfig(), fetchImpl = fetch, loa
         const expiresAt = Math.min(result.expiresAt, principal.expiresAt, now() + 28800)
         if (!Number.isSafeInteger(expiresAt) || expiresAt <= now()) fail(401)
         cookie(res, SESSION, result.session, expiresAt - now())
-        return res.redirect(303, '/')
+        return res.json({ ok: true })
       } catch {
-        // Always remove the one-time code from the browser URL, including failures.
         cookie(res, SESSION, '', 0)
-        return res.redirect(303, '/?sso=error')
+        return res.status(401).json({ error: 'SSO indisponível ou acesso não autorizado.' })
       }
-    })
+    }))
     app.get('/api/auth/sso/session', wrap(async (req, res) => {
       if (Object.keys(req.query).length || (req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site']))) fail()
       const session = readCookie(req, SESSION)

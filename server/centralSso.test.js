@@ -1,4 +1,5 @@
 import test from 'node:test'
+import vm from 'node:vm'
 import assert from 'node:assert/strict'
 import express from 'express'
 import { createServer } from 'node:http'
@@ -43,6 +44,13 @@ async function fixture(t, options = {}) {
   return { request, calls, setInspection: (v) => { currentInspection = v }, setRows: (v) => { currentRows = v } }
 }
 
+function postCallback(f, state, cookie, origin = PFC_ORIGIN) {
+  return f.request('/auth/sso/callback', { method: 'POST',
+    headers: { origin, 'Content-Type': 'application/json', ...(cookie ? { cookie } : {}) },
+    body: JSON.stringify({ code: 'c'.repeat(43), state }),
+  })
+}
+
 test('flags default off and enabled requires dedicated secrets', () => {
   assert.deepEqual(ssoConfig({}), { enabled: false })
   assert.throws(() => ssoConfig({ PFC_SSO_ENABLED: 'true' }))
@@ -73,8 +81,9 @@ test('start/callback are multi-instance, PKCE bound, fixed callback and secure c
   const transactionCookie = start.headers.get('set-cookie')
   assert.match(transactionCookie, /Secure; HttpOnly; SameSite=Lax/)
   assert.doesNotMatch(transactionCookie, /Domain=/)
-  const callback = await second.request(`/auth/sso/callback?code=${'c'.repeat(43)}&state=${target.searchParams.get('state')}`, { headers: { cookie: transactionCookie.split(';')[0] } })
-  assert.equal(callback.headers.get('location'), '/')
+  const callback = await postCallback(second, target.searchParams.get('state'), transactionCookie.split(';')[0])
+  assert.equal(callback.status, 200)
+  assert.deepEqual(await callback.json(), { ok: true })
   assert.match(callback.headers.get('set-cookie'), /__Host-pfc_sso=s{43}; Path=\/; Max-Age=28000; Secure; HttpOnly/)
   assert.equal(second.calls[0].body.callback, CALLBACK)
   const { createHash } = await import('node:crypto')
@@ -89,14 +98,14 @@ test('tampered state, transaction, duplicate query and expiry fail before exchan
   const target = new URL(start.headers.get('location'))
   const tx = start.headers.get('set-cookie').split(';')[0]
   for (const [state, cookie] of [[ 'x'.repeat(43), tx ], [target.searchParams.get('state'), `${tx}x`]]) {
-    const response = await f.request(`/auth/sso/callback?code=${'c'.repeat(43)}&state=${state}`, { headers: { cookie } })
-    assert.equal(response.headers.get('location'), '/?sso=error')
+    const response = await postCallback(f, state, cookie)
+    assert.equal(response.status, 401)
   }
   const duplicate = await f.request(`/auth/sso/callback?code=${'c'.repeat(43)}&state=${target.searchParams.get('state')}&state=${target.searchParams.get('state')}`, { headers: { cookie: tx } })
   assert.equal(duplicate.headers.get('location'), '/?sso=error')
   assert.equal(f.calls.length, 0)
   const expired = await fixture(t, { now: () => now + 301 })
-  assert.equal((await expired.request(`/auth/sso/callback?code=${'c'.repeat(43)}&state=${target.searchParams.get('state')}`, { headers: { cookie: tx } })).headers.get('location'), '/?sso=error')
+  assert.equal((await postCallback(expired, target.searchParams.get('state'), tx)).status, 401)
   assert.equal(expired.calls.length, 0)
 })
 
@@ -150,8 +159,8 @@ test('central rejection of replayed/expired code cannot issue a consumer session
   const f = await fixture(t, { fetchImpl: async () => ({ ok: false, status: 401 }) })
   const start = await f.request('/api/auth/sso/start')
   const state = new URL(start.headers.get('location')).searchParams.get('state')
-  const callback = await f.request(`/auth/sso/callback?code=${'c'.repeat(43)}&state=${state}`, { headers: { cookie: start.headers.get('set-cookie').split(';')[0] } })
-  assert.equal(callback.headers.get('location'), '/?sso=error')
+  const callback = await postCallback(f, state, start.headers.get('set-cookie').split(';')[0])
+  assert.equal(callback.status, 401)
   assert.match(callback.headers.get('set-cookie'), /__Host-pfc_sso=; Path=\/; Max-Age=0/)
 })
 
@@ -217,4 +226,69 @@ test('fixed CSV is global only for the explicit verified capability', () => {
   assert.notEqual(scopeSsoExport(sql, local), sql)
   assert.notEqual(scopeSsoExport(sql, { ...local, canReadAllIndicators: 'true' }), sql)
   assert.throws(() => scopeSsoExport(sql, { ...global, allowedRegAns: [] }))
+})
+
+
+test('fragment relay clears history before POST, validates exact params and loads no external resources', async (t) => {
+  const f = await fixture(t)
+  const response = await f.request('/auth/sso/callback')
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('cache-control'), 'no-store')
+  assert.equal(response.headers.get('referrer-policy'), 'no-referrer')
+  const html = await response.text()
+  const [, nonce, script] = /<script nonce="([A-Za-z0-9_-]+)">([\s\S]*?)<\/script>/.exec(html)
+  assert.ok(response.headers.get('content-security-policy').includes(`script-src 'nonce-${nonce}'`))
+  assert.ok(response.headers.get('content-security-policy').includes("default-src 'none'"))
+  assert.ok(response.headers.get('content-security-policy').includes("frame-ancestors 'none'"))
+  assert.doesNotMatch(html, /(?:src|href)=["']/)
+  const another = await f.request('/auth/sso/callback')
+  assert.notEqual(another.headers.get('content-security-policy'), response.headers.get('content-security-policy'))
+  const code = 'c'.repeat(43), state = 't'.repeat(43)
+  for (const [fragment, valid] of [
+    [`#code=${code}&state=${state}`, true], ['', false],
+    [`#code=${code}&state=${state}&state=${state}`, false],
+    [`#code=${code}&state=${state}&next=https://evil.example`, false],
+    [`#code=bad&state=${state}`, false], [`#token=${code}&state=${state}`, false],
+  ]) {
+    const events = []
+    await vm.runInNewContext(script, {
+      URLSearchParams,
+      location: { hash: fragment, replace: (url) => events.push(['redirect', url]) },
+      history: { replaceState: (...args) => events.push(['clear', ...args]) },
+      fetch: async (url, options) => { events.push(['fetch', url, options]); return { ok: true } },
+    })
+    assert.equal(events[0][0], 'clear')
+    assert.equal(events[0][3], '/auth/sso/callback')
+    const requests = events.filter((event) => event[0] === 'fetch')
+    assert.equal(requests.length, valid ? 1 : 0)
+    if (valid) {
+      const [, url, options] = requests[0]
+      assert.equal(url, '/auth/sso/callback')
+      assert.equal(options.method, 'POST')
+      assert.equal(options.credentials, 'same-origin')
+      assert.equal(options.redirect, 'error')
+      assert.deepEqual(JSON.parse(options.body), { code, state })
+    }
+    assert.equal(events.at(-1)[1], valid ? '/' : '/?sso=error')
+  }
+})
+
+test('callback POST rejects forged Origin, missing transaction, unknown body and any query', async (t) => {
+  const f = await fixture(t)
+  const start = await f.request('/api/auth/sso/start')
+  const state = new URL(start.headers.get('location')).searchParams.get('state')
+  const tx = start.headers.get('set-cookie').split(';')[0]
+  const forged = await postCallback(f, state, tx, 'https://evil.example')
+  assert.equal(forged.status, 403)
+  assert.equal(forged.headers.get('set-cookie'), null)
+  assert.equal((await postCallback(f, state)).status, 401)
+  for (const [url, body] of [
+    ['/auth/sso/callback?code=unexpected', { code: 'c'.repeat(43), state }],
+    ['/auth/sso/callback', { code: 'c'.repeat(43), state, extra: true }],
+    ['/auth/sso/callback', { code: ['c'.repeat(43)], state }],
+  ]) {
+    const response = await f.request(url, { method: 'POST', headers: { origin: PFC_ORIGIN, cookie: tx, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    assert.ok([401, 403].includes(response.status))
+  }
+  assert.equal(f.calls.length, 0)
 })
